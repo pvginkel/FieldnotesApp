@@ -41,7 +41,7 @@ Everything below follows from that.
 | Vetting | The reconciler writes only the triage document. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
 | Output | Triage doc in the store (ask, evidence, recommendation, impact → ruling) plus a Telegram message. No cap, no threshold. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. |
 | Rulings | `yes`, `no` + reason, `later` + revisit trigger, `merge into <id>`. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. |
-| Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. Observation id in a custom field, outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
+| Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Expiry | No TTL. Validity comes from 👎 reactions and the reconciler checking the project. | The TTL was a proxy for validity; project access replaces the proxy. |
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing and merging are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force cosine + BM25 for candidates, cross-encoder reranker from day one, reporter LLM decides. | Embeddings measure aboutness; the reranker measures sameness, which is the actual problem, and its score is an absolute estimate that a threshold can be set on. |
@@ -117,8 +117,8 @@ scope here.
 18. FR-18 Rulings are `yes`, `no: <reason>`, `later: <trigger>`, `merge: <id>`, written in the triage
     doc in a machine-readable block.
 19. FR-19 The `actioner` skill, run manually in a store checkout, executes each unactioned ruling
-    through the YouTrack MCP tools: `yes` → issue with the observation id in the `Observation` field,
-    the issue id written to the observation's `card`, status `raised`; `no` → `closed`, outcome
+    through the YouTrack MCP tools: `yes` → issue whose description names the observation id for the
+    reader, the issue id written to the observation's `card`, status `raised`; `no` → `closed`, outcome
     `wont-do`, reason recorded; `later` → trigger noted, stays `open`; `merge` → merged. Each ruling
     is marked actioned with a reference; reruns are no-ops.
 
@@ -127,8 +127,10 @@ scope here.
 20. FR-20 The REST API verifies and handles two webhooks: GitHub push (HMAC-SHA256 signature against
     a configured secret, re-verified by the API although the relay verified it first) and YouTrack
     issue and comment events (shared token).
-21. FR-21 A YouTrack event names an issue; the API reads that issue's current state from YouTrack
-    and applies it, so the result never depends on which event arrived or in what order. The outcome
+21. FR-21 A YouTrack event names an issue. The observation it concerns is the one whose `card` is
+    that issue; an event for any other issue is ignored. The API reads the issue's current state
+    from YouTrack and applies it, so the result never depends on which event arrived or in what
+    order, and the board needs no field of ours. The outcome
     follows a configured resolution field and value map: `Resolved`, `Absorbed` → `done`;
     `Won't Do` → `wont-do`. A later change to the field updates the outcome. A comment
     `Resolved: <pointer>` supplies the pointer. The reconciler's board scan runs the same routine.
@@ -280,9 +282,11 @@ once; `ping`, every other event and every other repository are answered `200` an
 server's own pushes come back as deliveries and cost one no-op fetch.
 
 **YouTrack.** The board posts issue and comment events to `/hooks/youtrack` with a shared token,
-in-cluster, with no relay. The handler takes the issue id from the event and runs the board-sync
-routine: read the issue from YouTrack's REST API with a read-only token, find the observation named
-in its `Observation` field, map the resolution field per FR-21, take the pointer from a
+in-cluster, with no relay. The handler takes the issue id from the event and looks up the observation
+whose `card` is that issue; most board events concern issues Fieldnotes never raised, and those are
+answered `200` and ignored without a call to YouTrack. For a match it runs the board-sync routine:
+read the issue from YouTrack's REST API with a read-only token, map the resolution field per FR-21,
+take the pointer from a
 `Resolved: <pointer>` comment, and write status, outcome and pointer. `POST
 /observations/{id}/board-sync` runs the same routine from the observation's `card`, and is what the
 reconciler's board scan calls, so the field map lives in one place: the API's config.
@@ -327,7 +331,7 @@ test material: whether any of it seeds the production store is decided after val
 | Index rebuild | Delete the cache directory, restart the API | Index equal to before; one vector per observation |
 | GitHub webhook | Post a signed push delivery after editing a canonical statement in the remote; then a bad signature | Only that observation re-embedded and `/neighbors` reflects it; bad signature rejected, nothing pulled |
 | MCP end-to-end | Scripted MCP client: `post` a known duplicate, `react` on the returned id, `get` it, `post` with `force` | Duplicate returned with reaction counts, no new file; reaction appended; forced post creates a file |
-| Board sync | Raise an issue by hand with the `Observation` field, move it to Done with a `Resolved:` comment, then change the resolution field to Won't Do | Observation `closed` / `done` with pointer; outcome changes to `wont-do` on the second event; with webhooks disabled, closed after the next board scan |
+| Board sync | Raise an issue by hand and set an observation's `card` to it, move the issue to Done with a `Resolved:` comment, then change the resolution field to Won't Do | Observation `closed` / `done` with pointer; outcome changes to `wont-do` on the second event; with webhooks disabled, closed after the next board scan |
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | A triage doc the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
 | Actioner idempotency | Rule on a triage doc, run the actioner twice | Second run creates nothing and reports zero actions |
 

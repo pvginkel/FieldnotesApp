@@ -5,7 +5,15 @@ description = "Fieldnotes MCP server: the three agent tools, post, react and get
 requires-python = ">=3.13"
 dependencies = [
     "fieldnotes-contracts",
+    "httpx>=0.28",
+    # FastMCP, as in KubeCoder: mcp 2 renamed it MCPServer and changed its API.
+    "mcp>=1.28,<2",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
 ]
+
+[project.scripts]
+fieldnotes-mcp = "fieldnotes_mcp.main:main"
 
 [build-system]
 requires = ["hatchling"]

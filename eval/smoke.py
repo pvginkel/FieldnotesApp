@@ -23,7 +23,8 @@ import httpx
 
 DEFAULT_URL = "http://models.models-prd.svc.cluster.local"
 
-# NFR-1: `post` reranks up to 40 candidates.
+# The candidate count the design first had, timed here; the operator's NFR-1 ruling cut it to 12
+# on these numbers.
 CANDIDATES = 40
 
 PARAPHRASE_A = (

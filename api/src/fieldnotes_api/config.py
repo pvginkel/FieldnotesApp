@@ -10,10 +10,10 @@
 | `FIELDNOTES_CACHE_DIR` | `/data/cache` | the embedding cache, on the volume |
 | `FIELDNOTES_MODELS_URL` | the models pod's Service | `/embed` |
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | what the pod embeds with: the cache's key |
-| `FIELDNOTES_MATCH_LIKELY` | 0.87 | the high threshold on the match score |
-| `FIELDNOTES_MATCH_RELATED` | 0.80 | the low threshold |
+| `FIELDNOTES_MATCH_LIKELY` | 0.94 | the high threshold on the match score |
+| `FIELDNOTES_MATCH_RELATED` | 0.85 | the low threshold |
 | `FIELDNOTES_MATCH_GAP` | 0.05 | how far a candidate may trail the best |
-| `FIELDNOTES_MATCH_LEXICAL_WEIGHT` | 0 | the lexical overlap's weight in the score; 0 is cosine |
+| `FIELDNOTES_MATCH_LEXICAL_WEIGHT` | 0.25 | the lexical overlap's weight in the score |
 | `FIELDNOTES_CLIENT_TOKEN_<NAME>` | | the bearer of the named client `<name>` (secret) |
 | `FIELDNOTES_GITHUB_WEBHOOK_SECRET` | none | the GitHub webhook's secret (secret) |
 | `FIELDNOTES_GITHUB_REPO` | none | the store repo as GitHub names it, `owner/name` |
@@ -54,14 +54,15 @@ DEFAULT_MODELS_URL = "http://models.models-prd.svc.cluster.local"
 DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
 
 # Read at gate 1 from the eval of the mined dataset (`eval/bench.py`, confirmed by a replay), for
-# the cosine of `DEFAULT_EMBED_MODEL`. A threshold belongs to its scorer: another embedding model
-# or lexical weight needs its own. Related: the lowest score at which at most one novel post in
+# the cosine of `DEFAULT_EMBED_MODEL` plus `DEFAULT_LEXICAL_WEIGHT` times the lexical overlap, the
+# scorer the operator ruled. A threshold belongs to its scorer: another embedding model or
+# lexical weight needs its own. Related: the lowest score at which at most one novel post in
 # ten is answered with a candidate. Likely: where three answers in four are right. The gap: the
 # widest that still trims an answer; it costs no duplicate on the dataset.
-DEFAULT_LIKELY = 0.87
-DEFAULT_RELATED = 0.80
+DEFAULT_LIKELY = 0.94
+DEFAULT_RELATED = 0.85
 DEFAULT_GAP = 0.05
-DEFAULT_LEXICAL_WEIGHT = 0.0
+DEFAULT_LEXICAL_WEIGHT = 0.25
 
 DEFAULT_RESOLUTION_FIELD = "Resolution"
 # FR-21's map: Resolved and Absorbed are done, Won't Do is wont-do.

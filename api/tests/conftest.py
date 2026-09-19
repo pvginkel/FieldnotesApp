@@ -105,7 +105,8 @@ def youtrack() -> FakeYouTrack:
 
 @pytest.fixture
 def environ(tmp_path, remote, youtrack) -> dict[str, str]:
-    """The API's environment. Thresholds suit the fake's word-overlap scores."""
+    """The API's environment. The scorer is the cosine alone, and the thresholds suit the fake's
+    word-overlap scores."""
     return {
         "FIELDNOTES_STORE_URL": str(remote.path),
         "FIELDNOTES_STORE_DIR": str(tmp_path / "checkout"),
@@ -113,6 +114,7 @@ def environ(tmp_path, remote, youtrack) -> dict[str, str]:
         "FIELDNOTES_MATCH_LIKELY": "0.6",
         "FIELDNOTES_MATCH_RELATED": "0.3",
         "FIELDNOTES_MATCH_GAP": "0.25",
+        "FIELDNOTES_MATCH_LEXICAL_WEIGHT": "0",
         "FIELDNOTES_GITHUB_WEBHOOK_SECRET": GITHUB_SECRET,
         "FIELDNOTES_GITHUB_REPO": STORE_REPO,
         "FIELDNOTES_YOUTRACK_URL": "https://youtrack.example.invalid",

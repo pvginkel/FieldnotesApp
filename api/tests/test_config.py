@@ -21,8 +21,8 @@ def test_defaults():
     assert settings.models_url == "http://models.models-prd.svc.cluster.local"
     assert settings.embed_model == "BAAI/bge-base-en-v1.5"
     match = settings.match
-    assert (match.likely, match.related, match.gap) == (0.87, 0.80, 0.05)
-    assert match.lexical_weight == 0.0
+    assert (match.likely, match.related, match.gap) == (0.94, 0.85, 0.05)
+    assert match.lexical_weight == 0.25
     assert settings.clients.names == ()
     assert settings.github is None
     assert settings.board is None
@@ -66,7 +66,7 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_STORE_URL": " "}, "FIELDNOTES_STORE_URL is not set"),
         ({"FIELDNOTES_API_PORT": "http"}, "FIELDNOTES_API_PORT is not a number"),
         ({"FIELDNOTES_MATCH_LEXICAL_WEIGHT": "-1"}, "FIELDNOTES_MATCH_LEXICAL_WEIGHT"),
-        ({"FIELDNOTES_MATCH_LIKELY": "1.2"}, "likely <= 1"),
+        ({"FIELDNOTES_MATCH_LIKELY": "1.3"}, "likely <= 1.25"),
         ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
         ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
         ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),

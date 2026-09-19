@@ -69,6 +69,7 @@ def settings(tmp_path):
             "FIELDNOTES_MATCH_LIKELY": "0.8",
             "FIELDNOTES_MATCH_RELATED": "0.4",
             "FIELDNOTES_MATCH_GAP": "0.5",
+            "FIELDNOTES_MATCH_LEXICAL_WEIGHT": "0",
         }
     )
 

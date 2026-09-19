@@ -45,7 +45,7 @@ Everything below follows from that.
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
 | Expiry | No TTL. Validity comes from 👎 reactions and the reconciler checking the project. | The TTL was a proxy for validity; project access replaces the proxy. |
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
-| Matching | Brute-force cosine over the whole store, cut by thresholds read from the eval; a lexical overlap (BM25) can be weighed into the score; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. |
+| Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
 | Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server and a webhook relay as three containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
@@ -242,7 +242,7 @@ suspicion. Pull-and-reindex jobs from the GitHub webhook run in the same queue.
    in-memory matrix, plus a lexical overlap times a configured weight. The overlap is the
    observation's BM25 score for the query (identifiers, paths, error strings) over the score the
    query's own terms would earn, so it lies in about 0–1 whatever the query's length. The weight
-   defaults to zero, and the score is then the cosine.
+   defaults to 0.25; at zero the score is the cosine.
 3. Classify each observation: `likely` at or above the high threshold, `related` at or above the low
    one, dropped below it. Then drop any that trails the best one by more than a configured gap, so
    one strong match does not carry weak ones along.
@@ -255,9 +255,12 @@ sameness that a cosine is not. Gate 1 measured the opposite on the mined dataset
 `BAAI/bge-reranker-base` scored two observations on one subject close to 1 whatever point each made,
 told duplicates from same-topic observations worse than the plain cosine did (AUC 0.85 against
 0.91), and found half as many duplicates at the same false-alarm rate, at ten times the latency. The
-operator ruled it out. A cosine's absolute value belongs to its embedding model, so the thresholds
-and the gap are config read from the eval's score distributions for that model, and are read again
-when the model or the weight changes. No LLM is involved.
+operator ruled it out. The same gate compared scorers at matched false-alarm rates: six embedding
+models differed by less than 59 duplicates can tell apart, while a lexical weight anywhere from 0.2
+to 0.75 found more duplicates than the cosine alone at every rate, and in a replay at 0.25 it found
+43 of 59 against 36 and lost none. The operator ruled 0.25. A cosine's absolute value belongs to its
+embedding model, so the thresholds and the gap are config read from the eval's score distributions
+for that model and weight, and are read again when either changes. No LLM is involved.
 
 What no scorer measured so far does well is tell a duplicate from a different point on the same
 subject: most false alarms are such pairs. Two things stand behind the matcher. The reporter reads

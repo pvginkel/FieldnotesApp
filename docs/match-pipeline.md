@@ -47,8 +47,8 @@ For a query text (a post's `area: text`, `/match`'s text, or an observation's ow
 
 1. Embed the query: the pipeline's one model call.
 2. **Score** every observation, over every status, closed ones included (FR-3): the cosine of the
-   two vectors, plus the lexical overlap times `FIELDNOTES_MATCH_LEXICAL_WEIGHT`. The weight
-   defaults to 0: the score is the cosine, and the lexical index is not asked. The store is scored
+   two vectors, plus the lexical overlap times `FIELDNOTES_MATCH_LEXICAL_WEIGHT`. With the weight
+   at 0 the score is the cosine, and the lexical index is not asked. The store is scored
    whole, a matrix product and a walk over the query's postings, so there is no candidate stage.
 3. **Classify**: `likely` at or above `FIELDNOTES_MATCH_LIKELY`, `related` at or above
    `FIELDNOTES_MATCH_RELATED`. An observation below both is dropped, and so is any whose score
@@ -70,20 +70,27 @@ why the cut is a threshold rather than a fixed top 3.
 
 | Variable | Default |
 | --- | --- |
-| `FIELDNOTES_MATCH_LIKELY` | 0.87 |
-| `FIELDNOTES_MATCH_RELATED` | 0.80 |
+| `FIELDNOTES_MATCH_LIKELY` | 0.94 |
+| `FIELDNOTES_MATCH_RELATED` | 0.85 |
 | `FIELDNOTES_MATCH_GAP` | 0.05 |
-| `FIELDNOTES_MATCH_LEXICAL_WEIGHT` | 0 |
+| `FIELDNOTES_MATCH_LEXICAL_WEIGHT` | 0.25 |
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` |
 
 Startup refuses a negative weight or gap, and thresholds that do not satisfy 0 ≤ related ≤ likely ≤
 1 + the weight, the most a score can be.
 
+**Why the weight is 0.25.** Gate 1 compared scorers at matched false-alarm rates on the mined
+dataset (`eval/bench.py`). With the weight anywhere from 0.2 to 0.75 the score found more duplicates
+than the cosine alone at every rate, and a replay at 0.25 found 43 of 59 where the cosine found 36,
+at the same false alarms, losing none. Six embedding models differed by less than the dataset can
+tell apart. The operator ruled 0.25, the low end of the plateau: the dataset's duplicates may share
+more wording than real posts will, and the lower weight keeps the cosine leading.
+
 **A threshold belongs to its scorer.** The three defaults are for the cosine of
-`BAAI/bge-base-en-v1.5`, read at gate 1 from the eval of the mined dataset (`eval/bench.py`,
-confirmed by `eval/replay.py` and `eval/run.py`): `related` is the lowest score at which at most one
-novel post in ten is answered with a candidate, `likely` the score from which three answers in four
-are right, and the gap the widest that still trims an answer, which costs no duplicate on the
-dataset. Another embedding model compresses its cosines differently, and a lexical weight adds to
+`BAAI/bge-base-en-v1.5` plus 0.25 times the lexical overlap, read at gate 1 from the same eval
+(`eval/bench.py`, confirmed by `eval/replay.py` and `eval/run.py`): `related` is the lowest score at
+which at most one novel post in ten is answered with a candidate, `likely` the score from which
+three answers in four are right, and the gap the widest that still trims an answer, which costs no
+duplicate on the dataset. Another embedding model compresses its cosines differently, and a lexical weight adds to
 every score, so changing either means reading new thresholds from the same eval. Match quality is
 measured by that eval, not by the unit tests, whose fake models score by shared words.

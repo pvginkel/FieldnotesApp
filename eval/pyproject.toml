@@ -3,7 +3,7 @@ name = "fieldnotes-eval"
 version = "0.1.0"
 description = "Fieldnotes replay and eval harness: the match pipeline measured against labeled data."
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["httpx>=0.28"]
 
 [build-system]
 requires = ["hatchling"]

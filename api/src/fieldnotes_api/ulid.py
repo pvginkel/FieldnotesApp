@@ -7,10 +7,11 @@ import os
 import re
 from datetime import datetime
 
+from fieldnotes_contracts import ID_PATTERN
+
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-PATTERN = r"^[0-9A-HJKMNP-TV-Z]{26}$"
-_PATTERN = re.compile(PATTERN)
+_PATTERN = re.compile(ID_PATTERN)
 
 
 def new_ulid(at: datetime) -> str:

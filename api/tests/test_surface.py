@@ -127,7 +127,12 @@ ENUMS = {
     ],
 }
 
-CONSTANTS = {"POST_CANDIDATES": 3, "MAX_CANDIDATES": 12, "POST_EMOJI": "📝"}
+CONSTANTS = {
+    "POST_CANDIDATES": 3,
+    "MAX_CANDIDATES": 12,
+    "POST_EMOJI": "📝",
+    "ID_PATTERN": r"^[0-9A-HJKMNP-TV-Z]{26}$",
+}
 
 
 def spell(annotation: object) -> str:

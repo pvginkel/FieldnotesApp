@@ -25,6 +25,7 @@ from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 
 from fieldnotes_contracts import (
+    ID_PATTERN,
     MAX_CANDIDATES,
     BoardSyncReply,
     HealthReply,
@@ -57,7 +58,6 @@ from .matching import Matcher
 from .models import HttpModels, Models, ModelsError
 from .observations import Clock, Observations
 from .store import GitError, Store
-from .ulid import PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ BOARD_TIMEOUT = 30.0
 
 NEIGHBORS_DEFAULT = 5
 
-ObservationId = Annotated[str, Path(pattern=PATTERN, description="the observation's ULID")]
+ObservationId = Annotated[str, Path(pattern=ID_PATTERN, description="the observation's ULID")]
 
 
 @dataclass

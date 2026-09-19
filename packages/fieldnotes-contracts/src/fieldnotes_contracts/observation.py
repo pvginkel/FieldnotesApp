@@ -16,6 +16,9 @@ from ._base import WireModel
 # shape and the reaction counts include the post itself (FR-2, FR-8).
 POST_EMOJI = "📝"
 
+# An observation's id, which names its file (FR-8): a ULID, 26 characters of Crockford base32.
+ID_PATTERN = r"^[0-9A-HJKMNP-TV-Z]{26}$"
+
 
 class Category(StrEnum):
     """FR-7. Non-normative: the reconciler may recategorize. There is no `bug`."""

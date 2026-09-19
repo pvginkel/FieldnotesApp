@@ -18,6 +18,7 @@ fieldnotes-contracts = { workspace = true }
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-asyncio>=1",
     "ruff>=0.6",
 ]
 
@@ -27,6 +28,8 @@ dev = [
 # -q --tb=short is the token-lean default for agent sessions: summary line on green, file:line
 # tracebacks on red. Pass -v / --tb=long explicitly when more is needed.
 addopts = "--import-mode=importlib -q --tb=short"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["packages", "api", "mcp-server", "eval"]
 
 [tool.ruff]

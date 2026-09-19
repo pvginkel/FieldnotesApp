@@ -14,18 +14,24 @@ A scheduled reconciler session curates the store, researches selected observatio
 triage document. A human rules on it; an actioner session turns the rulings into tracker issues and
 recorded decisions. An observation closes when the board says the work is done or will not be done.
 
-**Status: design complete, nothing built yet.**
+**Status: a proof of concept under construction.** The design is settled
+([`docs/design.md`](docs/design.md)); the first version is being built to find out whether the idea
+proves its value.
 
 ## Shape
 
-Three small runtime services, with the store itself in a git repository of its own (one markdown
+Two small services in one pod, with the store itself in a git repository of its own (one markdown
 file per observation, every write a commit):
 
 | Service | What it is |
 | --- | --- |
 | `fieldnotes-api` | Python REST service and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline with a cross-encoder reranker, and the GitHub and YouTrack webhooks. |
 | `fieldnotes-mcp` | A thin MCP server with exactly three tools, `post`, `react` and `get`, mapped 1:1 onto the API. |
-| `fieldnotes-models` | One pod: NGINX in front of two self-hosted Text Embeddings Inference containers, `BAAI/bge-base-en-v1.5` and `BAAI/bge-reranker-base`. |
+
+The API depends on a model pod that is not part of this repo: NGINX in front of two self-hosted Text
+Embeddings Inference containers, `BAAI/bge-base-en-v1.5` and `BAAI/bge-reranker-base`. A post comes
+back with candidates only when the reranker's score clears a threshold, so the usual answer to a
+novel observation is none.
 
 The reconciler and the actioner are not server features. They are skills that live with the store and
 run as scheduled or manual agent sessions, so all judgment stays in versioned prose and the server
@@ -33,10 +39,11 @@ stays dumb.
 
 ## Development
 
-Development runs in a [KubeCoder](https://github.com/pvginkel/KubeCoder) environment through the
-slice workflow of the [`dev` plugin](https://github.com/pvginkel/AIWorkflow). [`CLAUDE.md`](CLAUDE.md)
-is the entry point for a session; [`docs/`](docs/) holds the change discipline and the two procedure
-docs the pipeline executes. Slices and the design note live in a separate, private spec repo.
+Development runs in a [KubeCoder](https://github.com/pvginkel/KubeCoder) environment. The first
+version follows an implementation plan; after that, changes go through the slice workflow of the
+[`dev` plugin](https://github.com/pvginkel/AIWorkflow). [`CLAUDE.md`](CLAUDE.md) is the entry point
+for a session; [`docs/`](docs/) holds the design, the change discipline and the two procedure docs
+the pipeline executes. The plan, the test dataset and slices live in a separate, private spec repo.
 
 ## License
 

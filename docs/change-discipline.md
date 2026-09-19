@@ -4,10 +4,10 @@ The rules every code change in this repo obeys. This is the doc `.aiworkflowrc` 
 `design_philosophy`: it is handed to every `code-writer`, `code-reviewer`, `plan-writer` and
 `plan-reviewer` the pipeline dispatches, and it is what a reviewer cites when sending work back.
 
-The design is not here. It is in `../FieldnotesAppSpecs/design/design-note.md`, and as slices build
-what it describes, the design as built lands in topic docs beside this one. The note's "Decisions"
-table and its numbered requirements are binding. A decision it leaves open is the operator's to rule,
-never a plan's or an implementation's to assume.
+The design is not here. It is in [`design.md`](design.md), and as the code that builds it lands, the
+design as built goes into topic docs beside this one. Its "Decisions" table and its numbered
+requirements are binding. A decision it leaves open is the operator's to rule, never a plan's or an
+implementation's to assume.
 
 ## The server stays dumb
 
@@ -22,7 +22,7 @@ already do.
 
 ## The "not doing" list is ruled
 
-The design note closes off agent-facing search, transcript mining, a triage UI, a vector database, a
+The design closes off agent-facing search, transcript mining, a triage UI, a vector database, a
 TTL, a fine-tuned reranker, reconciler-authored documentation changes and a `bug` category, and names
 the trigger that would reopen each. A slice does not build one of these, or the groundwork for one,
 because it looked cheap while passing. When a trigger seems to have fired, say so in the close-out
@@ -51,9 +51,9 @@ parameter.
 ## The store is git, and git is the record
 
 One markdown file per observation; every server write is a commit on `main`; the embedding cache is a
-content-addressed orphan branch the server alone writes. There is no database, and no state that
-matters lives only in the API's memory: the index is rebuilt from the repository, and deleting the
-cache branch must cost a reindex and nothing else. The file format (FR-8) is a storage layout that
+content-addressed directory on the API's volume that the server alone writes. There is no database,
+and no state that matters lives only in the API's memory or on its volume: the index is rebuilt from
+the repository, and deleting the cache must cost a reindex and nothing else. The file format (FR-8) is a storage layout that
 skills and people edit by hand, so it changes as deliberately as a surface does.
 
 Merged-away files are removed and history is the record. The same holds for this repo.
@@ -83,5 +83,5 @@ substitute: the point of a test is that it runs again next time.
 rerank scores come from fakes, the store is a repository the test creates, and webhooks are requests
 the test signs itself. It is green from any environment with no credentials. Checks that need the
 real models or a real board belong to the test phase ([`slice-test-plan.md`](slice-test-plan.md)) and
-to the design note's test runbook, not to the suite. Match *quality* is likewise not a unit test: it
+to the design's validation checks, not to the suite. Match *quality* is likewise not a unit test: it
 is the eval run over labeled pairs, and thresholds are config set from that run.

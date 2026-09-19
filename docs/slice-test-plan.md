@@ -45,8 +45,8 @@ with the pid written from inside the tool container to a gitignored `.run/`, bec
 `cexec` client does not reach the process it started. The same goes for `fieldnotes-mcp` when it
 arrives.
 
-The design note's "Test runbook" lists the checks that will land here or in the store's `eval/` as the
-services come to exist: the model smoke, the index rebuild, the GitHub webhook (good and bad
+The "Validation" table in [`design.md`](design.md) lists the checks that will land here or in `eval/`
+as the services come to exist: the model smoke, the index rebuild, the GitHub webhook (good and bad
 signature), the MCP end-to-end, the board sync. A slice that delivers what one of those rows tests
 brings the row to life in the same slice, as a script rather than a described manual step wherever it
 can be one.

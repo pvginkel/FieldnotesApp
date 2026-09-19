@@ -37,13 +37,14 @@ Everything below follows from that.
 | Duplicates | `post` returns the candidates that clear the *related* threshold, at most 3, open and closed, with their reaction counts, and creates nothing; the reporter reacts, or creates with `force`. When nothing clears the threshold it creates and returns no candidates. | This response is the knowledge-delivery moment, so it must not cry wolf: a list that is always three long teaches the reporter to ignore it. Closed items stay matchable so recurrence becomes a re-raise signal. |
 | Reactions | One tool `react(id, emoji, text?, repo, session?)`; emoji uncurated, allows 👎. | Vote and comment merge cleanly; the emoji carries the claim type, text only when there is new information. |
 | Agent search | None. Only `post`, `react`, `get`. | Observations are unverified; agents reading them as facts would propagate errors. |
-| Reconciler | A session scheduled by a KubeCoder timer on a skill in the store repo, not a server feature. Free rein inside the store; everything outside is a proposal. | Keeps the server dumb; all judgment lives in versioned skills. |
+| Reconciler | A session scheduled by a KubeCoder timer on a skill in the store repo, not a server feature. It owns the observation files and has free rein over them; everything outside the store is a proposal. | Keeps the server dumb; all judgment lives in versioned skills. |
 | Vetting | The reconciler writes only the triage document. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
 | Output | Triage doc in the store (ask, evidence, recommendation, impact → ruling) plus a Telegram message. No cap, no threshold. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. |
 | Rulings | `yes`, `no` + reason, `later` + revisit trigger, `merge into <id>`. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
+| Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
 | Expiry | No TTL. Validity comes from 👎 reactions and the reconciler checking the project. | The TTL was a proxy for validity; project access replaces the proxy. |
-| Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing and merging are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
+| Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force cosine + BM25 for candidates, cross-encoder reranker from day one, reporter LLM decides. | Embeddings measure aboutness; the reranker measures sameness, which is the actual problem, and its score is an absolute estimate that a threshold can be set on. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5` and `BAAI/bge-reranker-base`. English only. | Small CPU models match API quality for paraphrase detection; no egress dependency. |
 | Topology | One model pod (two TEI containers behind NGINX) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server and a webhook relay as three containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
@@ -79,17 +80,17 @@ scope here.
 
 8. FR-8 One markdown file per observation, `observations/<ulid>.md`, with frontmatter: `id`,
    `status`, `area`, `category`, `repos`, `created`, `last_updated`, `last_reviewed`, `last_seen`,
-   `canonical`, `outcome`, `reason`, `card`, `pointer`. The body holds reactions and comments in
-   order; the creating post is the first reaction entry, so every report has the same provenance
-   shape.
+   `canonical`, `outcome`, `reason`, `card`, `card_updated`, `pointer`. The body holds reactions and
+   comments in order; the creating post is the first reaction entry, so every report has the same
+   provenance shape.
 9. FR-9 Every server write is a commit on `main`, pushed. Skills edit files directly and push. A
    GitHub push delivery makes the server pull and reindex.
 10. FR-10 Statuses: `open`, `proposed`, `raised`, `closed`. `outcome` is `done` or `wont-do`.
     `last_updated` changes on any write to the file, by anyone.
-11. FR-11 Condensing and merging are reconciler maintenance, not states. A closed observation may be
-    rewritten into a compact record and stays matchable; new information may still be merged into
-    it. A merged-away observation's file is removed and its content folded into the survivor; git
-    history is the record.
+11. FR-11 Condensing, merging and splitting are reconciler maintenance, not states. A closed
+    observation may be rewritten into a compact record and stays matchable; new information may
+    still be merged into it. A merged-away observation's file is removed and its content folded into
+    the survivor; git history is the record.
 
 **Reconciler**
 
@@ -98,11 +99,12 @@ scope here.
     available. The session first runs the `install` skill, which pulls `main` and then loads the
     requested skill.
 13. FR-13 Work queue: observations with `last_updated > last_reviewed`. The run starts with a board
-    scan: for every `raised` observation it asks the API to sync that observation against the board,
-    covering missed webhooks.
-14. FR-14 May merge, condense, recategorize, rewrite canonical statements, close as duplicate, and
-    add comments prefixed `[reconciler]`. Must not change project repositories, documentation or the
-    board; its only outputs are the store and the triage document.
+    scan: for every observation with a `card` it asks the API to sync that observation against the
+    board, covering missed webhooks.
+14. FR-14 Owns the observation files and may do with them whatever it judges right: merge, split,
+    condense, recategorize, rewrite canonical statements, edit, merge or delete reactions and
+    comments, add its own, close as duplicate. Must not change project repositories, documentation
+    or the board; its only outputs are the store and the triage document.
 15. FR-15 Must write `triage/YYYY-MM-DD.md`. Which observations it lists is at its discretion: only
     what it judges of interest, never everything. Per item: id, ask, evidence (count, distinct repos,
     first and last seen), recommendation, impact, empty `ruling` field. Recommended documentation
@@ -133,14 +135,21 @@ scope here.
     order, and the board needs no field of ours. The outcome
     follows a configured resolution field and value map: `Resolved`, `Absorbed` → `done`;
     `Won't Do` → `wont-do`. A later change to the field updates the outcome. A comment
-    `Resolved: <pointer>` supplies the pointer. The reconciler's board scan runs the same routine.
+    `Resolved: <pointer>` supplies the pointer. The sync also records the time of the card's latest
+    change, comments included, in `card_updated`, and writes nothing when nothing changed. The
+    reconciler's board scan runs the same routine.
+22. FR-22 Any change to the card, a comment included, must put its observation in the reconciler's
+    queue: a new `card_updated` changes `last_updated` (FR-10, FR-13). For a queued observation with
+    a card, the reconciler must read what changed on the card since `last_reviewed`, and folds into
+    the observation what bears on it, such as a solution, a proposed one or a workaround, in
+    whatever form it judges right (FR-14).
 
 **Non-functional**
 
-22. NFR-1 `post` p95 under 2 s including reranking up to 12 candidates.
-23. NFR-2 200 actions per week; 10,000 observations without redesign.
-24. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
-25. NFR-4 REST and MCP authenticated the way the KubeCoder MCP server is: a static bearer token on
+23. NFR-1 `post` p95 under 2 s including reranking up to 12 candidates.
+24. NFR-2 200 actions per week; 10,000 observations without redesign.
+25. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
+26. NFR-4 REST and MCP authenticated the way the KubeCoder MCP server is: a static bearer token on
     each boundary. Webhook secrets verified on every request.
 
 ## Technical design
@@ -274,8 +283,8 @@ stateDiagram-v2
   closed --> open: re-raise via reactions
 ```
 
-Condensing and merging change file contents, not status. `outcome`, `reason`, `card` and `pointer`
-are fields on the file; a re-raise reopens with history attached.
+Condensing, merging and splitting change file contents, not status. `outcome`, `reason`, `card` and
+`pointer` are fields on the file; a re-raise reopens with history attached.
 
 ### Webhooks
 
@@ -287,14 +296,15 @@ once; `ping`, every other event and every other repository are answered `200` an
 server's own pushes come back as deliveries and cost one no-op fetch.
 
 **YouTrack.** The board posts issue and comment events to `/hooks/youtrack` with a shared token,
-in-cluster, with no relay. The handler takes the issue id from the event and looks up the observation
-whose `card` is that issue; most board events concern issues Fieldnotes never raised, and those are
-answered `200` and ignored without a call to YouTrack. For a match it runs the board-sync routine:
-read the issue from YouTrack's REST API with a read-only token, map the resolution field per FR-21,
-take the pointer from a
-`Resolved: <pointer>` comment, and write status, outcome and pointer. `POST
-/observations/{id}/board-sync` runs the same routine from the observation's `card`, and is what the
-reconciler's board scan calls, so the field map lives in one place: the API's config.
+in-cluster, with no relay. The handler takes the issue id from the event and looks up the
+observation whose `card` is that issue; most board events concern issues Fieldnotes never raised,
+and those are answered `200` and ignored without a call to YouTrack. For a match it runs the
+board-sync routine: read the issue from YouTrack's REST API with a read-only token, map the
+resolution field per FR-21, take the pointer from a `Resolved: <pointer>` comment, and write status,
+outcome, pointer and `card_updated`; a sync that changes nothing writes nothing, so a rescan dirties
+no observation. `POST /observations/{id}/board-sync` runs the same routine from the observation's
+`card`, and is what the reconciler's board scan calls, so the field map lives in one place: the
+API's config.
 
 ### Skills
 
@@ -302,13 +312,14 @@ reconciler's board scan calls, so the field map lives in one place: the API's co
 and fast-forwards `main` in the session's checkout, then loads the named skill, so every run uses the
 current skill and data even though the checkout is not the API's.
 
-**Reconciler.** The run: board scan, read prior rulings, walk the queue, use `/neighbors` for missed
-duplicates, research selected items by cloning the repository or in a KubeCoder environment, edit
-observations, set `last_reviewed`, write the triage doc, commit, push, send the Telegram message.
-Helpers are Python where a script is more reliable than prose: the work queue from timestamps, the
-triage doc rendered from an item list. A `--dry-run` mode pushes nothing and sends nothing. The skill
-takes the store root as a parameter, defaulting to its own repo, so it can be run against a generated
-test store.
+**Reconciler.** The run: board scan, read prior rulings, walk the queue, read what changed on the
+card of each queued observation that has one (FR-22), use `/neighbors` for missed duplicates,
+research selected items by cloning the repository or in a KubeCoder environment, edit observations,
+set `last_reviewed`, write the triage doc, commit, push, send the Telegram message. Helpers are
+Python where a script is more reliable than prose: the work queue from timestamps, the triage doc
+rendered from an item list. A `--dry-run` mode pushes nothing and sends nothing. The skill takes the
+store root as a parameter, defaulting to its own repo, so it can be run against a generated test
+store.
 
 **Actioner.** Run manually after rulings. Parses the ruling blocks, executes FR-19 through the
 YouTrack MCP tools, writes references back into the triage doc and observations, commits, pushes. A
@@ -337,6 +348,7 @@ test material: whether any of it seeds the production store is decided after val
 | GitHub webhook | Post a signed push delivery after editing a canonical statement in the remote; then a bad signature | Only that observation re-embedded and `/neighbors` reflects it; bad signature rejected, nothing pulled |
 | MCP end-to-end | Scripted MCP client: `post` a known duplicate, `react` on the returned id, `get` it, `post` with `force` | Duplicate returned with reaction counts, no new file; reaction appended; forced post creates a file |
 | Board sync | Raise an issue by hand and set an observation's `card` to it, move the issue to Done with a `Resolved:` comment, then change the resolution field to Won't Do | Observation `closed` / `done` with pointer; outcome changes to `wont-do` on the second event; with webhooks disabled, closed after the next board scan |
+| Card feedback | Comment a workaround on a raised observation's card, sync it twice, then run the reconciler with `--dry-run` | `card_updated` moves on the first sync and the second writes nothing; the observation is in the queue; the reconciler's edit carries the workaround |
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | A triage doc the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
 | Actioner idempotency | Rule on a triage doc, run the actioner twice | Second run creates nothing and reports zero actions |
 

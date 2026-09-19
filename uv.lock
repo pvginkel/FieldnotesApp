@@ -124,11 +124,21 @@ name = "fieldnotes-eval"
 version = "0.1.0"
 source = { editable = "eval" }
 dependencies = [
+    { name = "fastapi" },
+    { name = "fieldnotes-api" },
+    { name = "fieldnotes-contracts" },
     { name = "httpx" },
+    { name = "numpy" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "httpx", specifier = ">=0.28" }]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "fieldnotes-api", editable = "api" },
+    { name = "fieldnotes-contracts", editable = "packages/fieldnotes-contracts" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "numpy", specifier = ">=2" },
+]
 
 [[package]]
 name = "fieldnotes-mcp"

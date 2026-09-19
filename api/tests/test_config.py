@@ -23,6 +23,7 @@ def test_defaults():
     assert (settings.match.cosine_top, settings.match.bm25_top) == (8, 4)
     assert settings.match.both_directions is False
     assert settings.clients.names == ()
+    assert settings.github is None
     assert (settings.host, settings.port) == ("0.0.0.0", 8080)
 
 
@@ -72,6 +73,7 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_MATCH_BOTH_DIRECTIONS": "yes"}, "FIELDNOTES_MATCH_BOTH_DIRECTIONS"),
         ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
         ({"FIELDNOTES_MATCH_COSINE_TOP": "0"}, "FIELDNOTES_MATCH_COSINE_TOP must be"),
+        ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
     ],
 )
 def test_a_bad_variable_fails_startup_by_name(overrides, named):

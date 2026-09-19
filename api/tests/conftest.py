@@ -16,6 +16,8 @@ from fieldnotes_api.testing import FakeModels
 
 SKILL = ["-c", "user.name=skill", "-c", "user.email=skill@example.invalid"]
 TOKENS = {"mcp": "mcp-token", "skills": "skills-token"}
+GITHUB_SECRET = "github-secret"
+STORE_REPO = "pvginkel/Fieldnotes"
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -105,8 +107,23 @@ def environ(tmp_path, remote) -> dict[str, str]:
         "FIELDNOTES_MATCH_LIKELY": "0.6",
         "FIELDNOTES_MATCH_RELATED": "0.3",
         "FIELDNOTES_MATCH_GAP": "0.25",
+        "FIELDNOTES_GITHUB_WEBHOOK_SECRET": GITHUB_SECRET,
+        "FIELDNOTES_GITHUB_REPO": STORE_REPO,
         **{f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token for name, token in TOKENS.items()},
     }
+
+
+def _eventually(condition, what: str = "the condition") -> None:
+    deadline = time.monotonic() + 20
+    while not condition():
+        assert time.monotonic() < deadline, f"{what} did not come about"
+        time.sleep(0.02)
+
+
+@pytest.fixture
+def eventually():
+    """`eventually(condition, what)`: wait for work the API queued and answered before doing."""
+    return _eventually
 
 
 def wait_ready(client: TestClient) -> None:

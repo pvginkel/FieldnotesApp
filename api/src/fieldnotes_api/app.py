@@ -27,6 +27,7 @@ from fastapi.exceptions import RequestValidationError
 from fieldnotes_contracts import (
     MAX_CANDIDATES,
     HealthReply,
+    HookReply,
     MatchReply,
     MatchRequest,
     NeighborsReply,
@@ -48,6 +49,7 @@ from .errors import (
     unauthenticated,
     unhandled_exception_handler,
 )
+from .hooks import github_push_to, github_verified
 from .index import EmbeddingCache, Index
 from .matching import Matcher
 from .models import HttpModels, Models, ModelsError
@@ -197,6 +199,28 @@ def create_app(
     async def match(request: MatchRequest, observations: Ready, _: Client) -> MatchReply:
         """The match pipeline, writing nothing."""
         return await observations.match(request)
+
+    @app.post("/hooks/github")
+    async def github_hook(
+        request: Request,
+        x_hub_signature_256: Annotated[str | None, Header()] = None,
+        x_github_event: Annotated[str | None, Header()] = None,
+    ) -> HookReply:
+        """FR-9, FR-20: a push to the store's main queues a pull and reindex; the relay gives
+        each receiver four seconds, so nothing is pulled before the answer."""
+        github = settings.github
+        body = await request.body()
+        if github is None or not github_verified(github.secret, body, x_hub_signature_256):
+            raise ProblemException(
+                401,
+                ProblemType.unauthenticated,
+                "the delivery's signature does not verify",
+                detail="sign with the configured secret as X-Hub-Signature-256",
+            )
+        if not github_push_to(github, settings.store.branch, x_github_event, body):
+            return HookReply(action="ignored")
+        store.pull()
+        return HookReply(action="queued")
 
     return app
 

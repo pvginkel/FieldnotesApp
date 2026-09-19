@@ -17,11 +17,14 @@
 | `FIELDNOTES_MATCH_GAP` | 0.3, provisional | how far a candidate may trail the best |
 | `FIELDNOTES_MATCH_BOTH_DIRECTIONS` | `false` | rerank each pair both ways and average |
 | `FIELDNOTES_CLIENT_TOKEN_<NAME>` | | the bearer of the named client `<name>` (secret) |
+| `FIELDNOTES_GITHUB_WEBHOOK_SECRET` | none | the GitHub webhook's secret (secret) |
+| `FIELDNOTES_GITHUB_REPO` | none | the store repo as GitHub names it, `owner/name` |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |
 
 Tokens are never in code or config files, only in environment variables materialised from
-secrets. A malformed value fails startup and names its variable.
+secrets. A malformed value fails startup and names its variable. The GitHub webhook's two
+variables are set together or not at all; without them every delivery is refused.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .auth import ClientRegistry
+from .hooks import GithubSettings
 from .matching import MatchSettings
 from .store import StoreSettings
 
@@ -60,6 +64,7 @@ class Settings:
     embed_model: str
     match: MatchSettings
     clients: ClientRegistry
+    github: GithubSettings | None
     host: str
     port: int
     log_level: str
@@ -130,6 +135,18 @@ def _clients(environ: Mapping[str, str]) -> ClientRegistry:
     )
 
 
+def _github(environ: Mapping[str, str]) -> GithubSettings | None:
+    secret = _optional(environ, "GITHUB_WEBHOOK_SECRET")
+    repo = _optional(environ, "GITHUB_REPO")
+    if secret is None and repo is None:
+        return None
+    if secret is None or repo is None:
+        raise SettingsError(
+            f"{PREFIX}GITHUB_WEBHOOK_SECRET and {PREFIX}GITHUB_REPO are set together or not at all"
+        )
+    return GithubSettings(secret=secret, repo=repo)
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     environ = os.environ if environ is None else environ
     return Settings(
@@ -146,6 +163,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         embed_model=_get(environ, "EMBED_MODEL", DEFAULT_EMBED_MODEL),
         match=_match(environ),
         clients=_clients(environ),
+        github=_github(environ),
         host=_get(environ, "API_HOST", "0.0.0.0"),
         port=_number(environ, "API_PORT", int, 8080),
         log_level=_get(environ, "LOG_LEVEL", "INFO").upper(),

@@ -79,8 +79,8 @@ further in.
 Every change ships with a test. A feature without one is incomplete, and "verified by hand" is no
 substitute: the point of a test is that it runs again next time.
 
-`kc project test` is hermetic. It reaches no model pod, no GitHub and no YouTrack: embeddings and
-rerank scores come from fakes, the store is a repository the test creates, and webhooks are requests
+`kc project test` is hermetic. It reaches no model pod, no GitHub and no YouTrack: embeddings
+come from a fake, the store is a repository the test creates, and webhooks are requests
 the test signs itself. It is green from any environment with no credentials. Checks that need the
 real models or a real board belong to the test phase ([`slice-test-plan.md`](slice-test-plan.md)) and
 to the design's validation checks, not to the suite. Match *quality* is likewise not a unit test: it

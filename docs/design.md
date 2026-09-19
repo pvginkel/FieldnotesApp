@@ -45,9 +45,9 @@ Everything below follows from that.
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
 | Expiry | No TTL. Validity comes from 👎 reactions and the reconciler checking the project. | The TTL was a proxy for validity; project access replaces the proxy. |
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
-| Matching | Brute-force cosine + BM25 for candidates, cross-encoder reranker from day one, reporter LLM decides. | Embeddings measure aboutness; the reranker measures sameness, which is the actual problem, and its score is an absolute estimate that a threshold can be set on. |
-| Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5` and `BAAI/bge-reranker-base`. English only. | Small CPU models match API quality for paraphrase detection; no egress dependency. |
-| Topology | One model pod (two TEI containers behind NGINX) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server and a webhook relay as three containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
+| Matching | Brute-force cosine over the whole store, cut by thresholds read from the eval; a lexical overlap (BM25) can be weighed into the score; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. |
+| Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
+| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server and a webhook relay as three containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
 | Not doing | Agent-facing search, transcript mining (dreaming), triage UI, a vector database, TTL, fine-tuned reranker, reconciler-authored doc changes, a bug category. | Volume is already sufficient; a curated document works; scale does not justify the rest. |
@@ -146,7 +146,7 @@ scope here.
 
 **Non-functional**
 
-23. NFR-1 `post` p95 under 2 s including reranking up to 12 candidates.
+23. NFR-1 `post` p95 under 2 s.
 24. NFR-2 200 actions per week; 10,000 observations without redesign.
 25. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
 26. NFR-4 REST and MCP authenticated the way the KubeCoder MCP server is: a static bearer token on
@@ -161,7 +161,7 @@ component that decides anything; everything else is off the shelf or thin.
 flowchart LR
   A[Agents in KubeCoder pods] -->|MCP| M[fieldnotes-mcp]
   M -->|HTTP| R[fieldnotes-api]
-  R -->|/embed /rerank| E[models]
+  R -->|/embed| E[models]
   R <-->|pull / push| G[GitHub store repo]
   G -->|push delivery| W[webhook-relay]
   W -->|verified delivery| R
@@ -201,7 +201,7 @@ equality.
 
 | Service | What it is | Placement |
 | --- | --- | --- |
-| `models` | One pod: NGINX in front of two TEI CPU containers, routing `/embed` and `/rerank`. A volume caches the downloaded models, so the pod starts without egress after the first run. | A chart of its own in the homelab's chart repo, pinned by node affinity and toleration to the high-performance node. |
+| `models` | One pod: NGINX in front of a TEI CPU container per model, routing by path; today one, the embedder at `/embed`. A volume caches the downloaded models, so the pod starts without egress after the first run. | A chart of its own in the homelab's chart repo, pinned by node affinity and toleration to the high-performance node. |
 | `fieldnotes` | One pod, three containers: `api`, `mcp` and `webhook-relay`. A volume holds the store checkout and the embedding cache. Three Services select the pod: the API and the MCP server for in-cluster and intranet callers, the relay as the one public hostname. `Recreate` strategy, since the checkout has a single writer. | A chart in the homelab's chart repo; secrets from OpenBao through External Secrets. |
 
 API endpoints: `POST /observations`, `POST /observations/{id}/reactions`, `GET /observations/{id}`,
@@ -235,33 +235,38 @@ suspicion. Pull-and-reindex jobs from the GitHub webhook run in the same queue.
 
 ### Match pipeline
 
-`POST /match {text, area?, k, rerank}`:
+`POST /match {text, area?, k}`:
 
-1. Embed the query via `/embed`.
-2. Candidates: cosine top-8 over the in-memory matrix, union BM25 top-4 (identifiers, paths, error
-   strings), over all statuses: at most 12.
-3. Rerank the union via `/rerank`, the query against each candidate, in one direction. Scoring both
-   directions and averaging is configuration; it doubles the rerank cost. TEI returns the
-   cross-encoder's score through a sigmoid, so it lies in 0–1.
-4. Classify each candidate: `likely` at or above the high threshold, `related` at or above the low
-   one, dropped below it. Then drop any candidate that trails the best one by more than a configured
-   gap, so one strong match does not carry weak ones along.
-5. Return the top `k` that remain, with cosine, rerank score, class and reaction counts.
+1. Embed the query via `/embed`, the pipeline's one model call.
+2. Score it against every observation, over all statuses: the cosine of the two vectors over the
+   in-memory matrix, plus a lexical overlap times a configured weight. The overlap is the
+   observation's BM25 score for the query (identifiers, paths, error strings) over the score the
+   query's own terms would earn, so it lies in about 0–1 whatever the query's length. The weight
+   defaults to zero, and the score is then the cosine.
+3. Classify each observation: `likely` at or above the high threshold, `related` at or above the low
+   one, dropped below it. Then drop any that trails the best one by more than a configured gap, so
+   one strong match does not carry weak ones along.
+4. Return the top `k` that remain, with cosine, score, class and reaction counts.
 
-**Why a threshold works here.** A cosine similarity only ranks: its absolute value says little,
-which is why a top-3 by cosine is always three long. The cross-encoder reads both texts together and
-scores the pair itself, so its score is an absolute estimate of sameness that holds across queries.
-No LLM is involved. The thresholds and the gap are config, chosen from the eval run's score
-distributions for labeled `same`, `related` and `unrelated` pairs against a precision target; the
-eval report shows the curves they were read from. The expected answer to a novel post is zero
-candidates.
+**Why a threshold, and on what.** A list that is always three long teaches the reporter to ignore
+it, so the cut is a threshold, and the expected answer to a novel post is zero candidates. The
+design first put that threshold on a cross-encoder reranker's score, as the absolute estimate of
+sameness that a cosine is not. Gate 1 measured the opposite on the mined dataset:
+`BAAI/bge-reranker-base` scored two observations on one subject close to 1 whatever point each made,
+told duplicates from same-topic observations worse than the plain cosine did (AUC 0.85 against
+0.91), and found half as many duplicates at the same false-alarm rate, at ten times the latency. The
+operator ruled it out. A cosine's absolute value belongs to its embedding model, so the thresholds
+and the gap are config read from the eval's score distributions for that model, and are read again
+when the model or the weight changes. No LLM is involved.
+
+What no scorer measured so far does well is tell a duplicate from a different point on the same
+subject: most false alarms are such pairs. Two things stand behind the matcher. The reporter reads
+the candidates and decides; and the reconciler merges the duplicates that slipped through.
 
 Budget, from the model smoke on the high-performance node (8 vCPUs, shared with the KubeCoder
-environments): embedding one text 100–250 ms, cosine about a millisecond. The reranker is
-compute-bound at about 90–125 ms a pair at 40 words a side and 270–300 ms at 100, so 40 pairs took
-3.7 s at the short end. The candidate counts and the single direction are what fits NFR-1. Gate 1
-measures what the cut costs: the candidate stage's recall at 12 against 40, which needs no
-reranking. It also tunes the counts on real observation lengths.
+environments): embedding one text 100–250 ms. Scoring the store is a matrix product and a walk over
+the query's postings, milliseconds at NFR-2's scale. What is left of a post that creates is the git
+commit and the push.
 
 ### Index maintenance
 
@@ -342,8 +347,8 @@ test material: whether any of it seeds the production store is decided after val
 
 | Check | How | Pass |
 | --- | --- | --- |
-| Model smoke | Embed two paraphrases and one unrelated text, rerank both pairs, time a 40-pair rerank | Paraphrase cosine above unrelated; reranker agrees; timing recorded |
-| Replay (gate 1) | The harness generates an empty store as a local git repo, runs the API against it with the real models, and posts the dataset in date order. A post whose labeled duplicate is already in the store should come back with it; a novel post should come back empty | Recall@3 on duplicates and the false-alarm rate on novel posts reported with and without reranking; the candidate stage's recall at 12 against 40; thresholds and gap chosen from the score distributions and committed to config; `post` p95 under 2 s |
+| Model smoke | Embed two paraphrases and one unrelated text, time one embedding at observation length | Paraphrase cosine above unrelated; timing recorded |
+| Replay (gate 1) | The harness generates an empty store as a local git repo, runs the API against it with the real models, and posts the dataset in date order. A post whose labeled duplicate is already in the store should come back with it; a novel post should come back empty | Recall@3 on duplicates and the false-alarm rate on novel posts reported, as answered and with no threshold; thresholds and gap chosen from the score distributions and committed to config; `post` p95 under 2 s |
 | Index rebuild | Delete the cache directory, restart the API | Index equal to before; one vector per observation |
 | GitHub webhook | Post a signed push delivery after editing a canonical statement in the remote; then a bad signature | Only that observation re-embedded and `/neighbors` reflects it; bad signature rejected, nothing pulled |
 | MCP end-to-end | Scripted MCP client: `post` a known duplicate, `react` on the returned id, `get` it, `post` with `force` | Duplicate returned with reaction counts, no new file; reaction appended; forced post creates a file |
@@ -369,11 +374,9 @@ Each has a trigger that would justify it.
   documentation items.
 - A `bug` category — trigger: environment or harness bugs keep arriving as `friction` with no better
   home.
-- Fine-tuned reranker on the labeled pairs — trigger: eval precision stays under 0.9 after threshold
-  tuning.
-- The int8 ONNX of the same reranker, about 2.5 times faster in a one-off measurement, served from a
-  local model directory — trigger: gate 1 shows the 12-candidate cap losing labeled duplicates at
-  the candidate stage.
+- A model trained for sameness on the labeled pairs, a fine-tuned cross-encoder or embedder — not
+  for phase 1 (operator, gate 1). Trigger: the matcher's misses or false alarms cost more than the
+  reporter and the reconciler absorb.
 - Transcript mining ("dreaming") — not planned; the reporter's judgment at capture time is the
   filter.
 - Agent-facing search — not planned; observations are unverified and project documentation is the

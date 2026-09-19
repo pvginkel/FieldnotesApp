@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 
 TIMED = 30  # texts timed one at a time, after a warm-up
@@ -55,7 +56,9 @@ def main() -> int:
     texts = embedded_texts(args.dataset)
     for name in args.models:
         started = time.perf_counter()
-        model = SentenceTransformer(name, device="cpu")
+        # Some checkpoints are stored in half precision, and transformers loads what is stored:
+        # fp16 on a CPU is many times slower than fp32, which is also what TEI's CPU image runs.
+        model = SentenceTransformer(name, device="cpu", model_kwargs={"dtype": torch.float32})
         loaded = time.perf_counter() - started
 
         model.encode(texts[:2], normalize_embeddings=True)
@@ -92,7 +95,7 @@ def main() -> int:
         (timings / f"{name.replace('/', '--')}.json").write_text(
             json.dumps(timing, indent=2) + "\n"
         )
-        print(json.dumps(timing))
+        print(json.dumps(timing), flush=True)
     return 0
 
 

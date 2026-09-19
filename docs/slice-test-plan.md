@@ -102,7 +102,11 @@ the services come to exist: the model smoke (`eval/smoke.py`), the replay and ev
 GitHub webhook (above), the MCP end-to-end, the board sync. A slice that delivers what one of those
 rows tests brings the row to life in the same slice, as a script rather than a described manual step
 wherever it can be one. A slice that changes the match pipeline or its thresholds reruns the replay
-and the eval, and keeps their output out of this repo: it quotes the dataset.
+and the eval, and keeps their output out of this repo: it quotes the dataset. A slice that changes
+the scorer itself (the embedding model, the lexical weight, a new ingredient) first compares it with
+the present one in `eval/bench.py`, at matched false-alarm rates, since a threshold does not carry
+from one scorer to the next; `eval/embed_local.py` embeds the dataset with a model the pod does not
+serve.
 
 Until then, a slice whose acceptance criteria need a running MCP server or a real board reports
 those criteria as *not verified*, never as passed.

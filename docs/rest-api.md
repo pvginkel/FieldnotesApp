@@ -42,7 +42,7 @@ unknown fields are refused.
 - `ReactRequest`: `emoji` (1–32 chars, uncurated, 👎 allowed), `text` (optional, ≤10,000: only what
   is new), `repo`, `session` (optional).
 - `MatchRequest`: `text`, `area` (optional; when given, the query is `area: text`, the same shape as
-  an observation's embedded text), `k` (1–12, default 3), `rerank` (bool, default true).
+  an observation's embedded text), `k` (1–12, default 3).
 
 ## What each endpoint does
 
@@ -58,9 +58,9 @@ unknown fields are refused.
   after the reaction.
 - **Get** (FR-5): the full observation from the index: every frontmatter field plus `reactions` and
   `comments`.
-- **Match**: the post's pipeline, writing nothing. With `rerank: false` the candidates come back in
-  cosine order with `score` and `match_class` null and no threshold applied.
-- **Neighbors**: the observations nearest this one, reranked, with no threshold or gap cut;
+- **Match**: the post's pipeline, writing nothing.
+- **Neighbors**: the observations nearest this one by the pipeline's score, with no threshold or gap
+  cut;
   `match_class` is null for a neighbour below both thresholds; the observation itself is left out.
   For the reconciler's search for missed duplicates.
 - **Board sync**: reconciles an observation's card with YouTrack. See
@@ -70,8 +70,8 @@ unknown fields are refused.
 
 The element of `candidates` and `neighbors` (FR-2): `id`, `area`, `canonical`, `status`, `outcome`,
 `pointer`, `reactions` (a list of `emoji (n)` strings, most frequent first, ties in order of first
-appearance; the creating post counts as `📝`), `cosine` (4 decimals), `score` (the reranker's score,
-0–1, 4 decimals; null without reranking), `match_class` (`likely`, `related`, or null), `next_step`
+appearance; the creating post counts as `📝`), `cosine` (4 decimals), `score` (what the thresholds
+read, 4 decimals: the cosine, plus the lexical overlap where the API weighs it in), `match_class` (`likely`, `related`, or null), `next_step`
 (literal text for the reporting agent). For an id `X` the next_step text is exactly:
 
 ```

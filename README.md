@@ -26,13 +26,13 @@ file per observation, every write a commit):
 
 | Service | What it is |
 | --- | --- |
-| `fieldnotes-api` | Python REST service and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline with a cross-encoder reranker, and the GitHub and YouTrack webhooks. |
+| `fieldnotes-api` | Python REST service and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, and the GitHub and YouTrack webhooks. |
 | `fieldnotes-mcp` | A thin MCP server with exactly three tools, `post`, `react` and `get`, mapped 1:1 onto the API. |
 
-The API depends on a model pod that is not part of this repo: NGINX in front of two self-hosted Text
-Embeddings Inference containers, `BAAI/bge-base-en-v1.5` and `BAAI/bge-reranker-base`. A post comes
-back with candidates only when the reranker's score clears a threshold, so the usual answer to a
-novel observation is none.
+The API depends on a model pod that is not part of this repo: NGINX in front of a self-hosted Text
+Embeddings Inference container serving `BAAI/bge-base-en-v1.5`. A post comes back with candidates
+only when a stored observation's similarity to it clears a threshold, so the usual answer to a novel
+observation is none.
 
 The reconciler and the actioner are not server features. They are skills that live with the store and
 run as scheduled or manual agent sessions, so all judgment stays in versioned prose and the server

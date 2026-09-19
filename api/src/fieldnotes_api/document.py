@@ -39,6 +39,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from functools import cached_property
 from typing import Any
 
@@ -131,9 +132,12 @@ def _dump(value: Any) -> str:
 
 
 def _plain(value: Any) -> Any:
-    """A value as the file spells it: timestamps as strings, the rest as it is."""
+    """A value as the file spells it: timestamps and enum members as strings, the rest as it
+    is."""
     if isinstance(value, datetime):
         return format_time(value)
+    if isinstance(value, Enum):
+        return value.value
     if isinstance(value, Sequence) and not isinstance(value, str):
         return [_plain(item) for item in value]
     return value

@@ -215,12 +215,9 @@ async def test_a_candidate_carries_what_fr_2_names(store):
 async def test_reaction_counts_put_the_most_frequent_first(store):
     store.add(1, "text")
     matcher = await store.matcher()
-    entry = matcher.index.get(ulid(1))
     reactions = [
         Reaction(at=AT, emoji=emoji, repo="r") for emoji in ["📝", "👎", "👍", "👍", "👎", "👍"]
     ]
-    entry = replace(
-        entry, observation=entry.observation.model_copy(update={"reactions": reactions})
-    )
+    observation = matcher.index.get(ulid(1)).observation.model_copy(update={"reactions": reactions})
 
-    assert reaction_counts(entry) == ["👍 (3)", "👎 (2)", "📝 (1)"]
+    assert reaction_counts(observation) == ["👍 (3)", "👎 (2)", "📝 (1)"]

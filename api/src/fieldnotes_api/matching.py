@@ -20,7 +20,7 @@ import asyncio
 from collections import Counter
 from dataclasses import dataclass
 
-from fieldnotes_contracts import Candidate, MatchClass
+from fieldnotes_contracts import Candidate, MatchClass, Observation
 
 from .index import Entry, Index
 from .models import Models
@@ -106,9 +106,9 @@ class Matcher:
         return [(a + b[0]) / 2 for a, b in zip(forward, reverse, strict=True)]
 
 
-def reaction_counts(entry: Entry) -> list[str]:
+def reaction_counts(observation: Observation) -> list[str]:
     """FR-2's `emoji (n)` list: most frequent first, ties in order of first appearance."""
-    counts = Counter(reaction.emoji for reaction in entry.observation.reactions)
+    counts = Counter(reaction.emoji for reaction in observation.reactions)
     return [f"{emoji} ({n})" for emoji, n in counts.most_common()]
 
 
@@ -130,7 +130,7 @@ def candidate(scored: Scored) -> Candidate:
         status=observation.status,
         outcome=observation.outcome,
         pointer=observation.pointer,
-        reactions=reaction_counts(scored.entry),
+        reactions=reaction_counts(observation),
         cosine=round(scored.cosine, 4),
         score=None if scored.score is None else round(scored.score, 4),
         match_class=scored.match_class,

@@ -16,7 +16,7 @@ recorded decisions. An observation closes when the board says the work is done o
 
 **Status: a proof of concept under construction.** The design is settled
 ([`docs/design.md`](docs/design.md)); the first version is being built to find out whether the idea
-proves its value. `fieldnotes-api` is built and runs locally; the MCP server and the deployment are
+proves its value. `fieldnotes-api` and `fieldnotes-mcp` are built and run locally; the deployment is
 not built yet.
 
 ## Shape

@@ -86,15 +86,38 @@ Drive it with `curl`, `Authorization: Bearer live-mcp-token` (or `live-skills-to
 6. The index-rebuild row: stop the API, delete `.run/live/cache`, boot it again. `/neighbors` answers
    byte for byte as before, and the log says one text embedded per observation.
 
+`fieldnotes-mcp` runs beside it, as the API's `mcp` client, the same way:
+
+```bash
+cat > .run/live/mcp.env <<'EOF'
+FIELDNOTES_API_URL=http://localhost:8765
+FIELDNOTES_API_TOKEN=live-mcp-token
+FIELDNOTES_MCP_TOKEN=live-agent-token
+FIELDNOTES_MCP_PORT=8766
+EOF
+cexec python sh -c 'cd /work/FieldnotesApp && set -a && . .run/live/mcp.env && set +a &&
+  setsid nohup .venv/bin/fieldnotes-mcp > .run/live/mcp.log 2>&1 < /dev/null &
+  echo $! > .run/live/mcp.pid'
+until curl -sf localhost:8766/readyz; do sleep 1; done
+```
+
+7. The MCP row. A `POST localhost:8766/mcp` with no bearer, or a wrong one, is a `401`. Then, with
+   a real MCP client (the SDK's `ClientSession` over `streamable_http_client`, run with
+   `cexec python uv run --all-packages python`) presenting `Bearer live-agent-token`: `list_tools`
+   is exactly `get`, `post` and `react`. `post` a novel observation: an id, and a commit on
+   `.run/live/remote.git`. `post` a paraphrase from another repo: no id, the first as a `likely`
+   candidate with its reaction counts and next step, and no commit. `react` on it with text, then
+   `get` it: the reaction is there with its repo, session and client `mcp`, and `repos` and
+   `last_seen` moved. The paraphrase again with `force: true`: a new id and a commit. `get` of an
+   unknown id and a `post` with category `bug` are tool errors that say why.
+
 Stop:
 
 ```bash
-cexec python sh -c 'kill $(cat /work/FieldnotesApp/.run/live/api.pid)'
+cexec python sh -c 'kill $(cat /work/FieldnotesApp/.run/live/mcp.pid) $(cat /work/FieldnotesApp/.run/live/api.pid)'
 ```
 
 The board sync has no live check here: it needs YouTrack's webhook app pointed at a deployed API.
-The same goes for `fieldnotes-mcp` when it arrives: the slice that makes it runnable writes its check
-by running it.
 
 The "Validation" table in [`design.md`](design.md) lists the checks that land here or in `eval/` as
 the services come to exist: the model smoke (`eval/smoke.py`), the replay and eval of gate 1
@@ -108,8 +131,8 @@ the present one in `eval/bench.py`, at matched false-alarm rates, since a thresh
 from one scorer to the next; `eval/embed_local.py` embeds the dataset with a model the pod does not
 serve.
 
-Until then, a slice whose acceptance criteria need a running MCP server or a real board reports
-those criteria as *not verified*, never as passed.
+Until then, a slice whose acceptance criteria need a real board reports those criteria as *not
+verified*, never as passed.
 
 ## 3. Check off `verification.json`
 

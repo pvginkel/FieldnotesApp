@@ -70,9 +70,10 @@ YouTrack project key is **`FN`**.
 ## Key documentation
 
 - [`docs/design.md`](docs/design.md): the design, its decisions and its numbered requirements.
-- The API as built: [`docs/rest-api.md`](docs/rest-api.md),
+- The services as built: [`docs/rest-api.md`](docs/rest-api.md),
   [`docs/observation-file.md`](docs/observation-file.md),
-  [`docs/match-pipeline.md`](docs/match-pipeline.md), [`docs/webhooks.md`](docs/webhooks.md).
+  [`docs/match-pipeline.md`](docs/match-pipeline.md), [`docs/webhooks.md`](docs/webhooks.md),
+  [`docs/mcp-server.md`](docs/mcp-server.md).
 - [`docs/change-discipline.md`](docs/change-discipline.md): the rules every change obeys.
 - [`docs/slice-test-plan.md`](docs/slice-test-plan.md): how a slice is verified before it is pushed.
 - [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.

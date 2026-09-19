@@ -1,0 +1,18 @@
+# What the dev pipeline reads about this project.
+# Schema: ${CLAUDE_PLUGIN_ROOT}/docs/project-contract.md
+
+spec_repo = "../FieldnotesAppSpecs"
+design_philosophy = "docs/change-discipline.md"
+
+[test_phase]
+# Local verification: nothing is deployed yet, so there is no dev instance. The
+# doc runs the suites here, then pushes.
+strategy = "docs/slice-test-plan.md"
+
+[doc_phase]
+plan = "docs/slice-doc-plan.md"
+
+[push]
+enabled = true
+
+# No [devlock]: with no dev instance, nothing contends over one.

@@ -1,0 +1,15 @@
+# Curated automation for FieldnotesApp.
+# Schema: https://kubecoder.home/help/reference/project-yaml/
+#
+# No verbs yet: the repo holds no code, so every verb is a skip, and a skip is
+# green. The slice that adds the first Python project wires setup, test and lint
+# through `cexec python`, and declares a component per deliverable if the
+# services land in folders of their own.
+
+projects:
+  root:
+    description: >-
+      FieldnotesApp — the application behind Fieldnotes, a curated cross-project
+      observation store for AI agents: the REST API that owns the git-backed
+      store and the match pipeline, the thin MCP server in front of it, and the
+      self-hosted embedding and reranker model pod.

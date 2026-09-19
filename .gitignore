@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.py[cod]
+.coverage
+
+# Tool caches, written into the repo by `kc project test` / `kc project lint`.
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# A live check's pid files, logs and tokens.
+.run/

@@ -137,7 +137,7 @@ scope here.
 
 **Non-functional**
 
-22. NFR-1 `post` p95 under 2 s including reranking up to 40 candidates.
+22. NFR-1 `post` p95 under 2 s including reranking up to 12 candidates.
 23. NFR-2 200 actions per week; 10,000 observations without redesign.
 24. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
 25. NFR-4 REST and MCP authenticated the way the KubeCoder MCP server is: a static bearer token on
@@ -229,10 +229,11 @@ suspicion. Pull-and-reindex jobs from the GitHub webhook run in the same queue.
 `POST /match {text, area?, k, rerank}`:
 
 1. Embed the query via `/embed`.
-2. Candidates: cosine top-20 over the in-memory matrix, union BM25 top-20 (identifiers, paths, error
-   strings), over all statuses.
-3. Rerank the union via `/rerank`; score both directions and average (configurable to one direction
-   after eval). TEI returns the cross-encoder's score through a sigmoid, so it lies in 0–1.
+2. Candidates: cosine top-8 over the in-memory matrix, union BM25 top-4 (identifiers, paths, error
+   strings), over all statuses: at most 12.
+3. Rerank the union via `/rerank`, the query against each candidate, in one direction. Scoring both
+   directions and averaging is configuration; it doubles the rerank cost. TEI returns the
+   cross-encoder's score through a sigmoid, so it lies in 0–1.
 4. Classify each candidate: `likely` at or above the high threshold, `related` at or above the low
    one, dropped below it. Then drop any candidate that trails the best one by more than a configured
    gap, so one strong match does not carry weak ones along.
@@ -246,8 +247,12 @@ distributions for labeled `same`, `related` and `unrelated` pairs against a prec
 eval report shows the curves they were read from. The expected answer to a novel post is zero
 candidates.
 
-Budget: embedding tens of milliseconds, cosine about a millisecond. The rerank of up to 40 pairs on
-CPU is the unmeasured part of NFR-1 and the first thing the model smoke measures.
+Budget, from the model smoke on the high-performance node (8 vCPUs, shared with the KubeCoder
+environments): embedding one text 100–250 ms, cosine about a millisecond. The reranker is
+compute-bound at about 90–125 ms a pair at 40 words a side and 270–300 ms at 100, so 40 pairs took
+3.7 s at the short end. The candidate counts and the single direction are what fits NFR-1. Gate 1
+measures what the cut costs: the candidate stage's recall at 12 against 40, which needs no
+reranking. It also tunes the counts on real observation lengths.
 
 ### Index maintenance
 
@@ -327,7 +332,7 @@ test material: whether any of it seeds the production store is decided after val
 | Check | How | Pass |
 | --- | --- | --- |
 | Model smoke | Embed two paraphrases and one unrelated text, rerank both pairs, time a 40-pair rerank | Paraphrase cosine above unrelated; reranker agrees; timing recorded |
-| Replay (gate 1) | The harness generates an empty store as a local git repo, runs the API against it with the real models, and posts the dataset in date order. A post whose labeled duplicate is already in the store should come back with it; a novel post should come back empty | Recall@3 on duplicates and the false-alarm rate on novel posts reported with and without reranking; thresholds and gap chosen from the score distributions and committed to config; `post` p95 under 2 s |
+| Replay (gate 1) | The harness generates an empty store as a local git repo, runs the API against it with the real models, and posts the dataset in date order. A post whose labeled duplicate is already in the store should come back with it; a novel post should come back empty | Recall@3 on duplicates and the false-alarm rate on novel posts reported with and without reranking; the candidate stage's recall at 12 against 40; thresholds and gap chosen from the score distributions and committed to config; `post` p95 under 2 s |
 | Index rebuild | Delete the cache directory, restart the API | Index equal to before; one vector per observation |
 | GitHub webhook | Post a signed push delivery after editing a canonical statement in the remote; then a bad signature | Only that observation re-embedded and `/neighbors` reflects it; bad signature rejected, nothing pulled |
 | MCP end-to-end | Scripted MCP client: `post` a known duplicate, `react` on the returned id, `get` it, `post` with `force` | Duplicate returned with reaction counts, no new file; reaction appended; forced post creates a file |
@@ -354,6 +359,9 @@ Each has a trigger that would justify it.
   home.
 - Fine-tuned reranker on the labeled pairs — trigger: eval precision stays under 0.9 after threshold
   tuning.
+- The int8 ONNX of the same reranker, about 2.5 times faster in a one-off measurement, served from a
+  local model directory — trigger: gate 1 shows the 12-candidate cap losing labeled duplicates at
+  the candidate stage.
 - Transcript mining ("dreaming") — not planned; the reporter's judgment at capture time is the
   filter.
 - Agent-facing search — not planned; observations are unverified and project documentation is the

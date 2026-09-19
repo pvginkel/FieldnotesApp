@@ -65,7 +65,7 @@ def precision_recall(
 def sweep(
     records: Sequence[Mapping[str, Any]], related: float, gap: float, key: str = "score"
 ) -> dict[str, Any]:
-    """A replay's outcome had `post` cut its reranked candidates at `related` and `gap` on `key`:
+    """A replay's outcome had `post` cut its scored observations at `related` and `gap` on `key`:
     hits among the posts whose cluster-mate was in the store, false alarms among the rest.
 
     The store is the one the replay built under its own settings. Under others it would differ

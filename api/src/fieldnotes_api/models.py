@@ -1,9 +1,8 @@
-"""The client of the models pod: `/embed` and `/rerank` (design, "Services", "Match pipeline").
+"""The client of the models pod: `/embed` (design, "Services", "Match pipeline").
 
-The pod is two Text Embeddings Inference containers behind NGINX. The embed container takes at
-most 32 texts a call (TEI's default), so embedding goes in chunks of 32; the rerank container takes
-64. Embeddings come back L2-normalised, so a dot product is the cosine. Rerank scores come back
-through a sigmoid, in 0-1.
+The pod is a Text Embeddings Inference container behind NGINX. It takes at most 32 texts a call
+(TEI's default), so embedding goes in chunks of 32. Embeddings come back L2-normalised, so a dot
+product is the cosine.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import httpx
 import numpy as np
 
 EMBED_BATCH = 32
-RERANK_BATCH = 64
 
 
 class ModelsError(RuntimeError):
@@ -25,10 +23,6 @@ class ModelsError(RuntimeError):
 class Models(Protocol):
     async def embed(self, texts: Sequence[str]) -> np.ndarray:
         """One row per text, in order: float32, L2-normalised."""
-        ...
-
-    async def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
-        """The cross-encoder's score of the query against each text, in the texts' order."""
         ...
 
 
@@ -54,12 +48,3 @@ class HttpModels:
             rows += await self._post("/embed", {"inputs": chunk})  # type: ignore[operator]
         matrix = np.asarray(rows, dtype=np.float32)
         return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
-
-    async def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
-        scores: list[float] = []
-        for start in range(0, len(texts), RERANK_BATCH):
-            chunk = list(texts[start : start + RERANK_BATCH])
-            ranked = await self._post("/rerank", {"query": query, "texts": chunk})
-            by_index = {item["index"]: float(item["score"]) for item in ranked}  # type: ignore[attr-defined]
-            scores += [by_index[index] for index in range(len(chunk))]
-        return scores

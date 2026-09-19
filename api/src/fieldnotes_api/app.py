@@ -206,7 +206,7 @@ def create_app(
         _: Client,
         k: Annotated[int, Query(ge=1, le=MAX_CANDIDATES)] = NEIGHBORS_DEFAULT,
     ) -> NeighborsReply:
-        """The observations nearest this one, reranked, none dropped by threshold."""
+        """The observations nearest this one, none dropped by threshold."""
         return await observations.neighbors(id, k)
 
     @app.post("/match")
@@ -276,7 +276,7 @@ async def _models_unreachable(request: Request, exc: Exception) -> Response:
             502,
             ProblemType.models_unreachable,
             "the models pod did not answer",
-            detail="matching needs the embedding and rerank models; retry in a minute",
+            detail="matching needs the embedding model; retry in a minute",
         ),
     )
 

@@ -161,7 +161,7 @@ class Observations:
 
     async def match(self, request: MatchRequest) -> MatchReply:
         text = embedded_text(request.area, request.text) if request.area else request.text
-        matches = await self.matcher.match(text, request.k, rerank=request.rerank)
+        matches = await self.matcher.match(text, request.k)
         return MatchReply(candidates=[candidate(match) for match in matches])
 
     async def neighbors(self, id_: str, k: int) -> NeighborsReply:

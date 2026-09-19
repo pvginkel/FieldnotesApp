@@ -1,12 +1,16 @@
 """The replay over an invented dataset, with the fake models: its reporter, its counts and the
-store it leaves behind (FR-1, FR-2, FR-4). The fake scores a pair by word overlap, so each row's
-wording sets what it matches."""
+store it leaves behind (FR-1, FR-2, FR-4). The fake's cosine is the share of words two texts have
+in common, so each row's wording sets what it matches."""
 
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 
-from fieldnotes_eval.dataset import Row
-from fieldnotes_eval.replay import EMOJI, post_times, returned_at, summarize
+import pytest
+
+from fieldnotes_api.testing import FakeModels
+from fieldnotes_eval.dataset import Row, load_clusters, load_rows
+from fieldnotes_eval.replay import EMOJI, post_times, replay, returned_at, summarize
 
 
 def test_the_reporter_reacts_to_a_hit_and_forces_the_rest(records):
@@ -23,16 +27,32 @@ def test_the_reporter_reacts_to_a_hit_and_forces_the_rest(records):
     assert records[3]["returned"] == [r1["target"]]
 
 
-def test_each_post_records_every_reranked_candidate(records):
+def test_each_post_records_what_it_was_scored_against(records):
     r1, r2, r3, r4, r5 = records
-    assert r1["scored"] == [] and r1["stage"] is None
-    # The store holds r1, r3 and r4 when r5 is posted; its mate r3 is reranked but scores too low.
+    assert r1["scored"] == [] and r1["rank"] is None
+    # The store holds r1, r3 and r4 when r5 is posted; its mate r3 is the best of them and still
+    # scores too low.
     by_row = {s["of"]: s for s in r5["scored"]}
     assert set(by_row) == {"r1", "r3", "r4"}
-    assert by_row["r3"]["mate"] and by_row["r3"]["score"] < 0.3
-    assert r5["stage"] is True and r5["wide"] is True
-    assert r5["rank"]["cosine"] >= 1
-    assert set(r5["cosine3"]) == {s["id"] for s in r5["scored"]}
+    assert by_row["r3"]["mate"] and 0.3 < by_row["r3"]["score"] < 0.4
+    assert by_row["r3"]["score"] == by_row["r3"]["cosine"] and by_row["r3"]["lexical"] > 0
+    assert r5["rank"] == {"score": 1, "cosine": 1}
+    assert r5["top3"] == [s["id"] for s in r5["scored"]]
+    assert [s["score"] for s in r5["scored"]] == sorted(
+        (s["score"] for s in r5["scored"]), reverse=True
+    )
+
+
+def test_a_lexical_weight_enters_the_recorded_score(dataset, settings):
+    weighted = replace(settings, match=replace(settings.match, lexical_weight=1.0, likely=1.5))
+    records = replay(load_rows(dataset), load_clusters(dataset), weighted, models=FakeModels())
+
+    # r5's mate r3 shares its rarest words: the overlap lifts the pair over the low threshold.
+    r5 = records[4]
+    [mate] = [s for s in r5["scored"] if s["mate"]]
+    assert mate["score"] == pytest.approx(mate["cosine"] + mate["lexical"])
+    assert mate["score"] > 0.4 > mate["cosine"]
+    assert (r5["outcome"], r5["action"]) == ("hit", "react")
 
 
 def test_the_summary_counts_hits_misses_and_false_alarms(records):
@@ -40,13 +60,12 @@ def test_the_summary_counts_hits_misses_and_false_alarms(records):
     assert summary["posts"] == 5
     assert (summary["eligible"], summary["novel"]) == (2, 3)
     assert summary["outcomes"] == {"hit": 1, "miss": 1, "false-alarm": 1, "quiet": 2}
-    assert summary["recall_at_3"]["rerank"] == {"n": 1, "of": 2, "rate": 0.5}
-    # Without reranking the cosine top 3 holds every mate in a store this small, and answers
-    # every novel post once the store has anything in it.
-    assert summary["recall_at_3"]["cosine"]["n"] == 2
-    assert summary["false_alarms"]["cosine"] == {"n": 2, "of": 3, "rate": 0.667}
-    assert summary["false_alarms"]["rerank"] == {"n": 1, "of": 3, "rate": 0.333}
-    assert summary["candidate_stage"]["at_12"]["n"] == 2
+    assert summary["recall_at_3"]["answered"] == {"n": 1, "of": 2, "rate": 0.5}
+    # With no threshold the top 3 holds every mate in a store this small, and answers every novel
+    # post once the store has anything in it.
+    assert summary["recall_at_3"]["top3"]["n"] == 2
+    assert summary["false_alarms"]["top3"] == {"n": 2, "of": 3, "rate": 0.667}
+    assert summary["false_alarms"]["answered"] == {"n": 1, "of": 3, "rate": 0.333}
     assert summary["store"] == {"observations": 4, "reactions": 1}
     assert summary["latency"]["posts"] == 4
 

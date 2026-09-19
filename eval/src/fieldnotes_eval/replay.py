@@ -13,19 +13,20 @@ other reply with candidates is forced: a **miss** when a cluster-mate was in the
 alarm** when none was. A post created at once is a miss when a cluster-mate was in the store and
 **quiet** otherwise, the expected answer to a novel post.
 
-Beyond the reply, each post records what gate 1 needs to choose the thresholds and to judge the
-candidate stage, all measured on the store as it was just before the post:
+Beyond the reply, each post records what gate 1 needs to choose the thresholds, all measured on
+the store as it was just before the post:
 
-- every candidate the pipeline reranked, with its cosine and rerank score before any threshold, so
-  a threshold and gap other than the run's can be replayed from the log (`returned_at`);
-- the cosine top 3, the answer without reranking;
-- whether a cluster-mate was among the candidates the pipeline reranked (cosine top 8 union BM25
-  top 4 by default: 12) and among the design's first 40 (cosine top 20 union BM25 top 20);
+- the best `RECORDED` observations by the pipeline's score, and every cluster-mate, each with its
+  cosine, its lexical overlap and its score before any threshold, so a threshold and gap other
+  than the run's can be replayed from the log (`returned_at`);
+- the top 3 by score, the answer without a threshold;
+- each cluster-mate's rank in the store, by score and by cosine;
 - the post's latency (NFR-1).
 
-These come from the models' own answers during the post, recorded by a wrapper, and from the
-API's index; the replay makes no model call of its own. Each post checks that the threshold and
-gap rule applied to its recorded scores gives back exactly what the API returned.
+The cosines come from the vector the post's own embedding call produced, recorded by a wrapper,
+and the overlaps from the API's index just before the post; the replay makes no model call of
+its own. Each post checks that the threshold and gap rule applied to its recorded scores gives
+back exactly what the API returned.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ from fieldnotes_api.app import MODELS_TIMEOUT, create_app
 from fieldnotes_api.config import DEFAULT_MODELS_URL, Settings, load_settings
 from fieldnotes_api.index import Index
 from fieldnotes_api.models import HttpModels, Models
-from fieldnotes_contracts import POST_CANDIDATES
+from fieldnotes_contracts import MAX_CANDIDATES, POST_CANDIDATES
 
 from .dataset import Row, load_clusters, load_rows
 
@@ -59,16 +60,16 @@ TOKEN = "replay-token"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 EMOJI = "👍"
 
-# The design's first candidate stage, before the NFR-1 ruling cut it to 12 (design, "Match
-# pipeline"): what gate 1 compares the cut against.
-WIDE_COSINE_TOP = 20
-WIDE_BM25_TOP = 20
+# The observations recorded per post, best first by score: what `/match` returns at most.
+RECORDED = MAX_CANDIDATES
 
 # Posts of one date are spread over the day from this hour, this far apart; the reporter's follow-up
 # (a reaction, or the forced post) comes a minute after the post.
 DAY_START = timedelta(hours=9)
 POST_SPACING = timedelta(minutes=2)
 FOLLOW_UP = timedelta(minutes=1)
+
+HAIRLINE = 1e-6  # float32 against float64, at a threshold
 
 READY_TIMEOUT = 600.0  # a cold start embeds the whole store; the replay's starts empty
 
@@ -80,42 +81,19 @@ class ReplayError(RuntimeError):
 
 
 class RecordingModels:
-    """The models, with every answer kept for the post being replayed: the vectors by text, and
-    each rerank call."""
+    """The models, with the vector of every text embedded for the post being replayed."""
 
     def __init__(self, models: Models) -> None:
         self.models = models
         self.vectors: dict[str, np.ndarray] = {}
-        self.reranks: list[tuple[str, list[str], list[float]]] = []
 
     def clear(self) -> None:
         self.vectors.clear()
-        self.reranks.clear()
 
     async def embed(self, texts: Sequence[str]) -> np.ndarray:
         matrix = await self.models.embed(texts)
         self.vectors.update(zip(texts, matrix, strict=True))
         return matrix
-
-    async def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
-        scores = await self.models.rerank(query, texts)
-        self.reranks.append((query, list(texts), list(scores)))
-        return scores
-
-    def scores(self, query: str) -> dict[str, float]:
-        """Each candidate text's score against the query in the calls recorded: the forward
-        score, averaged with the reverse one when the pipeline scored both directions."""
-        forward: dict[str, float] = {}
-        reverse: dict[str, float] = {}
-        for asked, texts, scores in self.reranks:
-            if asked == query:
-                forward.update(zip(texts, scores, strict=True))
-            elif texts == [query]:
-                reverse[asked] = scores[0]
-        return {
-            text: (score + reverse[text]) / 2 if text in reverse else score
-            for text, score in forward.items()
-        }
 
 
 class Clock:
@@ -129,9 +107,9 @@ class Clock:
 def returned_at(
     scored: Sequence[Mapping[str, Any]], related: float, gap: float, k: int = POST_CANDIDATES
 ) -> list[str]:
-    """The ids `post` returns for these reranked candidates under a low threshold and a gap: the
+    """The ids `post` returns for these scored observations under a low threshold and a gap: the
     rule of the API's `Matcher.match`, kept here to replay other settings from the log. `scored`
-    is in the pipeline's candidate order, which breaks ties in score."""
+    is in the pipeline's order, which breaks ties in score."""
     kept = sorted((s for s in scored if s["score"] >= related), key=lambda s: -s["score"])
     if kept:
         best = kept[0]["score"]
@@ -185,9 +163,9 @@ class Replay:
             for id_, creator in self.creators.items()
             if cluster is not None and self.clusters.get(creator) == cluster
         }
-        size = len(self.index)
-        # BM25 before the post: a post that creates changes every term's weight.
-        bm25 = [id_ for id_, _ in self.index.bm25_top(row.embedded, size)]
+        # The store before the post: a post that creates changes every term's weight.
+        before = list(self.index.ids)
+        overlaps = dict(zip(before, self.index.overlaps(row.embedded).tolist(), strict=True))
 
         body = {
             "area": row.area,
@@ -210,13 +188,13 @@ class Replay:
             "id": row.id,
             "date": row.date,
             "cluster": cluster,
-            "store": size,
+            "store": len(before),
             "mates": sorted(mates),
             "latency": round(latency, 3),
             "status": response.status_code,
             "returned": returned,
         }
-        record |= self._measure(row, size, bm25, mates, created, returned)
+        record |= self._measure(row, before, overlaps, mates, returned)
 
         if mates and any(id_ in mates for id_ in returned):
             outcome = "hit"
@@ -247,54 +225,61 @@ class Replay:
     def _measure(
         self,
         row: Row,
-        size: int,
-        bm25: list[str],
+        before: list[str],
+        overlaps: Mapping[str, float],
         mates: set[str],
-        created: str | None,
         returned: list[str],
     ) -> dict[str, Any]:
-        """The candidate stage, the reranked candidates and the cosine top 3, on the store as it
-        was before the post, from the vector and scores the post's own model calls produced."""
-        if not size:
-            return {"scored": [], "cosine3": [], "stage": None, "wide": None, "rank": None}
+        """The scored observations, the top 3 and the mates' ranks, on the store as it was before
+        the post, from the vector the post's own embedding call produced."""
+        if not before:
+            return {"scored": [], "top3": [], "rank": None}
         vector = self.models.vectors.get(row.embedded)
         if vector is None:
             raise ReplayError(f"{row.id}: the post embedded no query")
-        # Cosine needs no before-image: the post's own observation, if any, is left out.
-        cosine = dict(self.index.cosine_top(vector, size, exclude=created))
-        by_cosine = list(cosine)
         match = self.settings.match
-        stage = list(dict.fromkeys(by_cosine[: match.cosine_top] + bm25[: match.bm25_top]))
-        wide = set(by_cosine[:WIDE_COSINE_TOP]) | set(bm25[:WIDE_BM25_TOP])
+        cosines = {id_: float(self.index.get(id_).vector @ vector) for id_ in before}  # type: ignore[union-attr]
+        scores = {id_: cosines[id_] + match.lexical_weight * overlaps[id_] for id_ in before}
+        # Stable, over the index's own order: ties break as they do in the API.
+        by_score = sorted(before, key=lambda id_: -scores[id_])
+        by_cosine = sorted(before, key=lambda id_: -cosines[id_])
 
-        scores = self.models.scores(row.embedded)
-        texts = {id_: self.index.get(id_).text for id_ in stage}  # type: ignore[union-attr]
-        if set(scores) != set(texts.values()):
-            raise ReplayError(f"{row.id}: the pipeline reranked other candidates than expected")
+        recorded = by_score[:RECORDED] + [id_ for id_ in by_score[RECORDED:] if id_ in mates]
         scored = [
             {
                 "id": id_,
                 "of": self.creators[id_],
-                "cosine": cosine[id_],
-                "score": scores[texts[id_]],
+                "cosine": cosines[id_],
+                "lexical": overlaps[id_],
+                "score": scores[id_],
                 "mate": id_ in mates,
             }
-            for id_ in stage
+            for id_ in recorded
         ]
-        if returned_at(scored, match.related, match.gap) != returned:
+        expected = returned_at(scored, match.related, match.gap)
+        # The API rounds nothing before it cuts, but it adds in float32: a score within a hair of
+        # the threshold may fall either side.
+        if expected != returned and not self._hairline(scored, match.related, match.gap):
             raise ReplayError(f"{row.id}: the scores recorded do not give back what post returned")
 
-        ranks = [by_cosine.index(id_) + 1 for id_ in mates]
-        bm25_ranks = [bm25.index(id_) + 1 for id_ in mates if id_ in bm25]
         return {
             "scored": scored,
-            "cosine3": by_cosine[:3],
-            "stage": any(id_ in mates for id_ in stage) if mates else None,
-            "wide": bool(mates & wide) if mates else None,
-            "rank": {"cosine": min(ranks), "bm25": min(bm25_ranks, default=None)}
+            "top3": by_score[:POST_CANDIDATES],
+            "rank": {
+                "score": min(by_score.index(id_) + 1 for id_ in mates),
+                "cosine": min(by_cosine.index(id_) + 1 for id_ in mates),
+            }
             if mates
             else None,
         }
+
+    @staticmethod
+    def _hairline(scored: Sequence[Mapping[str, Any]], related: float, gap: float) -> bool:
+        best = max(s["score"] for s in scored)
+        return any(
+            abs(s["score"] - related) < HAIRLINE or abs(best - s["score"] - gap) < HAIRLINE
+            for s in scored
+        )
 
 
 def _wait_ready(api: TestClient) -> None:
@@ -359,20 +344,17 @@ def summarize(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "eligible": len(eligible),
         "novel": len(novel),
         "outcomes": {o: outcomes[o] for o in ("hit", "miss", "false-alarm", "quiet")},
+        # `answered`: what post returned; `top3`: the three best with no threshold.
         "recall_at_3": {
-            "rerank": _rate(outcomes["hit"], len(eligible)),
-            "cosine": _rate(
-                sum(any(id_ in r["mates"] for id_ in r["cosine3"]) for r in eligible),
+            "answered": _rate(outcomes["hit"], len(eligible)),
+            "top3": _rate(
+                sum(any(id_ in r["mates"] for id_ in r["top3"]) for r in eligible),
                 len(eligible),
             ),
         },
         "false_alarms": {
-            "rerank": _rate(outcomes["false-alarm"], len(novel)),
-            "cosine": _rate(sum(bool(r["cosine3"]) for r in novel), len(novel)),
-        },
-        "candidate_stage": {
-            "at_12": _rate(sum(bool(r["stage"]) for r in eligible), len(eligible)),
-            "at_40": _rate(sum(bool(r["wide"]) for r in eligible), len(eligible)),
+            "answered": _rate(outcomes["false-alarm"], len(novel)),
+            "top3": _rate(sum(bool(r["top3"]) for r in novel), len(novel)),
         },
         "latency": {
             "posts": len(latencies),
@@ -400,12 +382,9 @@ def _environ(args: argparse.Namespace, remote: Path, cache: Path) -> dict[str, s
         "MATCH_LIKELY": args.likely,
         "MATCH_RELATED": args.related,
         "MATCH_GAP": args.gap,
-        "MATCH_COSINE_TOP": args.cosine_top,
-        "MATCH_BM25_TOP": args.bm25_top,
+        "MATCH_LEXICAL_WEIGHT": args.lexical_weight,
     }
     environ |= {f"FIELDNOTES_{k}": str(v) for k, v in overrides.items() if v is not None}
-    if args.both_directions:
-        environ["FIELDNOTES_MATCH_BOTH_DIRECTIONS"] = "true"
     return environ
 
 
@@ -422,9 +401,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--likely", type=float, help="high threshold (default: the API's)")
     parser.add_argument("--related", type=float, help="low threshold (default: the API's)")
     parser.add_argument("--gap", type=float, help="the gap (default: the API's)")
-    parser.add_argument("--cosine-top", type=int, help="candidates by cosine (default: the API's)")
-    parser.add_argument("--bm25-top", type=int, help="candidates by BM25 (default: the API's)")
-    parser.add_argument("--both-directions", action="store_true", help="rerank both ways")
+    parser.add_argument(
+        "--lexical-weight", type=float, help="the lexical overlap's weight (default: the API's)"
+    )
     parser.add_argument("--limit", type=int, help="post only the first N rows")
     args = parser.parse_args(argv)
 
@@ -459,12 +438,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     summary = {
         "settings": {
-            "cosine_top": settings.match.cosine_top,
-            "bm25_top": settings.match.bm25_top,
+            "embed_model": settings.embed_model,
+            "lexical_weight": settings.match.lexical_weight,
             "likely": settings.match.likely,
             "related": settings.match.related,
             "gap": settings.match.gap,
-            "both_directions": settings.match.both_directions,
         },
         **summarize(records),
     }

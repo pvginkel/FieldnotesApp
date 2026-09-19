@@ -25,7 +25,7 @@ from .observation import Category, Outcome, Status
 # FR-1: `post` returns at most this many candidates.
 POST_CANDIDATES = 3
 
-# The most `/match` and `/neighbors` return: the candidate stage's cap (design, "Match pipeline").
+# The most `/match` and `/neighbors` return.
 MAX_CANDIDATES = 12
 
 AREA_MAX = 200
@@ -66,10 +66,9 @@ class Candidate(WireModel):
     # `emoji (n)`, most frequent first; the creating post counts as a `POST_EMOJI` reaction.
     reactions: list[str]
     cosine: float
-    # The reranker's score, 0-1; absent when the match ran without reranking.
-    score: float | None
-    # Absent when the match ran without reranking, or on a `/neighbors` entry below both
-    # thresholds.
+    # What the thresholds read: the cosine, plus the lexical overlap where the API weighs it in.
+    score: float
+    # Absent on a `/neighbors` entry below both thresholds.
     match_class: MatchClass | None
     # The literal next step for the reporting agent: `react` with this id, or `post` with `force`.
     next_step: str
@@ -122,7 +121,6 @@ class MatchRequest(WireModel):
     text: BodyText
     area: AreaText | None = None
     k: int = Field(default=POST_CANDIDATES, ge=1, le=MAX_CANDIDATES)
-    rerank: bool = True
 
 
 class MatchReply(WireModel):
@@ -130,7 +128,7 @@ class MatchReply(WireModel):
 
 
 class NeighborsReply(WireModel):
-    """The observations nearest to one in the store, reranked, none dropped by threshold."""
+    """The observations nearest to one in the store, none dropped by threshold."""
 
     id: str
     neighbors: list[Candidate]

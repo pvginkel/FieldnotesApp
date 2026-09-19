@@ -1,5 +1,6 @@
-"""The match pipeline (design, "Match pipeline"; FR-1..FR-3) over the fake models, whose rerank
-score is the word overlap of the two texts: a test sets a score by choosing the words."""
+"""The match pipeline (design, "Match pipeline"; FR-1..FR-3) over the fake models, whose cosine
+is `shared / sqrt(n * m)` for texts of `n` and `m` words: a test sets a score by choosing the
+words. The query of most tests, `a: uv sync installs no workspace members`, has seven."""
 
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -14,9 +15,7 @@ from fieldnotes_api.testing import FakeModels
 from fieldnotes_contracts import MatchClass, Reaction
 
 AT = datetime(2026, 9, 19, 10, 0, 0, tzinfo=UTC)
-SETTINGS = MatchSettings(
-    cosine_top=8, bm25_top=4, likely=0.6, related=0.3, gap=0.25, both_directions=False
-)
+SETTINGS = MatchSettings(likely=0.9, related=0.7, gap=0.1, lexical_weight=0.0)
 
 
 def ulid(n: int) -> str:
@@ -44,7 +43,6 @@ class Store:
 
     async def matcher(self, settings: MatchSettings = SETTINGS) -> Matcher:
         await self.index.update(self.paths)
-        self.models.reranked.clear()
         return Matcher(self.index, self.models, settings)
 
 
@@ -78,8 +76,8 @@ async def test_a_duplicate_comes_back_likely(store):
 
 
 async def test_classes_follow_the_thresholds(store):
-    # Against the query's seven words, the area `a` included: 4 of 7 shared is 0.57 (related), 2
-    # of 7 is 0.29 (dropped).
+    # Against the query's seven words, the area `a` included: 4 of 4 shared is 4/sqrt(28) = 0.76
+    # (related), 2 of 2 is 2/sqrt(14) = 0.53 (dropped).
     store.add(1, "uv sync installs")
     store.add(2, "uv")
     matcher = await store.matcher(replace(SETTINGS, gap=1.0))
@@ -91,9 +89,9 @@ async def test_classes_follow_the_thresholds(store):
 
 
 async def test_the_gap_drops_what_trails_the_best(store):
-    store.add(1, "uv sync installs no workspace members")  # 7/7 = 1.0
-    store.add(2, "uv sync installs no workspace")  # 6/7 = 0.86, within the gap
-    store.add(3, "uv sync installs no")  # 5/7 = 0.71: likely, but trails by more than 0.25
+    store.add(1, "uv sync installs no workspace members")  # 1.0
+    store.add(2, "uv sync installs no workspace")  # 6/sqrt(42) = 0.93, within the gap
+    store.add(3, "uv sync installs no")  # 5/sqrt(35) = 0.85: related, but trails by more than 0.1
     matcher = await store.matcher()
 
     matches = await matcher.match("a: uv sync installs no workspace members", 3)
@@ -120,52 +118,37 @@ async def test_closed_observations_match_too(store):
     assert match.entry.observation.status == "closed"
 
 
-async def test_the_candidates_are_the_cosine_top_union_the_bm25_top(store):
+async def test_the_whole_store_is_scored(store):
+    # No candidate stage: the one duplicate is found behind any number of nearer-looking rows.
+    for n in range(40):
+        store.add(n, f"uv sync observation {n}")
+    store.add(99, "probe timeout defaults to one second")
+    matcher = await store.matcher()
+
+    [match] = await matcher.match("a: probe timeout defaults to one second", 3)
+
+    assert match.entry.observation.id == ulid(99)
+    assert store.models.embedded[-1] == "a: probe timeout defaults to one second"
+
+
+async def test_the_lexical_weight_adds_the_overlap_to_the_cosine(store):
     for n in range(30):
         store.add(n, f"filler observation number {n} about nothing in particular")
     store.add(99, "track_build.py rc=3 on a jenkins backlog")
-    matcher = await store.matcher(replace(SETTINGS, cosine_top=2, bm25_top=1))
+    query = "a: filler observation mentioning track_build.py"
 
-    await matcher.match("a: filler observation mentioning track_build.py", 3)
+    # By cosine alone the observation that quotes the identifier stays under the threshold.
+    assert await (await store.matcher()).match(query, 3) == []
 
-    [(_, texts)] = store.models.reranked
-    assert len(texts) == 3
-    assert "a: track_build.py rc=3 on a jenkins backlog" in texts
-
-
-async def test_the_default_candidate_stage_reranks_at_most_twelve(store):
-    for n in range(40):
-        store.add(n, f"uv sync observation {n}")
-    matcher = await store.matcher()
-
-    await matcher.match("a: uv sync observation", 3)
-
-    [(_, texts)] = store.models.reranked
-    assert len(texts) <= 12
-
-
-async def test_both_directions_average_the_two_scores(store):
-    store.add(1, "one")
-    matcher = await store.matcher(replace(SETTINGS, both_directions=True))
-    query, other = "a: query", "a: one"
-    store.models.scores = {(query, other): 0.9, (other, query): 0.5}
-
+    matcher = await store.matcher(replace(SETTINGS, lexical_weight=1.0))
     [match] = await matcher.match(query, 3)
 
-    assert match.score == pytest.approx(0.7)
-    assert store.models.reranked == [(query, [other]), (other, [query])]
-
-
-async def test_without_reranking_the_candidates_come_in_cosine_order(store):
-    store.add(1, "uv sync installs no workspace members")
-    store.add(2, "grafana dashboards")
-    matcher = await store.matcher()
-
-    matches = await matcher.match("a: uv sync installs no workspace members", 2, rerank=False)
-
-    assert ids(matches) == [ulid(1), ulid(2)]
-    assert [(m.score, m.match_class) for m in matches] == [(None, None), (None, None)]
-    assert store.models.reranked == []
+    assert match.entry.observation.id == ulid(99)
+    overlap = store.index.overlaps(query)[store.index.ids.index(ulid(99))]
+    assert 0.5 < overlap < 1
+    assert match.cosine == pytest.approx(4 / (7 * 9) ** 0.5)
+    assert match.score == pytest.approx(match.cosine + overlap)
+    assert match.match_class is MatchClass.likely
 
 
 async def test_neighbours_keep_what_falls_below_the_thresholds(store):

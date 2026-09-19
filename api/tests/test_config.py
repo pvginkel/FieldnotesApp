@@ -20,8 +20,9 @@ def test_defaults():
     assert settings.cache_dir == Path("/data/cache")
     assert settings.models_url == "http://models.models-prd.svc.cluster.local"
     assert settings.embed_model == "BAAI/bge-base-en-v1.5"
-    assert (settings.match.cosine_top, settings.match.bm25_top) == (8, 4)
-    assert settings.match.both_directions is False
+    match = settings.match
+    assert (match.likely, match.related, match.gap) == (0.87, 0.80, 0.05)
+    assert match.lexical_weight == 0.0
     assert settings.clients.names == ()
     assert settings.github is None
     assert settings.board is None
@@ -48,23 +49,15 @@ def test_match_settings_are_read():
     settings = load_settings(
         BASE
         | {
-            "FIELDNOTES_MATCH_COSINE_TOP": "20",
-            "FIELDNOTES_MATCH_BM25_TOP": "0",
-            "FIELDNOTES_MATCH_LIKELY": "0.9",
-            "FIELDNOTES_MATCH_RELATED": "0.4",
+            # With a lexical weight a score runs past 1, and so may the thresholds.
+            "FIELDNOTES_MATCH_LIKELY": "1.2",
+            "FIELDNOTES_MATCH_RELATED": "0.9",
             "FIELDNOTES_MATCH_GAP": "0.1",
-            "FIELDNOTES_MATCH_BOTH_DIRECTIONS": "True",
+            "FIELDNOTES_MATCH_LEXICAL_WEIGHT": "0.5",
         }
     )
     match = settings.match
-    assert (match.cosine_top, match.bm25_top, match.likely, match.related, match.gap) == (
-        20,
-        0,
-        0.9,
-        0.4,
-        0.1,
-    )
-    assert match.both_directions is True
+    assert (match.likely, match.related, match.gap, match.lexical_weight) == (1.2, 0.9, 0.1, 0.5)
 
 
 @pytest.mark.parametrize(
@@ -72,9 +65,9 @@ def test_match_settings_are_read():
     [
         ({"FIELDNOTES_STORE_URL": " "}, "FIELDNOTES_STORE_URL is not set"),
         ({"FIELDNOTES_API_PORT": "http"}, "FIELDNOTES_API_PORT is not a number"),
-        ({"FIELDNOTES_MATCH_BOTH_DIRECTIONS": "yes"}, "FIELDNOTES_MATCH_BOTH_DIRECTIONS"),
+        ({"FIELDNOTES_MATCH_LEXICAL_WEIGHT": "-1"}, "FIELDNOTES_MATCH_LEXICAL_WEIGHT"),
+        ({"FIELDNOTES_MATCH_LIKELY": "1.2"}, "likely <= 1"),
         ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
-        ({"FIELDNOTES_MATCH_COSINE_TOP": "0"}, "FIELDNOTES_MATCH_COSINE_TOP must be"),
         ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
         ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),
         (

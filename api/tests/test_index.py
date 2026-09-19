@@ -121,8 +121,9 @@ async def test_a_removed_file_leaves_the_index(root, tmp_path, models):
 
     assert built.get(ulid(1)) is None
     assert built.by_card("FN-1") is None
-    assert built.bm25_top("gone soon", 5) == []
-    assert [id_ for id_, _ in built.cosine_top(built.get(ulid(2)).vector, 5)] == [ulid(2)]
+    assert built.ids == [ulid(2)]
+    assert built.cosines(built.get(ulid(2)).vector).tolist() == pytest.approx([1.0])
+    assert built.overlaps("area: gone soon").tolist() == pytest.approx([0.0], abs=0.2)
 
 
 async def test_an_invalid_file_is_logged_and_left_out(root, tmp_path, models, caplog):
@@ -152,7 +153,7 @@ async def test_a_failed_embedding_changes_nothing(root, tmp_path, models):
     assert len(built) == 1
 
 
-async def test_cosine_ranks_by_similarity_and_leaves_out_the_excluded(root, tmp_path, models):
+async def test_the_whole_index_is_scored_in_the_order_of_its_ids(root, tmp_path, models):
     paths = {
         write(root, 1, "uv", "sync installs no workspace members"),
         write(root, 2, "uv", "sync installs members with all packages"),
@@ -160,12 +161,14 @@ async def test_cosine_ranks_by_similarity_and_leaves_out_the_excluded(root, tmp_
     }
     built = index(root, tmp_path / "cache", models)
     await built.update(paths)
-    query = built.get(ulid(1)).vector
+    text = built.get(ulid(1)).text
 
-    ranked = built.cosine_top(query, 2)
-    assert [id_ for id_, _ in ranked] == [ulid(1), ulid(2)]
-    assert ranked[0][1] == pytest.approx(1.0)
-    assert [id_ for id_, _ in built.cosine_top(query, 2, exclude=ulid(1))] == [ulid(2), ulid(3)]
+    cosines = built.cosines(built.get(ulid(1)).vector)
+    overlaps = built.overlaps(text)
+
+    assert built.ids == [ulid(1), ulid(2), ulid(3)]
+    assert cosines[0] == pytest.approx(1.0) and cosines[0] > cosines[1] > cosines[2]
+    assert overlaps[0] == pytest.approx(1.0) and overlaps[0] > overlaps[1] > overlaps[2] == 0.0
 
 
 def test_terms_keep_identifiers_whole_and_in_parts():
@@ -183,14 +186,27 @@ def test_terms_keep_identifiers_whole_and_in_parts():
     ]
 
 
-def test_bm25_prefers_the_rare_identifier():
+def test_the_overlap_weighs_the_rare_identifier():
     bm25 = Bm25()
     bm25.put("a", "the build failed with rc=3 from track_build.py")
     bm25.put("b", "the build failed again")
     bm25.put("c", "the deploy failed")
-    ranked = bm25.top("track_build.py exits 3", 5)
-    assert [id_ for id_, _ in ranked] == ["a", "b"]
-    # `build`, a part of the identifier, is in "b" too.
-    assert [id_ for id_, _ in bm25.top("track_build.py", 5, exclude="a")] == ["b"]
+
+    overlap = bm25.overlap("track_build.py exits 3")
+
+    # `build`, a part of the identifier, is in "b" too; "c" shares no term and is absent. `exits`
+    # is in no document, and what nothing covers keeps every overlap under 1.
+    assert set(overlap) == {"a", "b"}
+    assert 1 > overlap["a"] > 3 * overlap["b"] > 0
     bm25.remove("a")
-    assert [id_ for id_, _ in bm25.top("track_build.py", 5)] == ["b"]
+    assert set(bm25.overlap("track_build.py")) == {"b"}
+
+
+def test_a_text_covers_itself_whatever_its_length():
+    bm25 = Bm25()
+    texts = {"short": "uv sync", "long": "uv sync installs no workspace members " * 5}
+    for id_, text in texts.items():
+        bm25.put(id_, text)
+    for id_, text in texts.items():
+        assert bm25.overlap(text)[id_] == pytest.approx(1.0)
+    assert Bm25().overlap("anything") == {}

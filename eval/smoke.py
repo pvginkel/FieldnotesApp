@@ -1,15 +1,13 @@
 """Model smoke: the models pod answers, and answers sensibly (design, "Validation").
 
 Embeds two paraphrases and one unrelated text and checks that the paraphrases sit closer together
-than either does to the unrelated one. Reranks both pairs and checks that the reranker agrees. Then
-times the unmeasured part of NFR-1, a 40-pair rerank at observation length: forward, as one
-`/rerank` call of the query against 40 texts, and reverse, as 40 concurrent calls of each text
-against the query. That is the second direction the match pipeline averages in. It also times
-embedding one text, the pipeline's other model call.
+than either does to the unrelated one. Then times embedding one text at observation length, the
+match pipeline's only model call and so the model's share of NFR-1.
 
     cexec python uv run --all-packages python eval/smoke.py [--url URL]
 
-Every text is invented. The exit status is 1 when a check fails. Timings are reported, not judged.
+Every text is invented. The exit status is 1 when the check fails. Timings are reported, not
+judged.
 """
 
 import argparse
@@ -23,9 +21,8 @@ import httpx
 
 DEFAULT_URL = "http://models.models-prd.svc.cluster.local"
 
-# The candidate count the design first had, timed here; the operator's NFR-1 ruling cut it to 12
-# on these numbers.
-CANDIDATES = 40
+# How many different texts a length is timed over.
+TEXTS = 40
 
 PARAPHRASE_A = (
     "uv workspace: running `uv sync` at the root of a workspace whose root project is not a "
@@ -118,46 +115,21 @@ async def check(client: httpx.AsyncClient) -> bool:
     embed_ok = paraphrase > unrelated
     print(f"cosine: paraphrase {paraphrase:.3f}, unrelated {unrelated:.3f}")
 
-    response = await client.post(
-        "/rerank", json={"query": PARAPHRASE_A, "texts": [PARAPHRASE_B, UNRELATED]}
-    )
-    response.raise_for_status()
-    scores = {item["index"]: item["score"] for item in response.json()}
-    rerank_ok = scores[0] > scores[1]
-    print(f"rerank: paraphrase {scores[0]:.3f}, unrelated {scores[1]:.3f}")
-
     print(f"embedding separates the paraphrase: {'yes' if embed_ok else 'NO'}")
-    print(f"reranker agrees: {'yes' if rerank_ok else 'NO'}")
-    return embed_ok and rerank_ok
+    return embed_ok
 
 
-async def time_calls(
-    client: httpx.AsyncClient, words: int, repeats: int
-) -> tuple[list[float], list[float], list[float]]:
-    """Seconds per round for one embed, the forward rerank and the reverse rerank. One extra
-    round runs first as a warm-up and is dropped."""
-    query = observation(len(SENTENCES) * len(AREAS), words)
-    texts = [observation(i, words) for i in range(CANDIDATES)]
-    embed: list[float] = []
-    forward: list[float] = []
-    reverse: list[float] = []
+async def time_calls(client: httpx.AsyncClient, words: int, repeats: int) -> list[float]:
+    """Seconds per embedding of one text, a different text each round. One extra round runs
+    first as a warm-up and is dropped."""
+    samples: list[float] = []
     for round_ in range(repeats + 1):
-        t0 = time.perf_counter()
-        (await client.post("/embed", json={"inputs": query})).raise_for_status()
-        t1 = time.perf_counter()
-        (await client.post("/rerank", json={"query": query, "texts": texts})).raise_for_status()
-        t2 = time.perf_counter()
-        responses = await asyncio.gather(
-            *(client.post("/rerank", json={"query": text, "texts": [query]}) for text in texts)
-        )
-        for response in responses:
-            response.raise_for_status()
-        t3 = time.perf_counter()
+        text = observation(round_ % TEXTS, words)
+        started = time.perf_counter()
+        (await client.post("/embed", json={"inputs": text})).raise_for_status()
         if round_:
-            embed.append(t1 - t0)
-            forward.append(t2 - t1)
-            reverse.append(t3 - t2)
-    return embed, forward, reverse
+            samples.append(time.perf_counter() - started)
+    return samples
 
 
 async def main() -> int:
@@ -169,7 +141,7 @@ async def main() -> int:
         type=int,
         nargs="+",
         default=[40, 100, 200],
-        help="observation lengths to time, in words (query and texts alike)",
+        help="observation lengths to time, in words",
     )
     args = parser.parse_args()
 
@@ -177,20 +149,15 @@ async def main() -> int:
         ok = await check(client)
 
         print()
-        print(
-            f"One embed, and a {CANDIDATES}-pair rerank forward (fwd) and reverse (rev); "
-            f"{args.repeats} rounds per length, milliseconds:"
-        )
+        print(f"One text embedded; {args.repeats} rounds per length, milliseconds:")
         print()
-        print("| words | embed p50 | embed p95 | fwd p50 | fwd p95 | rev p50 | rev p95 |")
-        print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        print("| words | embed p50 | embed p95 |")
+        print("| ---: | ---: | ---: |")
         for words in args.words:
-            embed, forward, reverse = await time_calls(client, words, args.repeats)
-            cells = [
-                f"{statistics.median(s) * 1000:.0f} | {p95(s) * 1000:.0f}"
-                for s in (embed, forward, reverse)
-            ]
-            print(f"| {words} | {' | '.join(cells)} |")
+            samples = await time_calls(client, words, args.repeats)
+            print(
+                f"| {words} | {statistics.median(samples) * 1000:.0f} | {p95(samples) * 1000:.0f} |"
+            )
 
     return 0 if ok else 1
 

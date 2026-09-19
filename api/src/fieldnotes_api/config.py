@@ -8,14 +8,12 @@
 | `FIELDNOTES_STORE_BRANCH` | `main` | |
 | `FIELDNOTES_GIT_AUTHOR_NAME`, `_EMAIL` | `Fieldnotes API` | the server's commits' author |
 | `FIELDNOTES_CACHE_DIR` | `/data/cache` | the embedding cache, on the volume |
-| `FIELDNOTES_MODELS_URL` | the models pod's Service | `/embed` and `/rerank` |
+| `FIELDNOTES_MODELS_URL` | the models pod's Service | `/embed` |
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | what the pod embeds with: the cache's key |
-| `FIELDNOTES_MATCH_COSINE_TOP` | 8 | candidates by cosine |
-| `FIELDNOTES_MATCH_BM25_TOP` | 4 | candidates by BM25 |
-| `FIELDNOTES_MATCH_LIKELY` | 0.995 | the high threshold on the rerank score |
-| `FIELDNOTES_MATCH_RELATED` | 0.985 | the low threshold |
-| `FIELDNOTES_MATCH_GAP` | 0.3 | how far a candidate may trail the best |
-| `FIELDNOTES_MATCH_BOTH_DIRECTIONS` | `false` | rerank each pair both ways and average |
+| `FIELDNOTES_MATCH_LIKELY` | 0.87 | the high threshold on the match score |
+| `FIELDNOTES_MATCH_RELATED` | 0.80 | the low threshold |
+| `FIELDNOTES_MATCH_GAP` | 0.05 | how far a candidate may trail the best |
+| `FIELDNOTES_MATCH_LEXICAL_WEIGHT` | 0 | the lexical overlap's weight in the score; 0 is cosine |
 | `FIELDNOTES_CLIENT_TOKEN_<NAME>` | | the bearer of the named client `<name>` (secret) |
 | `FIELDNOTES_GITHUB_WEBHOOK_SECRET` | none | the GitHub webhook's secret (secret) |
 | `FIELDNOTES_GITHUB_REPO` | none | the store repo as GitHub names it, `owner/name` |
@@ -55,13 +53,15 @@ CLIENT_TOKEN_PREFIX = f"{PREFIX}CLIENT_TOKEN_"
 DEFAULT_MODELS_URL = "http://models.models-prd.svc.cluster.local"
 DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
 
-# Read at gate 1 from the eval's replay of the mined dataset. Related: the lowest score at which
-# at most one novel post in ten is answered with a candidate. Likely: where answers are right as
-# often as wrong. The reranker's scores bunch near 1 for texts on one topic, so both sit high, and
-# at these thresholds the gap drops nothing.
-DEFAULT_LIKELY = 0.995
-DEFAULT_RELATED = 0.985
-DEFAULT_GAP = 0.3
+# Read at gate 1 from the eval of the mined dataset (`eval/bench.py`, confirmed by a replay), for
+# the cosine of `DEFAULT_EMBED_MODEL`. A threshold belongs to its scorer: another embedding model
+# or lexical weight needs its own. Related: the lowest score at which at most one novel post in
+# ten is answered with a candidate. Likely: where three answers in four are right. The gap: the
+# widest that still trims an answer; it costs no duplicate on the dataset.
+DEFAULT_LIKELY = 0.87
+DEFAULT_RELATED = 0.80
+DEFAULT_GAP = 0.05
+DEFAULT_LEXICAL_WEIGHT = 0.0
 
 DEFAULT_RESOLUTION_FIELD = "Resolution"
 # FR-21's map: Resolved and Absorbed are done, Won't Do is wont-do.
@@ -115,31 +115,23 @@ def _number[T: (int, float)](environ: Mapping[str, str], name: str, kind: type[T
         raise SettingsError(f"{PREFIX}{name} is not a number: {value!r}") from None
 
 
-def _flag(environ: Mapping[str, str], name: str) -> bool:
-    value = _get(environ, name, "false").lower()
-    if value not in ("true", "false"):
-        raise SettingsError(f"{PREFIX}{name} is neither true nor false: {value!r}")
-    return value == "true"
-
-
 def _match(environ: Mapping[str, str]) -> MatchSettings:
     match = MatchSettings(
-        cosine_top=_number(environ, "MATCH_COSINE_TOP", int, 8),
-        bm25_top=_number(environ, "MATCH_BM25_TOP", int, 4),
         likely=_number(environ, "MATCH_LIKELY", float, DEFAULT_LIKELY),
         related=_number(environ, "MATCH_RELATED", float, DEFAULT_RELATED),
         gap=_number(environ, "MATCH_GAP", float, DEFAULT_GAP),
-        both_directions=_flag(environ, "MATCH_BOTH_DIRECTIONS"),
+        lexical_weight=_number(environ, "MATCH_LEXICAL_WEIGHT", float, DEFAULT_LEXICAL_WEIGHT),
     )
-    if not 0 <= match.related <= match.likely <= 1:
+    if match.lexical_weight < 0 or match.gap < 0:
+        raise SettingsError(
+            f"{PREFIX}MATCH_LEXICAL_WEIGHT and {PREFIX}MATCH_GAP must be at least 0"
+        )
+    # A score is a cosine plus the weighted lexical overlap, itself about 0-1.
+    highest = 1 + match.lexical_weight
+    if not 0 <= match.related <= match.likely <= highest:
         raise SettingsError(
             f"{PREFIX}MATCH_RELATED ({match.related}) and {PREFIX}MATCH_LIKELY ({match.likely}) "
-            "must satisfy 0 <= related <= likely <= 1"
-        )
-    if match.cosine_top < 1 or match.bm25_top < 0 or match.gap < 0:
-        raise SettingsError(
-            f"{PREFIX}MATCH_COSINE_TOP must be at least 1, and {PREFIX}MATCH_BM25_TOP and "
-            f"{PREFIX}MATCH_GAP at least 0"
+            f"must satisfy 0 <= related <= likely <= {highest:g}"
         )
     return match
 

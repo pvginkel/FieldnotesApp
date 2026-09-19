@@ -1,6 +1,6 @@
 """An invented dataset in the mined dataset's format, and the settings of an API over an empty
-store for it. The fake models score a pair by word overlap, so each row's wording sets what it
-matches under the thresholds below."""
+store for it. The fake models' cosine is the share of words two texts have in common, so each
+row's wording sets what it matches under the thresholds below."""
 
 import json
 import subprocess
@@ -12,9 +12,9 @@ from fieldnotes_api.testing import FakeModels
 from fieldnotes_eval.dataset import load_clusters, load_rows
 from fieldnotes_eval.replay import TOKEN, replay
 
-# In date order. r1 and r2 make the same point (c1), and so do r3 and r5 (c2), in words too
-# different for the fake to see; r4 shares enough words with r1 to be returned for it, and is
-# novel.
+# In date order. r1 and r2 make the same point (c1) in nearly the same words (cosine 0.90), and so
+# do r3 and r5 (c2), in words too different for the fake to see (0.32); r4 shares enough words
+# with r1 to be returned for it (0.52), and is novel.
 ROWS = [
     ("r1", "2026-01-01", "helm chart", "the chart renders locally but server side apply fails on "
      "a defaulted field"),
@@ -66,9 +66,9 @@ def settings(tmp_path):
             "FIELDNOTES_STORE_DIR": str(tmp_path / "checkout"),
             "FIELDNOTES_CACHE_DIR": str(tmp_path / "cache"),
             "FIELDNOTES_CLIENT_TOKEN_REPLAY": TOKEN,
-            "FIELDNOTES_MATCH_LIKELY": "0.6",
-            "FIELDNOTES_MATCH_RELATED": "0.3",
-            "FIELDNOTES_MATCH_GAP": "0.25",
+            "FIELDNOTES_MATCH_LIKELY": "0.8",
+            "FIELDNOTES_MATCH_RELATED": "0.4",
+            "FIELDNOTES_MATCH_GAP": "0.5",
         }
     )
 

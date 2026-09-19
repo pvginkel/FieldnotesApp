@@ -1,24 +1,25 @@
 """The match pipeline (design, "Match pipeline"; FR-1, FR-2, FR-3).
 
 1. Embed the query.
-2. Candidates: the cosine top `cosine_top` over the matrix, union the BM25 top `bm25_top`, over
-   every status (FR-3): at most 12 with the default 8 and 4.
-3. Rerank them, the query against each candidate; with `both_directions`, each candidate against
-   the query as well, and the two scores averaged.
-4. Classify: `likely` at or above the high threshold, `related` at or above the low one. When
-   thresholds apply, a candidate below both is dropped, and so is any that trails the best by
-   more than the gap, so one strong match does not carry weak ones along.
-5. The top `k`, best first.
+2. Score it against every observation, over every status (FR-3): the cosine of the two vectors,
+   plus the lexical overlap (`Bm25.overlap`) times `lexical_weight`. With the weight at zero the
+   score is the cosine, and the lexical index is not asked.
+3. Classify: `likely` at or above the high threshold, `related` at or above the low one. When
+   thresholds apply, an observation below both is dropped, and so is any that trails the best
+   by more than the gap, so one strong match does not carry weak ones along.
+4. The top `k`, best first.
 
-No LLM is involved: the thresholds and the gap are configuration, set from the eval run's score
-distributions (plan step 4).
+No LLM is involved, and no model beyond the one embedding: the thresholds, the gap and the weight
+are configuration, set from the eval's score distributions (plan step 4). The store is scored
+whole, a matrix product and a walk over the query's postings, so there is no candidate stage.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections import Counter
 from dataclasses import dataclass
+
+import numpy as np
 
 from fieldnotes_contracts import Candidate, MatchClass, Observation
 
@@ -28,19 +29,17 @@ from .models import Models
 
 @dataclass(frozen=True)
 class MatchSettings:
-    cosine_top: int
-    bm25_top: int
     likely: float  # the high threshold
     related: float  # the low threshold
     gap: float
-    both_directions: bool
+    lexical_weight: float
 
 
 @dataclass(frozen=True)
 class Scored:
     entry: Entry
     cosine: float
-    score: float | None  # the rerank score; None without reranking
+    score: float  # what the thresholds read
     match_class: MatchClass | None
 
 
@@ -62,48 +61,33 @@ class Matcher:
         text: str,
         k: int,
         *,
-        rerank: bool = True,
         thresholds: bool = True,
         exclude: str | None = None,
     ) -> list[Scored]:
-        """The best `k` matches for `text`, an embedded text (`area: text`). Without reranking
-        they are the candidates in cosine order, unclassified; `thresholds=False` keeps the
-        candidates below both thresholds, unclassified, and skips the gap rule."""
+        """The best `k` matches for `text`, an embedded text (`area: text`).
+        `thresholds=False` keeps what falls below both thresholds, unclassified, and skips the
+        gap rule."""
         if not len(self.index):
             return []
         vector = (await self.models.embed([text]))[0]
-        cosines = dict(self.index.cosine_top(vector, self.settings.cosine_top, exclude))
-        for id_, _ in self.index.bm25_top(text, self.settings.bm25_top, exclude):
-            cosines.setdefault(id_, self.index.cosine(vector, id_))
-        entries = [self.index.get(id_) for id_ in cosines]
-        candidates = [entry for entry in entries if entry is not None]
+        cosines = self.index.cosines(vector)
+        scores = cosines
+        if self.settings.lexical_weight:
+            scores = cosines + self.settings.lexical_weight * self.index.overlaps(text)
 
-        if not rerank:
-            ranked = sorted(candidates, key=lambda e: -cosines[e.observation.id])
-            return [Scored(e, cosines[e.observation.id], None, None) for e in ranked[:k]]
-
-        scores = await self._scores(text, candidates)
-        scored = sorted(
-            (
-                Scored(entry, cosines[entry.observation.id], score, self.classify(score))
-                for entry, score in zip(candidates, scores, strict=True)
-            ),
-            key=lambda s: -s.score,  # type: ignore[operator]
-        )
+        scored = []
+        for n in np.argsort(-scores, kind="stable"):
+            entry = self.index.get(self.index.ids[n])
+            if entry is None or entry.observation.id == exclude:
+                continue
+            score = float(scores[n])
+            scored.append(Scored(entry, float(cosines[n]), score, self.classify(score)))
+            if len(scored) == k:
+                break
         if thresholds:
             scored = [s for s in scored if s.match_class is not None]
-            if scored:
-                best = scored[0].score
-                scored = [s for s in scored if best - s.score <= self.settings.gap]  # type: ignore[operator]
-        return scored[:k]
-
-    async def _scores(self, text: str, candidates: list[Entry]) -> list[float]:
-        texts = [entry.text for entry in candidates]
-        forward = await self.models.rerank(text, texts)
-        if not self.settings.both_directions:
-            return forward
-        reverse = await asyncio.gather(*(self.models.rerank(other, [text]) for other in texts))
-        return [(a + b[0]) / 2 for a, b in zip(forward, reverse, strict=True)]
+            scored = [s for s in scored if scored[0].score - s.score <= self.settings.gap]
+        return scored
 
 
 def reaction_counts(observation: Observation) -> list[str]:
@@ -132,7 +116,7 @@ def candidate(scored: Scored) -> Candidate:
         pointer=observation.pointer,
         reactions=reaction_counts(observation),
         cosine=round(scored.cosine, 4),
-        score=None if scored.score is None else round(scored.score, 4),
+        score=round(scored.score, 4),
         match_class=scored.match_class,
         next_step=next_step(observation.id),
     )

@@ -240,17 +240,11 @@ def test_match_writes_nothing_and_joins_the_area(start, auth, remote, models):
         response = api.post(
             "/match", json={"text": DUPLICATE, "area": "uv"}, headers=auth("skills")
         )
-        unranked = api.post(
-            "/match",
-            json={"text": DUPLICATE, "area": "uv", "rerank": False},
-            headers=auth("skills"),
-        )
 
     [candidate] = response.json()["candidates"]
     assert candidate["id"] == id_
-    assert candidate["score"] == 1.0
-    assert models.embedded[-2] == f"uv: {DUPLICATE}"
-    assert unranked.json()["candidates"][0]["score"] is None
+    assert (candidate["cosine"], candidate["score"]) == (1.0, 1.0)
+    assert models.embedded[-1] == f"uv: {DUPLICATE}"
     assert len(remote.log()) == 1
 
 

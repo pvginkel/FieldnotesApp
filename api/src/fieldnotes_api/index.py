@@ -1,9 +1,10 @@
 """The in-memory index of the store (design, "Index maintenance").
 
 Every observation in the checkout, parsed, with the vector of its embedded text, `area + ": " +
-canonical`, and its terms in a BM25 index. The store's listener keeps it current: on start it
-hears every path of the checkout, after that the paths each pull or write changed, and it re-reads
-those files and nothing else.
+canonical`, and its terms in a BM25 index. It scores a text against all of them at once, by
+cosine and by lexical overlap; the match pipeline combines the two. The store's listener keeps
+it current: on start it hears every path of the checkout, after that the paths each pull or
+write changed, and it re-reads those files and nothing else.
 
 Vectors come from the embedding cache, a directory on the volume addressed by model and the
 SHA-256 of the embedded text: `<cache>/<model>/<sha256>`, the float32 vector's raw bytes. What the
@@ -137,24 +138,32 @@ class Bm25:
             if not self._postings[term]:
                 del self._postings[term]
 
-    def top(self, query: str, n: int, exclude: str | None = None) -> list[tuple[str, float]]:
-        """The `n` best-scoring observations that share a term with the query."""
+    def _term_score(self, idf: float, tf: int, length: int, average: float) -> float:
+        norm = self.K1 * (1 - self.B + self.B * length / average)
+        return idf * tf * (self.K1 + 1) / (tf + norm)
+
+    def overlap(self, query: str) -> dict[str, float]:
+        """How much of the query each observation covers, for those that share a term with it:
+        the observation's BM25 score for the query, over the score the query's own terms would
+        earn as a document. About 0-1 whatever the query's length, so a threshold can read it,
+        and 1 for the query's own text."""
         if not self._counts:
-            return []
+            return {}
         documents = len(self._counts)
         average = self._total / documents or 1.0
+        wanted = Counter(terms(query))
+        length = sum(wanted.values())
+        own = 0.0
         scores: Counter[str] = Counter()
-        for term in set(terms(query)):
+        for term, asked in wanted.items():
             holders = self._postings.get(term, set())
-            if not holders:
-                continue
             idf = math.log(1 + (documents - len(holders) + 0.5) / (len(holders) + 0.5))
+            own += self._term_score(idf, asked, length, average)
             for id_ in holders:
-                tf = self._counts[id_][term]
-                norm = self.K1 * (1 - self.B + self.B * self._lengths[id_] / average)
-                scores[id_] += idf * tf * (self.K1 + 1) / (tf + norm)
-        scores.pop(exclude, None)  # type: ignore[arg-type]
-        return sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:n]
+                scores[id_] += self._term_score(
+                    idf, self._counts[id_][term], self._lengths[id_], average
+                )
+        return {id_: score / own for id_, score in scores.items()} if own else {}
 
 
 # -- the index -----------------------------------------------------------------------------------
@@ -252,19 +261,18 @@ class Index:
             self._cards[entry.observation.card.upper()] = id_
         self._bm25.put(id_, entry.text)
 
-    def cosine_top(
-        self, vector: np.ndarray, n: int, exclude: str | None = None
-    ) -> list[tuple[str, float]]:
-        """The `n` observations whose vectors are nearest the given one."""
+    @property
+    def ids(self) -> list[str]:
+        """The observations in the order `cosines` and `overlaps` score them."""
+        return self._ids
+
+    def cosines(self, vector: np.ndarray) -> np.ndarray:
+        """The cosine of every observation's vector with the given one."""
         if not self._ids:
-            return []
-        similarities = self._matrix @ vector
-        order = np.argsort(-similarities, kind="stable")
-        ranked = [(self._ids[i], float(similarities[i])) for i in order[: n + 1]]
-        return [(id_, cosine) for id_, cosine in ranked if id_ != exclude][:n]
+            return np.zeros(0, dtype=np.float32)
+        return self._matrix @ vector
 
-    def cosine(self, vector: np.ndarray, id_: str) -> float:
-        return float(self._entries[id_].vector @ vector)
-
-    def bm25_top(self, query: str, n: int, exclude: str | None = None) -> list[tuple[str, float]]:
-        return self._bm25.top(query, n, exclude)
+    def overlaps(self, text: str) -> np.ndarray:
+        """Every observation's lexical overlap with the text (`Bm25.overlap`)."""
+        overlap = self._bm25.overlap(text)
+        return np.asarray([overlap.get(id_, 0.0) for id_ in self._ids], dtype=np.float32)

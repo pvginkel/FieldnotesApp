@@ -2,26 +2,24 @@
 a replay's outcome across thresholds.
 
 Each pair of `pairs.jsonl` is scored the way a post meets a stored observation: the later of the
-two in replay order is the query, the earlier the candidate. The scorers:
+two in replay order is the post, the earlier the stored one. The scorers:
 
 - `cosine`: the embeddings' cosine;
-- `forward`: the reranker, query against candidate: the pipeline's one direction;
-- `reverse`: the reranker, candidate against query;
-- `both`: the mean of the two, the pipeline's both-directions setting;
-- `min`: the lower of the two, which the pipeline does not offer, measured for comparison.
+- `lexical`: the API's lexical overlap, how much of the post the stored observation covers;
+- `score`: the pipeline's own score, the cosine plus the weighted overlap, when the weight given
+  (the replay's, or `--lexical-weight`) is not zero.
 
 For each: the distribution per label, how well it separates `same` from the rest (AUC), and the
 precision and recall of `same` across thresholds. The pairs are stratified by cosine, so their
 precision is not what a post meets; the replay's false-alarm rate is.
 
-With `--replay`, a replay's log adds its counts, the candidate stage's recall, the post latency,
-and a sweep of the low threshold and the gap for each scorer over the candidates each post
-reranked, with the worst misses and false alarms quoted. The replay recorded the forward score
-only: the reverse of every candidate it reranked is scored here.
+With `--replay`, a replay's log adds its counts, the post latency, and a sweep of the low
+threshold and the gap over the scores each post recorded, with the worst misses and false alarms
+quoted. `eval/bench.py` compares scorers and embedding models; this reports on one.
 
-Model answers are cached in `--work`: vectors in the API's embedding-cache layout, rerank scores
-in `rerank.jsonl`, so a rerun calls the models only for what is new. The report goes to stdout. It
-quotes the dataset, which is private: write it outside this repo's history.
+Vectors are cached in `--work` in the API's embedding-cache layout, so a rerun calls the models
+only for what is new. The report goes to stdout. It quotes the dataset, which is private: write
+it outside this repo's history.
 
     cexec python uv run --all-packages python eval/run.py --dataset ../FieldnotesAppSpecs/dataset \\
         --replay .run/replay --work .run/eval > .run/eval/report.md
@@ -32,7 +30,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -47,80 +44,48 @@ from fieldnotes_api.models import HttpModels, Models
 
 from .dataset import Pair, Row, load_pairs, load_rows
 from .metrics import auc, distribution, precision_recall, sweep
+from .scoring import cosine_matrix, embed_missing, lexical_matrix
 
 LABELS = ("same", "related", "unrelated")
-SCORERS = ("cosine", "forward", "reverse", "both", "min")
 
-RERANK_THRESHOLDS = (
-    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.97, 0.98, 0.99, 0.995, 0.998, 0.999,
-)  # fmt: skip
-COSINE_THRESHOLDS = (0.6, 0.65, 0.7, 0.75, 0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
-GAPS = (0.05, 0.1, 0.2, 0.3, 1.0)
+COSINE_THRESHOLDS = (0.6, 0.65, 0.7, 0.75, 0.78, 0.8, 0.82, 0.84, 0.86, 0.88, 0.9, 0.925, 0.95)
+GAPS = (0.02, 0.05, 0.1, 1.0)
+STEPS = 13  # thresholds tried for a scorer that has no grid of its own
 
 
-def thresholds(scorer: str) -> tuple[float, ...]:
-    return COSINE_THRESHOLDS if scorer == "cosine" else RERANK_THRESHOLDS
+def thresholds(scorer: str, scores: Iterable[float]) -> tuple[float, ...]:
+    """The grid a scorer is swept over: the cosine's own, or one spread over the upper half of
+    the scores seen."""
+    if scorer == "cosine":
+        return COSINE_THRESHOLDS
+    values = sorted(scores)
+    if not values:
+        return ()
+    grid = np.linspace(values[len(values) // 2], values[-1], STEPS, endpoint=False)
+    return tuple(round(float(value), 3) for value in grid)
 
 
 class Scores:
-    """The models' answers for the dataset's rows, by row id, cached in a work directory."""
+    """Each scorer's number for a post row against a stored row."""
 
-    def __init__(self, rows: Mapping[str, Row], models: Models, work: Path, model: str) -> None:
-        self.rows = rows
-        self.models = models
-        self.cache = EmbeddingCache(work / "cache", model)
-        self.path = work / "rerank.jsonl"
-        self.vectors: dict[str, np.ndarray] = {}
-        self.reranked: dict[tuple[str, str], float] = {}
-        if self.path.exists():
-            for line in self.path.read_text().splitlines():
-                item = json.loads(line)
-                self.reranked[(item["query"], item["text"])] = item["score"]
+    def __init__(self, rows: Sequence[Row], cache: EmbeddingCache, lexical_weight: float) -> None:
+        self.order = {row.id: n for n, row in enumerate(rows)}
+        cosine = cosine_matrix(rows, cache)
+        lexical = lexical_matrix(rows)
+        self.matrices = {"cosine": cosine, "lexical": lexical}
+        if lexical_weight:
+            self.matrices["score"] = cosine + lexical_weight * lexical
 
-    async def embed(self) -> None:
-        texts = {row.embedded for row in self.rows.values()}
-        missing = sorted(text for text in texts if self.cache.get(text) is None)
-        if missing:
-            for text, vector in zip(missing, await self.models.embed(missing), strict=True):
-                self.cache.put(text, vector)
-        self.vectors = {id_: self.cache.get(row.embedded) for id_, row in self.rows.items()}
+    @property
+    def scorers(self) -> tuple[str, ...]:
+        return tuple(self.matrices)
 
-    async def rerank(self, wanted: Iterable[tuple[str, str]]) -> None:
-        """Score each (query, text) pair of row ids not scored yet, one call per query."""
-        todo: dict[str, list[str]] = {}
-        for query, text in wanted:
-            if (query, text) not in self.reranked and text not in todo.get(query, []):
-                todo.setdefault(query, []).append(text)
-        with self.path.open("a") as out:
-            for n, (query, texts) in enumerate(todo.items(), start=1):
-                scores = await self.models.rerank(
-                    self.rows[query].embedded, [self.rows[t].embedded for t in texts]
-                )
-                for text, score in zip(texts, scores, strict=True):
-                    self.reranked[(query, text)] = score
-                    out.write(json.dumps({"query": query, "text": text, "score": score}) + "\n")
-                out.flush()
-                if n % 50 == 0 or n == len(todo):
-                    print(f"reranked for {n}/{len(todo)} queries", file=sys.stderr)
-
-    def cosine(self, a: str, b: str) -> float:
-        return float(self.vectors[a] @ self.vectors[b])
-
-    def score(self, scorer: str, query: str, candidate: str) -> float:
-        if scorer == "cosine":
-            return self.cosine(query, candidate)
-        forward = self.reranked[(query, candidate)]
-        reverse = self.reranked[(candidate, query)]
-        return {
-            "forward": forward,
-            "reverse": reverse,
-            "both": (forward + reverse) / 2,
-            "min": min(forward, reverse),
-        }[scorer]
+    def score(self, scorer: str, post: str, stored: str) -> float:
+        return float(self.matrices[scorer][self.order[post], self.order[stored]])
 
 
 def orient(pair: Pair, order: Mapping[str, int]) -> tuple[str, str]:
-    """(query, candidate): the later row is posted against the earlier."""
+    """(post, stored): the later row is posted against the earlier."""
     return (pair.a, pair.b) if order[pair.a] > order[pair.b] else (pair.b, pair.a)
 
 
@@ -151,14 +116,13 @@ class Report:
         self,
         rows: Mapping[str, Row],
         pairs: Sequence[Pair],
-        order: Mapping[str, int],
         scores: Scores,
         labels: Mapping[frozenset[str], str],
         creators: Mapping[str, str],
     ) -> None:
         self.rows = rows
         self.pairs = pairs
-        self.order = order
+        self.order = scores.order
         self.scores = scores
         self.labels = labels
         self.creators = creators  # a replay's store id -> the row that created it
@@ -189,7 +153,7 @@ class Report:
             "",
         )
         rows = []
-        for scorer in SCORERS:
+        for scorer in self.scores.scorers:
             by = self.pair_scores(scorer)
             rows.append(
                 [
@@ -202,7 +166,7 @@ class Report:
         self.out(*table(["scorer", "vs related", "vs unrelated", "vs both"], rows, 3))
 
         self.out("### Distributions", "")
-        for scorer in SCORERS:
+        for scorer in self.scores.scorers:
             by = self.pair_scores(scorer)
             self.out(f"`{scorer}`:", "")
             rows = []
@@ -220,13 +184,14 @@ class Report:
             self.out(*table(["label", "n", "min", "p10", "p25", "p50", "p75", "p90", "max"], rows))
 
         self.out("### Precision and recall of `same` across thresholds", "")
-        for scorer in SCORERS:
+        for scorer in self.scores.scorers:
             by = self.pair_scores(scorer)
             scored = [(s, True) for s in by["same"]]
             scored += [(s, False) for s in by["related"] + by["unrelated"]]
+            grid = thresholds(scorer, (score for score, _ in scored))
             rows = [
                 [r["threshold"], r["tp"], r["fp"], r["precision"], r["recall"]]
-                for r in precision_recall(scored, thresholds(scorer))
+                for r in precision_recall(scored, grid)
             ]
             self.out(
                 f"`{scorer}`:",
@@ -237,18 +202,19 @@ class Report:
     def replay_section(self, records: Sequence[dict[str, Any]], summary: Mapping[str, Any]) -> None:
         self.out("## Replay", "", "Settings: " + json.dumps(summary["settings"]), "")
         recall, alarms = summary["recall_at_3"], summary["false_alarms"]
-        stage, latency = summary["candidate_stage"], summary["latency"]
+        latency = summary["latency"]
         rows = [
             ["posts", summary["posts"]],
             ["cluster-mate in the store (eligible)", summary["eligible"]],
             ["novel", summary["novel"]],
             *[[f"outcome: {k}", v] for k, v in summary["outcomes"].items()],
-            ["recall@3, reranked", f"{recall['rerank']['n']}/{recall['rerank']['of']}"],
-            ["recall@3, cosine top 3", f"{recall['cosine']['n']}/{recall['cosine']['of']}"],
-            ["false alarms, reranked", f"{alarms['rerank']['n']}/{alarms['rerank']['of']}"],
-            ["false alarms, cosine top 3", f"{alarms['cosine']['n']}/{alarms['cosine']['of']}"],
-            ["mate in the candidate stage at 12", f"{stage['at_12']['n']}/{stage['at_12']['of']}"],
-            ["mate in the candidate stage at 40", f"{stage['at_40']['n']}/{stage['at_40']['of']}"],
+            ["recall@3, as answered", f"{recall['answered']['n']}/{recall['answered']['of']}"],
+            ["recall@3, top 3 with no threshold", f"{recall['top3']['n']}/{recall['top3']['of']}"],
+            ["false alarms, as answered", f"{alarms['answered']['n']}/{alarms['answered']['of']}"],
+            [
+                "false alarms, top 3 with no threshold",
+                f"{alarms['top3']['n']}/{alarms['top3']['of']}",
+            ],
             [
                 "post latency p50 / p95 / max (s)",
                 f"{latency['p50']} / {latency['p95']} / {latency['max']}",
@@ -260,38 +226,30 @@ class Report:
         ]
         self.out(*table(["", ""], rows))
 
-        for scorer in ("forward", "both", "min", "cosine"):
-            keyed = self._keyed(records, scorer)
+        weighted = bool(summary["settings"].get("lexical_weight"))
+        for key in ("score", "cosine") if weighted else ("cosine",):
             self.out(
-                f"### Sweep on `{scorer}`: recall@3 / false-alarm rate",
+                f"### Sweep on `{key}`: duplicates found, false alarms",
                 "",
-                "Rows: the low threshold; columns: the gap. Over the candidates each post "
-                "reranked, in the store the replay built.",
+                "Rows: the low threshold; columns: the gap. Over the scores each post recorded, "
+                "in the store the replay built.",
                 "",
             )
+            seen = (s[key] for r in records for s in r["scored"])
             rows = []
-            for threshold in thresholds(scorer):
+            for threshold in thresholds("cosine" if key == "cosine" else "score", seen):
                 cells = []
                 for gap in GAPS:
-                    s = sweep(keyed, threshold, gap)
-                    cells.append(f"{s['recall']:.2f} / {s['false_alarm_rate']:.2f}")
+                    s = sweep(records, threshold, gap, key)
+                    cells.append(
+                        f"{s['hits']}/{s['eligible']}, {s['false_alarms']}/{s['novel']} "
+                        f"({s['false_alarm_rate']:.3f})"
+                    )
                 rows.append([threshold, *cells])
             self.out(*table(["threshold", *[f"gap {g}" for g in GAPS]], rows, 3))
 
         self.misses(records)
         self.false_alarms(records)
-
-    def _keyed(self, records: Sequence[dict[str, Any]], scorer: str) -> list[dict[str, Any]]:
-        """The records with each candidate's `score` replaced by the scorer's."""
-        return [
-            {
-                **r,
-                "scored": [
-                    {**s, "score": self.scores.score(scorer, r["id"], s["of"])} for s in r["scored"]
-                ],
-            }
-            for r in records
-        ]
 
     def misses(self, records: Sequence[dict[str, Any]], quote: int = 8) -> None:
         misses = [r for r in records if r["outcome"] == "miss"]
@@ -299,8 +257,8 @@ class Report:
             "### Misses",
             "",
             f"{len(misses)} posts whose cluster-mate was in the store and not returned. `mate` is "
-            "the best-scored mate (forward), `best other` the best-scored non-mate; ranks are "
-            "over the whole store.",
+            "the best-scored mate, `best other` the best-scored non-mate; ranks are over the "
+            "whole store.",
             "",
         )
         rows = []
@@ -313,11 +271,12 @@ class Report:
             rows.append(
                 [
                     r["id"],
-                    mate["of"] if mate else "(not reranked)",
+                    mate["of"] if mate else None,
                     mate["score"] if mate else None,
                     mate["cosine"] if mate else None,
+                    mate["lexical"] if mate else None,
+                    r["rank"]["score"],
                     r["rank"]["cosine"],
-                    r["rank"]["bm25"],
                     other["score"] if other else None,
                 ]
             )
@@ -329,8 +288,9 @@ class Report:
                     "mate",
                     "mate score",
                     "mate cosine",
+                    "mate lexical",
+                    "score rank",
                     "cosine rank",
-                    "bm25 rank",
                     "best other",
                 ],
                 rows,
@@ -368,9 +328,9 @@ class Report:
             top = max(r["scored"], key=lambda s: s["score"])
             post, other = self.rows[r["id"]], self.rows[top["of"]]
             self.out(
-                f"- **{r['id']}** against **{top['of']}**: forward {top['score']:.4f}, "
-                f"reverse {self.scores.reranked[(top['of'], r['id'])]:.4f}, cosine "
-                f"{top['cosine']:.3f}, labeled {self.label(r['id'], top['of'])}",
+                f"- **{r['id']}** against **{top['of']}**: score {top['score']:.4f}, cosine "
+                f"{top['cosine']:.4f}, lexical {top['lexical']:.4f}, labeled "
+                f"{self.label(r['id'], top['of'])}",
                 f"  - post: {post.area}: {_quote(post.text)}",
                 f"  - candidate: {other.area}: {_quote(other.text)}",
             )
@@ -396,38 +356,32 @@ async def evaluate(
     replay: Path | None,
     models_factory: Callable[[], tuple[Models, Callable[[], Any]]],
     model: str = DEFAULT_EMBED_MODEL,
+    lexical_weight: float | None = None,
 ) -> str:
+    """The report. The scorer is the replay's (its embedding model and lexical weight) unless
+    given; without either it is the cosine of `model`."""
     ordered = load_rows(dataset)
-    rows = {row.id: row for row in ordered}
-    order = {row.id: n for n, row in enumerate(ordered)}
     pairs = load_pairs(dataset)
     records: list[dict[str, Any]] = []
     summary: dict[str, Any] = {}
     if replay is not None:
         records = [json.loads(line) for line in (replay / "replay.jsonl").read_text().splitlines()]
         summary = json.loads((replay / "summary.json").read_text())
+        model = summary["settings"].get("embed_model", model)
+        if lexical_weight is None:
+            lexical_weight = summary["settings"].get("lexical_weight")
 
-    work.mkdir(parents=True, exist_ok=True)
+    cache = EmbeddingCache(work / "cache", model)
     models, close = models_factory()
     try:
-        scores = Scores(rows, models, work, model)
-        await scores.embed()
-        wanted = []
-        for pair in pairs:
-            query, candidate = orient(pair, order)
-            wanted += [(query, candidate), (candidate, query)]
-        for r in records:
-            for s in r["scored"]:
-                # The score the post itself met, so a sweep at the replay's own settings gives
-                # back its counts.
-                scores.reranked[(r["id"], s["of"])] = s["score"]
-                wanted.append((s["of"], r["id"]))
-        await scores.rerank(wanted)
+        await embed_missing(ordered, cache, models)
     finally:
         await close()
 
+    scores = Scores(ordered, cache, lexical_weight or 0.0)
     creators = {r["target"]: r["id"] for r in records if r["action"] != "react"}
-    report = Report(rows, pairs, order, scores, _labels(dataset, pairs), creators)
+    rows = {row.id: row for row in ordered}
+    report = Report(rows, pairs, scores, _labels(dataset, pairs), creators)
     report.out("# Gate 1 eval", "")
     report.pairs_section()
     if records:
@@ -438,14 +392,20 @@ async def evaluate(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Score the labeled pairs and a replay (gate 1).")
     parser.add_argument("--dataset", type=Path, required=True, help="the dataset directory")
-    parser.add_argument("--work", type=Path, required=True, help="where model answers are cached")
+    parser.add_argument("--work", type=Path, required=True, help="where vectors are cached")
     parser.add_argument("--replay", type=Path, help="a replay's output directory")
     parser.add_argument("--models-url", default=DEFAULT_MODELS_URL)
+    parser.add_argument(
+        "--lexical-weight", type=float, help="the lexical overlap's weight (default: the replay's)"
+    )
     args = parser.parse_args(argv)
 
     def http() -> tuple[Models, Callable[[], Any]]:
         client = httpx.AsyncClient(base_url=args.models_url, timeout=MODELS_TIMEOUT)
         return HttpModels(client), client.aclose
 
-    print(asyncio.run(evaluate(args.dataset, args.work.resolve(), args.replay, http)))
+    report = evaluate(
+        args.dataset, args.work.resolve(), args.replay, http, lexical_weight=args.lexical_weight
+    )
+    print(asyncio.run(report))
     return 0

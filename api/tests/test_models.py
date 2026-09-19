@@ -11,7 +11,7 @@ from fieldnotes_api.testing import FakeModels
 
 
 class Pod:
-    """The pod's `/embed` and `/rerank`, as TEI answers them."""
+    """The pod's `/embed`, as TEI answers it."""
 
     def __init__(self, status: int = 200) -> None:
         self.status = status
@@ -22,11 +22,7 @@ class Pod:
         self.requests.append((request.url.path, body))
         if self.status != 200:
             return httpx.Response(self.status, text="Model is overloaded")
-        if request.url.path == "/embed":
-            return httpx.Response(200, json=[[float(len(text)), 1.0] for text in body["inputs"]])
-        scores = [len(text) / 100 for text in body["texts"]]
-        ranked = sorted(enumerate(scores), key=lambda item: -item[1])
-        return httpx.Response(200, json=[{"index": i, "score": s} for i, s in ranked])
+        return httpx.Response(200, json=[[float(len(text)), 1.0] for text in body["inputs"]])
 
 
 def client(pod) -> HttpModels:
@@ -46,22 +42,6 @@ async def test_embedding_goes_in_chunks_of_32_and_comes_back_normalised():
     np.testing.assert_allclose(np.linalg.norm(matrix, axis=1), 1.0, rtol=1e-6)
 
 
-async def test_rerank_scores_come_back_in_the_texts_order():
-    pod = Pod()
-
-    scores = await client(pod).rerank("query", ["a", "ccc", "bb"])
-
-    assert pod.requests == [("/rerank", {"query": "query", "texts": ["a", "ccc", "bb"]})]
-    assert scores == [0.01, 0.03, 0.02]
-
-
-async def test_rerank_goes_in_chunks_of_64():
-    pod = Pod()
-    scores = await client(pod).rerank("q", ["x" * i for i in range(100)])
-    assert [len(body["texts"]) for _, body in pod.requests] == [64, 36]
-    assert scores == [i / 100 for i in range(100)]
-
-
 async def test_a_refusal_is_a_models_error():
     with pytest.raises(ModelsError, match="/embed answered 503"):
         await client(Pod(status=503)).embed(["a"])
@@ -71,21 +51,21 @@ async def test_an_unreachable_pod_is_a_models_error():
     def refuse(request):
         raise httpx.ConnectError("connection refused")
 
-    with pytest.raises(ModelsError, match="/rerank could not be reached"):
-        await client(refuse).rerank("q", ["a"])
+    with pytest.raises(ModelsError, match="/embed could not be reached"):
+        await client(refuse).embed(["a"])
 
 
 async def test_the_fake_is_deterministic_and_scores_by_shared_words():
-    fake = FakeModels(scores={("q", "pinned"): 0.42})
+    fake = FakeModels()
     first, again = (
         await fake.embed(["uv sync all packages"]),
         await fake.embed(["uv sync all packages"]),
     )
     np.testing.assert_array_equal(first, again)
     close, far = await fake.embed(["uv sync packages", "grafana timezone"])
-    assert float(first[0] @ close) > float(first[0] @ far)
-    assert await fake.rerank("a b c d", ["a b", "x y", "pinned"]) == [0.5, 0.0, 0.0]
-    assert await fake.rerank("q", ["pinned"]) == [0.42]
+    # Three of the four words against all three of the other's; nothing shared.
+    assert float(first[0] @ close) == pytest.approx(3 / (4 * 3) ** 0.5)
+    assert float(first[0] @ far) == 0.0
     fake.fail = True
     with pytest.raises(ModelsError):
         await fake.embed(["a"])

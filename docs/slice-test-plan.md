@@ -39,20 +39,71 @@ and `lint` carry the gate. Say so in the close-out report rather than reporting 
 
 ## 2. The live check
 
-**There is none yet, and this section is not to be filled from imagination.** The slice that makes
-`fieldnotes-api` runnable writes the check by running it: boot, drive, and the stop recipe included,
-with the pid written from inside the tool container to a gitignored `.run/`, because killing the local
-`cexec` client does not reach the process it started. The same goes for `fieldnotes-mcp` when it
-arrives.
+`fieldnotes-api` runs in the `python` tool container against a store generated under the gitignored
+`.run/` and the real models pod. The store lives in `.run/` and not in `/tmp` because every
+container has its own `/tmp`, while the checkout is shared; the tool containers share the pod's
+network, so the API answers on `localhost` here. All texts are invented.
 
-The "Validation" table in [`design.md`](design.md) lists the checks that will land here or in `eval/`
-as the services come to exist: the model smoke, the index rebuild, the GitHub webhook (good and bad
-signature), the MCP end-to-end, the board sync. A slice that delivers what one of those rows tests
-brings the row to life in the same slice, as a script rather than a described manual step wherever it
-can be one.
+Boot, from the repo root:
 
-Until then, a slice whose acceptance criteria need a running service, real models or a real board
-reports those criteria as *not verified*, never as passed.
+```bash
+rm -rf .run/live && mkdir -p .run/live
+git init --quiet --bare --initial-branch main .run/live/remote.git
+cat > .run/live/env <<'EOF'
+FIELDNOTES_STORE_URL=/work/FieldnotesApp/.run/live/remote.git
+FIELDNOTES_STORE_DIR=/work/FieldnotesApp/.run/live/checkout
+FIELDNOTES_CACHE_DIR=/work/FieldnotesApp/.run/live/cache
+FIELDNOTES_CLIENT_TOKEN_MCP=live-mcp-token
+FIELDNOTES_CLIENT_TOKEN_SKILLS=live-skills-token
+FIELDNOTES_GITHUB_WEBHOOK_SECRET=live-github-secret
+FIELDNOTES_GITHUB_REPO=pvginkel/Fieldnotes
+FIELDNOTES_API_PORT=8765
+EOF
+cexec python sh -c 'cd /work/FieldnotesApp && set -a && . .run/live/env && set +a &&
+  setsid nohup .venv/bin/fieldnotes-api > .run/live/api.log 2>&1 < /dev/null &
+  echo $! > .run/live/api.pid'
+until curl -sf localhost:8765/readyz; do sleep 1; done
+```
+
+The pid is written from inside the tool container: killing the local `cexec` client does not reach
+the process it started, and `.venv/bin/fieldnotes-api` rather than `uv run` keeps that pid the
+server's own.
+
+Drive it with `curl`, `Authorization: Bearer live-mcp-token` (or `live-skills-token`):
+
+1. `POST /observations` a novel observation: `201` with an id, and one commit on
+   `.run/live/remote.git`'s `main`.
+2. Post a paraphrase of it: `200`, the first as a `likely` candidate, and no new commit. Post an
+   unrelated one: `201`.
+3. `POST /observations/{id}/reactions` on the candidate, then `GET` it: the reaction is there with
+   its provenance, and `last_seen` and `repos` moved.
+4. `POST /match` and `GET /observations/{id}/neighbors` with the skills token.
+5. The GitHub-webhook row: clone `.run/live/remote.git`, rewrite one observation's `canonical`, push,
+   then post a delivery signed with `live-github-secret` (`X-GitHub-Event: push`, a body naming
+   `pvginkel/Fieldnotes` and `refs/heads/main`, `X-Hub-Signature-256` from
+   `openssl dgst -sha256 -hmac`). It answers `queued`; `GET` shows the new canonical and
+   `.run/live/api.log` says `embedded 1 texts`. The same delivery with a wrong signature is a `401`.
+6. The index-rebuild row: stop the API, delete `.run/live/cache`, boot it again. `/neighbors` answers
+   byte for byte as before, and the log says one text embedded per observation.
+
+Stop:
+
+```bash
+cexec python sh -c 'kill $(cat /work/FieldnotesApp/.run/live/api.pid)'
+```
+
+The board sync has no live check here: it needs YouTrack's webhook app pointed at a deployed API.
+The same goes for `fieldnotes-mcp` when it arrives: the slice that makes it runnable writes its check
+by running it.
+
+The "Validation" table in [`design.md`](design.md) lists the checks that land here or in `eval/` as
+the services come to exist: the model smoke (`eval/smoke.py`), the index rebuild and the GitHub
+webhook (above), the MCP end-to-end, the board sync. A slice that delivers what one of those rows
+tests brings the row to life in the same slice, as a script rather than a described manual step
+wherever it can be one.
+
+Until then, a slice whose acceptance criteria need a running MCP server or a real board reports
+those criteria as *not verified*, never as passed.
 
 ## 3. Check off `verification.json`
 

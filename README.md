@@ -16,7 +16,8 @@ recorded decisions. An observation closes when the board says the work is done o
 
 **Status: a proof of concept under construction.** The design is settled
 ([`docs/design.md`](docs/design.md)); the first version is being built to find out whether the idea
-proves its value.
+proves its value. `fieldnotes-api` is built and runs locally; the MCP server and the deployment are
+not built yet.
 
 ## Shape
 
@@ -42,8 +43,8 @@ stays dumb.
 Development runs in a [KubeCoder](https://github.com/pvginkel/KubeCoder) environment. The first
 version follows an implementation plan; after that, changes go through the slice workflow of the
 [`dev` plugin](https://github.com/pvginkel/AIWorkflow). [`CLAUDE.md`](CLAUDE.md) is the entry point
-for a session; [`docs/`](docs/) holds the design, the change discipline and the two procedure docs
-the pipeline executes. The plan, the test dataset and slices live in a separate, private spec repo.
+for a session; [`docs/`](docs/) holds the design, a topic doc for each part as built, the change
+discipline and the two procedure docs the pipeline executes. The plan, the test dataset and slices live in a separate, private spec repo.
 
 ## License
 

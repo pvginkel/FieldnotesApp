@@ -134,7 +134,10 @@ def create_app(
         for client in clients:
             await client.aclose()
 
-    app = FastAPI(title="Fieldnotes API", lifespan=lifespan)
+    # The contract models are the surface's definition (design, "This repo"): no OpenAPI document.
+    app = FastAPI(
+        title="Fieldnotes API", lifespan=lifespan, openapi_url=None, docs_url=None, redoc_url=None
+    )
     app.state.runtime = runtime
     app.add_exception_handler(ProblemException, problem_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)

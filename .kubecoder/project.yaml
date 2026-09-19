@@ -1,14 +1,27 @@
 # Curated automation for FieldnotesApp.
 # Schema: https://kubecoder.home/help/reference/project-yaml/
 #
-# No verbs yet: the repo holds no code, so every verb is a skip, and a skip is
-# green. Step 0 of the implementation plan creates the uv workspace and wires
-# setup, test and lint through `cexec python`.
+# One component for the whole uv workspace, as in KubeCoder: the members
+# (packages/fieldnotes-contracts, api, mcp-server, eval) share one ruff config
+# and one pytest config whose `testpaths` covers every member, so splitting them
+# into components would run the same suite once per member. To run one member's
+# tests alone: `cexec python uv run --all-packages pytest api`.
+#
+# No `build:`. The image arrives with the Dockerfile and is built by kaniko in
+# CI; there is nothing to compile here.
 
 projects:
   root:
     description: >-
       FieldnotesApp — the application behind Fieldnotes, a curated cross-project
       observation store for AI agents: the REST API that owns the git-backed
-      store and the match pipeline, the thin MCP server in front of it, and the
-      replay and eval harness that validates the matching.
+      store and the match pipeline, the thin MCP server in front of it, the
+      shared wire models, and the replay and eval harness that validates the
+      matching.
+    # --all-packages: the workspace root is package = false, so a plain `uv sync`
+    # installs only the root dev group and none of the members.
+    setup: cexec python uv sync --all-packages --frozen
+    lint:
+      - cexec python uv run --all-packages ruff check .
+      - cexec python uv run --all-packages ruff format --check .
+    test: cexec python uv run --all-packages pytest

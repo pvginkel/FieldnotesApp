@@ -20,8 +20,8 @@ operator's decision.
 
 ## Repo structure
 
-One uv workspace, laid out like KubeCoder's. The plan's step 0 creates it; `kc project list` shows
-the components as they come to exist.
+One uv workspace, laid out like KubeCoder's, which `kc project` runs as one component, `root`
+(`setup`, `lint`, `test`). One member's tests alone: `cexec python uv run --all-packages pytest api`.
 
 - **`api/`**: `fieldnotes-api`, the Python REST service and the only component with logic — the git
   checkout and its commits, the file model, the in-memory index and its embedding cache, the match

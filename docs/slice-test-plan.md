@@ -34,8 +34,8 @@ kc project lint
 All three must be green. No gate is known red, so a failure is this slice's. A `kc project` verb
 prints its output only on failure, so read its exit code directly and never through a pipe.
 
-While the manifest declares no verbs, all three are skips and prove nothing; say so in the close-out
-report rather than reporting green.
+While the manifest declares no `build` verb, `kc project build` is a skip and proves nothing; `test`
+and `lint` carry the gate. Say so in the close-out report rather than reporting the build green.
 
 ## 2. The live check
 

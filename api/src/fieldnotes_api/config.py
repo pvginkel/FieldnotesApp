@@ -12,9 +12,9 @@
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | what the pod embeds with: the cache's key |
 | `FIELDNOTES_MATCH_COSINE_TOP` | 8 | candidates by cosine |
 | `FIELDNOTES_MATCH_BM25_TOP` | 4 | candidates by BM25 |
-| `FIELDNOTES_MATCH_LIKELY` | 0.8, provisional | the high threshold on the rerank score |
-| `FIELDNOTES_MATCH_RELATED` | 0.5, provisional | the low threshold |
-| `FIELDNOTES_MATCH_GAP` | 0.3, provisional | how far a candidate may trail the best |
+| `FIELDNOTES_MATCH_LIKELY` | 0.995 | the high threshold on the rerank score |
+| `FIELDNOTES_MATCH_RELATED` | 0.985 | the low threshold |
+| `FIELDNOTES_MATCH_GAP` | 0.3 | how far a candidate may trail the best |
 | `FIELDNOTES_MATCH_BOTH_DIRECTIONS` | `false` | rerank each pair both ways and average |
 | `FIELDNOTES_CLIENT_TOKEN_<NAME>` | | the bearer of the named client `<name>` (secret) |
 | `FIELDNOTES_GITHUB_WEBHOOK_SECRET` | none | the GitHub webhook's secret (secret) |
@@ -55,10 +55,12 @@ CLIENT_TOKEN_PREFIX = f"{PREFIX}CLIENT_TOKEN_"
 DEFAULT_MODELS_URL = "http://models.models-prd.svc.cluster.local"
 DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
 
-# Provisional until gate 1: plan step 4 reads the thresholds and the gap from the eval run's score
-# distributions and commits them here.
-DEFAULT_LIKELY = 0.8
-DEFAULT_RELATED = 0.5
+# Read at gate 1 from the eval's replay of the mined dataset. Related: the lowest score at which
+# at most one novel post in ten is answered with a candidate. Likely: where answers are right as
+# often as wrong. The reranker's scores bunch near 1 for texts on one topic, so both sit high, and
+# at these thresholds the gap drops nothing.
+DEFAULT_LIKELY = 0.995
+DEFAULT_RELATED = 0.985
 DEFAULT_GAP = 0.3
 
 DEFAULT_RESOLUTION_FIELD = "Resolution"

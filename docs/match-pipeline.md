@@ -70,8 +70,8 @@ ranks, while the cross-encoder scores each pair as an absolute estimate of samen
 | --- | --- |
 | `FIELDNOTES_MATCH_COSINE_TOP` | 8 |
 | `FIELDNOTES_MATCH_BM25_TOP` | 4 |
-| `FIELDNOTES_MATCH_LIKELY` | 0.8 |
-| `FIELDNOTES_MATCH_RELATED` | 0.5 |
+| `FIELDNOTES_MATCH_LIKELY` | 0.995 |
+| `FIELDNOTES_MATCH_RELATED` | 0.985 |
 | `FIELDNOTES_MATCH_GAP` | 0.3 |
 | `FIELDNOTES_MATCH_BOTH_DIRECTIONS` | false |
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` |
@@ -80,6 +80,9 @@ Startup refuses thresholds that do not satisfy 0 ≤ related ≤ likely ≤ 1, a
 negative BM25 top or gap.
 
 The three threshold defaults (`FIELDNOTES_MATCH_LIKELY`, `FIELDNOTES_MATCH_RELATED`,
-`FIELDNOTES_MATCH_GAP`) are provisional: they are to be read from an eval run's score distributions
-over labeled pairs and committed as the defaults. Until then they are placeholders. Match quality is
-measured by that eval, not by the unit tests, whose fake models score by word overlap.
+`FIELDNOTES_MATCH_GAP`) were read at gate 1 from the eval harness's replay of the mined dataset
+(`eval/replay.py`, `eval/run.py`): `related` is the lowest rerank score at which at most one novel
+post in ten is answered with a candidate, and `likely` the score at which answers are right as often
+as wrong. The reranker scores texts on one topic close to 1 whether or not they make the same point,
+so both thresholds sit high, and at these values the gap drops nothing. Match quality is measured by
+that eval, not by the unit tests, whose fake models score by word overlap.

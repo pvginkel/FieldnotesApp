@@ -6,8 +6,9 @@ creating post is the first reaction (FR-8), carrying `POST_EMOJI`.
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
+
+from pydantic import AwareDatetime
 
 from ._base import WireModel
 
@@ -43,7 +44,7 @@ class Outcome(StrEnum):
 class Reaction(WireModel):
     """One reaction entry, with its provenance (FR-4)."""
 
-    at: datetime
+    at: AwareDatetime
     emoji: str
     repo: str
     session: str | None = None
@@ -55,7 +56,7 @@ class Reaction(WireModel):
 class Comment(WireModel):
     """One comment entry: written by the skills, never by the API."""
 
-    at: datetime
+    at: AwareDatetime
     author: str
     text: str
 
@@ -68,15 +69,15 @@ class Observation(WireModel):
     area: str
     category: Category
     repos: list[str]
-    created: datetime
-    last_updated: datetime
-    last_reviewed: datetime | None
-    last_seen: datetime
+    created: AwareDatetime
+    last_updated: AwareDatetime
+    last_reviewed: AwareDatetime | None
+    last_seen: AwareDatetime
     canonical: str
     outcome: Outcome | None
     reason: str | None
     card: str | None
-    card_updated: datetime | None
+    card_updated: AwareDatetime | None
     pointer: str | None
     reactions: list[Reaction]
     comments: list[Comment]

@@ -14,11 +14,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import AwareDatetime, Field, StringConstraints, model_validator
 
 from ._base import WireModel
 from .observation import Category, Outcome, Status
@@ -147,7 +146,7 @@ class BoardSyncReply(WireModel):
     status: Status
     outcome: Outcome | None
     pointer: str | None
-    card_updated: datetime | None
+    card_updated: AwareDatetime | None
 
 
 class HookReply(WireModel):

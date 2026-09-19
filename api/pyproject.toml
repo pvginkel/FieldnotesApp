@@ -5,6 +5,7 @@ description = "Fieldnotes API: the git-backed store, its index and match pipelin
 requires-python = ">=3.13"
 dependencies = [
     "fieldnotes-contracts",
+    "pyyaml>=6",
 ]
 
 [build-system]

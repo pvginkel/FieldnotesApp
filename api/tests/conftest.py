@@ -12,12 +12,13 @@ from fastapi.testclient import TestClient
 
 from fieldnotes_api.app import create_app
 from fieldnotes_api.config import load_settings
-from fieldnotes_api.testing import FakeModels
+from fieldnotes_api.testing import FakeModels, FakeYouTrack
 
 SKILL = ["-c", "user.name=skill", "-c", "user.email=skill@example.invalid"]
 TOKENS = {"mcp": "mcp-token", "skills": "skills-token"}
 GITHUB_SECRET = "github-secret"
 STORE_REPO = "pvginkel/Fieldnotes"
+YOUTRACK_WEBHOOK_TOKEN = "youtrack-webhook-token-of-at-least-32-characters"
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -98,7 +99,12 @@ def models() -> FakeModels:
 
 
 @pytest.fixture
-def environ(tmp_path, remote) -> dict[str, str]:
+def youtrack() -> FakeYouTrack:
+    return FakeYouTrack()
+
+
+@pytest.fixture
+def environ(tmp_path, remote, youtrack) -> dict[str, str]:
     """The API's environment. Thresholds suit the fake's word-overlap scores."""
     return {
         "FIELDNOTES_STORE_URL": str(remote.path),
@@ -109,6 +115,9 @@ def environ(tmp_path, remote) -> dict[str, str]:
         "FIELDNOTES_MATCH_GAP": "0.25",
         "FIELDNOTES_GITHUB_WEBHOOK_SECRET": GITHUB_SECRET,
         "FIELDNOTES_GITHUB_REPO": STORE_REPO,
+        "FIELDNOTES_YOUTRACK_URL": "https://youtrack.example.invalid",
+        "FIELDNOTES_YOUTRACK_TOKEN": youtrack.token,
+        "FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN": YOUTRACK_WEBHOOK_TOKEN,
         **{f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token for name, token in TOKENS.items()},
     }
 
@@ -135,13 +144,14 @@ def wait_ready(client: TestClient) -> None:
 
 
 @pytest.fixture
-def start(environ, models, clock):
+def start(environ, models, clock, youtrack):
     """Start the API; `with start() as api:` yields a client that is ready."""
 
     @contextlib.contextmanager
     def started(ready: bool = True, **overrides: str):
         settings = load_settings({**environ, **overrides})
-        app = create_app(settings, models=models, clock=clock, environ=os.environ)
+        board = youtrack.board(settings.board) if settings.board is not None else None
+        app = create_app(settings, models=models, board=board, clock=clock, environ=os.environ)
         with TestClient(app, raise_server_exceptions=False) as client:
             if ready:
                 wait_ready(client)

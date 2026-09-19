@@ -26,6 +26,7 @@ from fastapi.exceptions import RequestValidationError
 
 from fieldnotes_contracts import (
     MAX_CANDIDATES,
+    BoardSyncReply,
     HealthReply,
     HookReply,
     MatchReply,
@@ -40,6 +41,7 @@ from fieldnotes_contracts import (
 )
 
 from .auth import bearer
+from .board import Board, BoardError, HttpBoard
 from .config import Settings
 from .errors import (
     ProblemException,
@@ -49,7 +51,7 @@ from .errors import (
     unauthenticated,
     unhandled_exception_handler,
 )
-from .hooks import github_push_to, github_verified
+from .hooks import github_push_to, github_verified, youtrack_issue, youtrack_verified
 from .index import EmbeddingCache, Index
 from .matching import Matcher
 from .models import HttpModels, Models, ModelsError
@@ -61,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 # A cold start embeds the whole store in batches; one batch on the shared node can take seconds.
 MODELS_TIMEOUT = 60.0
+BOARD_TIMEOUT = 30.0
 
 NEIGHBORS_DEFAULT = 5
 
@@ -85,20 +88,27 @@ def create_app(
     settings: Settings,
     *,
     models: Models | None = None,
+    board: Board | None = None,
     clock: Clock = _utcnow,
     environ: Mapping[str, str] | None = None,
 ) -> FastAPI:
-    """The app. `models` replaces the models pod and `clock` the time, in the suites."""
-    http: httpx.AsyncClient | None = None
+    """The app. `models` replaces the models pod, `board` YouTrack and `clock` the time, in the
+    suites."""
+    clients: list[httpx.AsyncClient] = []
     if models is None:
-        http = httpx.AsyncClient(base_url=settings.models_url, timeout=MODELS_TIMEOUT)
-        models = HttpModels(http)
+        clients.append(httpx.AsyncClient(base_url=settings.models_url, timeout=MODELS_TIMEOUT))
+        models = HttpModels(clients[-1])
+    if board is None and settings.board is not None:
+        clients.append(httpx.AsyncClient(base_url=settings.board.url, timeout=BOARD_TIMEOUT))
+        board = HttpBoard(clients[-1], settings.board)
+    outcomes = settings.board.outcomes if settings.board is not None else {}
     store = Store(settings.store, os.environ if environ is None else environ)
     index = Index(
         settings.store.root, EmbeddingCache(settings.cache_dir, settings.embed_model), models
     )
     matcher = Matcher(index, models, settings.match)
-    runtime = Runtime(settings, store, index, Observations(store, index, matcher, clock))
+    observations = Observations(store, index, matcher, clock, board, outcomes)
+    runtime = Runtime(settings, store, index, observations)
 
     async def start() -> None:
         try:
@@ -121,8 +131,8 @@ def create_app(
         starting.cancel()
         await asyncio.gather(starting, return_exceptions=True)
         await store.stop()
-        if http is not None:
-            await http.aclose()
+        for client in clients:
+            await client.aclose()
 
     app = FastAPI(title="Fieldnotes API", lifespan=lifespan)
     app.state.runtime = runtime
@@ -130,6 +140,7 @@ def create_app(
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
     app.add_exception_handler(ModelsError, _models_unreachable)
     app.add_exception_handler(GitError, _store_unreachable)
+    app.add_exception_handler(BoardError, _board_unreachable)
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
     def ready() -> Observations:
@@ -222,6 +233,35 @@ def create_app(
         store.pull()
         return HookReply(action="queued")
 
+    @app.post("/observations/{id}/board-sync")
+    async def board_sync(id: ObservationId, observations: Ready, _: Client) -> BoardSyncReply:
+        """FR-21: apply the observation's card as the board has it now. The reconciler's board
+        scan calls this for every observation with a card (FR-13)."""
+        return await observations.board_sync(id)
+
+    @app.post("/hooks/youtrack")
+    async def youtrack_hook(request: Request) -> HookReply:
+        """FR-20, FR-21: an event naming an issue that is some observation's card queues a board
+        sync of it; every other event is ignored without a call to YouTrack. The Webhook Triggers
+        app waits for each answer, so nothing is read or written before it."""
+        hook = settings.youtrack_hook
+        if hook is None or not youtrack_verified(hook, request.headers.get(hook.header)):
+            raise ProblemException(
+                401,
+                ProblemType.unauthenticated,
+                "the delivery's token does not verify",
+                detail="send the configured webhook token in the configured header",
+            )
+        issue = youtrack_issue(await request.body())
+        if issue is None:
+            return HookReply(action="ignored")
+        ready()
+        entry = index.by_card(issue)
+        if entry is None:
+            return HookReply(action="ignored")
+        observations.sync_later(entry.observation.id)
+        return HookReply(action="queued")
+
     return app
 
 
@@ -234,6 +274,19 @@ async def _models_unreachable(request: Request, exc: Exception) -> Response:
             ProblemType.models_unreachable,
             "the models pod did not answer",
             detail="matching needs the embedding and rerank models; retry in a minute",
+        ),
+    )
+
+
+async def _board_unreachable(request: Request, exc: Exception) -> Response:
+    logger.warning("board: %s", exc)
+    return await problem_exception_handler(
+        request,
+        ProblemException(
+            502,
+            ProblemType.board_unreachable,
+            "YouTrack could not be reached or refused the read",
+            detail="nothing was written; retry in a minute",
         ),
     )
 

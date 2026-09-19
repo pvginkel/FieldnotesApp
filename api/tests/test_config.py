@@ -24,6 +24,8 @@ def test_defaults():
     assert settings.match.both_directions is False
     assert settings.clients.names == ()
     assert settings.github is None
+    assert settings.board is None
+    assert settings.youtrack_hook is None
     assert (settings.host, settings.port) == ("0.0.0.0", 8080)
 
 
@@ -74,6 +76,15 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
         ({"FIELDNOTES_MATCH_COSINE_TOP": "0"}, "FIELDNOTES_MATCH_COSINE_TOP must be"),
         ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
+        ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),
+        (
+            {
+                "FIELDNOTES_YOUTRACK_URL": "https://yt",
+                "FIELDNOTES_YOUTRACK_TOKEN": "t",
+                "FIELDNOTES_YOUTRACK_OUTCOMES": "Resolved=finished",
+            },
+            "FIELDNOTES_YOUTRACK_OUTCOMES",
+        ),
     ],
 )
 def test_a_bad_variable_fails_startup_by_name(overrides, named):
@@ -88,3 +99,21 @@ def test_ulids_are_well_formed_and_sort_by_time():
     assert ids == sorted(ids)
     assert len({new_ulid(at) for _ in range(100)}) == 100
     assert not is_ulid("01K5H8ZQ3V6D9W2X4Y7B1C0E5I")  # no I in Crockford base32
+
+
+def test_the_board_defaults_to_the_designs_field_and_map():
+    settings = load_settings(
+        BASE
+        | {
+            "FIELDNOTES_YOUTRACK_URL": "https://issues.example.invalid",
+            "FIELDNOTES_YOUTRACK_TOKEN": "perm:token",
+            "FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN": "w" * 32,
+        }
+    )
+    assert settings.board.resolution_field == "Resolution"
+    assert settings.board.outcomes == {
+        "Resolved": "done",
+        "Absorbed": "done",
+        "Won't Do": "wont-do",
+    }
+    assert settings.youtrack_hook.header == "X-YouTrack-Token"

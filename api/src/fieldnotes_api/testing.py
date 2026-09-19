@@ -1,18 +1,27 @@
-"""Fakes for what this repo does not own, shared by the suites: the models pod.
+"""Fakes for what this repo does not own, shared by the suites: the models pod and YouTrack.
 
 `FakeModels` is deterministic. Its embedding is a hashed bag of words, so texts that share words
 sit close together; its rerank score is the Jaccard overlap of the two texts' word sets, so a test
 sets a score by choosing the words. `scores` overrides the score of a given (query, text) pair.
+
+`FakeYouTrack` answers `GET /api/issues/{id}` as YouTrack does, over an httpx transport, so the
+real board client and its reading of the JSON run in every test that syncs a card.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
+from urllib.parse import unquote
 
+import httpx
 import numpy as np
 
+from .board import BoardSettings, HttpBoard
 from .models import ModelsError
 
 FAKE_DIMENSIONS = 256
@@ -55,3 +64,62 @@ class FakeModels:
             return self.scores[(query, text)]
         a, b = words(query), words(text)
         return len(a & b) / len(a | b) if a | b else 0.0
+
+
+def _millis(at: datetime) -> int:
+    return int(at.timestamp() * 1000)
+
+
+class FakeYouTrack:
+    def __init__(self, token: str = "youtrack-read-token") -> None:
+        self.token = token
+        self.issues: dict[str, dict[str, Any]] = {}
+        self.reads: list[str] = []  # the issue ids read, in order
+        self.fail = False  # when set, every read answers 503
+
+    def add(self, id_: str, at: datetime, state: str = "Accepted") -> None:
+        self.issues[id_] = {"updated": _millis(at), "state": state, "resolution": None}
+        self.issues[id_]["comments"] = []
+
+    def resolve(self, id_: str, at: datetime, resolution: str = "Resolved") -> None:
+        """Move the issue to Done with the resolution; Done is what shows the field."""
+        self.issues[id_] |= {"updated": _millis(at), "state": "Done", "resolution": resolution}
+
+    def reopen(self, id_: str, at: datetime) -> None:
+        """Back to an unresolved state: the field's condition hides the resolution."""
+        self.issues[id_] |= {"updated": _millis(at), "state": "Accepted", "resolution": None}
+
+    def comment(self, id_: str, text: str, at: datetime, *, moves_issue: bool = False) -> None:
+        """A comment. By default it leaves the issue's own `updated` alone, the harder case."""
+        self.issues[id_]["comments"].append({"text": text, "created": _millis(at), "updated": None})
+        if moves_issue:
+            self.issues[id_]["updated"] = _millis(at)
+
+    def _json(self, id_: str) -> dict[str, Any]:
+        issue = self.issues[id_]
+        fields: list[dict[str, Any]] = [{"name": "State", "value": {"name": issue["state"]}}]
+        if issue["resolution"] is not None:
+            fields.append({"name": "Resolution", "value": {"name": issue["resolution"]}})
+        comments = [{**c, "deleted": False, "$type": "IssueComment"} for c in issue["comments"]]
+        return {
+            "idReadable": id_,
+            "updated": issue["updated"],
+            "customFields": fields,
+            "comments": comments,
+            "$type": "Issue",
+        }
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("Authorization") != f"Bearer {self.token}":
+            return httpx.Response(401, json={"error": "Unauthorized"})
+        if self.fail:
+            return httpx.Response(503, text="YouTrack is restarting")
+        id_ = unquote(request.url.path.removeprefix("/api/issues/")).upper()
+        self.reads.append(id_)
+        if id_ not in self.issues:
+            return httpx.Response(404, json={"error": "Not Found"})
+        return httpx.Response(200, content=json.dumps(self._json(id_)))
+
+    def board(self, settings: BoardSettings) -> HttpBoard:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(self), base_url=settings.url)
+        return HttpBoard(client, settings)

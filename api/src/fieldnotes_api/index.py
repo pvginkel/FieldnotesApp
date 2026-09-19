@@ -178,7 +178,8 @@ class Index:
         return self._entries.get(id_)
 
     def by_card(self, card: str) -> Entry | None:
-        id_ = self._cards.get(card)
+        """The observation whose `card` is this issue; issue ids compare without case."""
+        id_ = self._cards.get(card.upper())
         return self._entries[id_] if id_ is not None else None
 
     def entries(self) -> Iterable[Entry]:
@@ -241,14 +242,14 @@ class Index:
     def _remove(self, id_: str) -> None:
         entry = self._entries.pop(id_, None)
         if entry is not None and entry.observation.card is not None:
-            self._cards.pop(entry.observation.card, None)
+            self._cards.pop(entry.observation.card.upper(), None)
         self._bm25.remove(id_)
 
     def _put(self, entry: Entry) -> None:
         id_ = entry.observation.id
         self._entries[id_] = entry
         if entry.observation.card is not None:
-            self._cards[entry.observation.card] = id_
+            self._cards[entry.observation.card.upper()] = id_
         self._bm25.put(id_, entry.text)
 
     def cosine_top(

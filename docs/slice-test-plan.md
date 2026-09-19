@@ -97,10 +97,12 @@ The same goes for `fieldnotes-mcp` when it arrives: the slice that makes it runn
 by running it.
 
 The "Validation" table in [`design.md`](design.md) lists the checks that land here or in `eval/` as
-the services come to exist: the model smoke (`eval/smoke.py`), the index rebuild and the GitHub
-webhook (above), the MCP end-to-end, the board sync. A slice that delivers what one of those rows
-tests brings the row to life in the same slice, as a script rather than a described manual step
-wherever it can be one.
+the services come to exist: the model smoke (`eval/smoke.py`), the replay and eval of gate 1
+(`eval/replay.py`, `eval/run.py`, over the private dataset by path), the index rebuild and the
+GitHub webhook (above), the MCP end-to-end, the board sync. A slice that delivers what one of those
+rows tests brings the row to life in the same slice, as a script rather than a described manual step
+wherever it can be one. A slice that changes the match pipeline or its thresholds reruns the replay
+and the eval, and keeps their output out of this repo: it quotes the dataset.
 
 Until then, a slice whose acceptance criteria need a running MCP server or a real board reports
 those criteria as *not verified*, never as passed.

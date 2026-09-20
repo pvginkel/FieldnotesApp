@@ -47,10 +47,11 @@ required one is refused, and the lengths are the API's (see [rest-api.md](rest-a
   first call's candidates.
 
 A candidate carries the literal next step the API writes into it (FR-2), and the descriptions say
-the same things the steering does: post what is out of scope and not urgent, product bugs go to the
-close-out report, react instead of posting again, and a candidate is a lead to check, not a fact.
-The one part of a candidate an agent is told to follow is its `reason`: that is not an observation
-but what the operator decided about one, and for what was ruled and never carded it is the whole
+the same things the steering does: every post is friction and the category says what comes with it,
+urgent things and product bugs go to the close-out report, react instead of posting again, and
+there is no search because the store is temporary. They also tell the agent to trust what comes
+back once it has decided a candidate is the thing it met: the statement is the curator's and the
+`reason` is the operator's, and for what was ruled and never carded that answer is the whole
 delivery.
 
 The result is the API's reply model as structured content, with its JSON as text beside it. Each

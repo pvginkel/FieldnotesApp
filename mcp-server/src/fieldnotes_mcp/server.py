@@ -29,11 +29,12 @@ from .tools import register_tools
 
 SERVER_NAME = "fieldnotes"
 SERVER_INSTRUCTIONS = (
-    "Fieldnotes: the curated store of what agents learn while they work (hints, ideas, "
-    "friction), shared across every project. `post` an observation; when the store already holds "
-    "it, `post` answers with the likely duplicates instead of creating one, and you `react` to "
-    "the one it is. `get` reads one in full. There is no search: what the store holds reaches "
-    "you when you post something it matches, and it is unverified, a lead rather than a fact."
+    "Fieldnotes: the operator's complaint box for friction agents run into while they work, "
+    "shared across every project and curated. `post` what got in your way; when the store "
+    "already holds it, `post` answers with what is known about it instead of creating a "
+    "duplicate, and you `react` to the one it is. `get` reads one in full. There is no search: "
+    "the store is temporary, what is reported gets fixed or documented and then leaves it. What "
+    "comes back when your post matches is curated, and the operator's rulings are in it: trust it."
 )
 HEALTH_PATHS = frozenset({"/healthz", "/readyz"})
 

@@ -8,11 +8,18 @@ code.
 
 ## Purpose
 
-Fieldnotes replaces agent memory with a curated, cross-project store. The observations agents now
-leave in close-out reports and in their own memory files, where nobody reads them, go here instead.
-An agent posts an observation; the server answers with likely duplicates and their reaction counts,
-and the agent reacts to one instead of re-posting. That post-time answer makes Fieldnotes a
-just-in-time knowledge base without any search tool.
+Fieldnotes is the operator's complaint box: a curated, cross-project store for the friction agents
+run into while they work. What got in an agent's way and is not theirs to fix now, which today
+ends up in a close-out report with thirty other findings or in a memory file nobody else reads,
+goes here instead. It still reaches the operator, through a second, lower-priority channel that is
+curated before they see it, and the close-out report stays on topic. An agent posts an observation;
+the server answers with what the store already knows about it, the operator's ruling included, and
+the agent reacts to that instead of re-posting. That post-time answer is how knowledge reaches the
+next agent, without any search tool.
+
+The store is temporary by design. What is reported gets fixed or documented, and then its
+observation is deleted; what the operator decides not to act on stays, with the reason, as the
+answer the next agent gets.
 
 A scheduled reconciler session curates the store, researches selected observations, checks the board
 and writes a triage document. The operator rules; an actioner session turns rulings into YouTrack
@@ -34,11 +41,11 @@ Everything below follows from that.
 
 | Topic | Decision | Rationale |
 | --- | --- | --- |
-| Scope | Three bins for the reporting agent: in scope → do it; out of scope and urgent → close-out report, flagged; out of scope and not urgent → Fieldnotes. Refactoring opportunities stay in close-out reports. | Ownership is something the reporter can judge; severity is not. Fieldnotes is cross-project memory with an editor, not a tech-debt register. |
-| Category | Enum `hint` / `idea` / `friction`, no `bug`; non-normative, the reconciler may recategorize. | A forcing function: the reporter must articulate the observation as one thing. Product bugs go to the operator through the close-out report; friction covers environment and harness cost. |
+| Scope | Fieldnotes takes friction: what cost an agent time or got in its way and is not theirs to fix now. The reporting agent sorts what it notices: small or in scope → do it; urgent, a product bug, or a change to the product it is working on (a refactoring, a design suggestion) → the close-out report, because the operator has a say in the product and decides there; everything else that got in the way, however minor → Fieldnotes. | Ruled after gate 2: an agent can think of a hundred hints in any decent chunk of work, and a hint with no friction behind it never finds the agent who needs it, since the store is only reached by reporting. Friction is self-limiting and self-routing. It also takes the long tail out of close-out reports, which regularly ran past thirty findings. "At least to start out with." |
+| Category | Enum `hint` / `idea` / `friction`, no `bug`. Every post is friction; the category says what comes with it: `friction` the complaint alone, `hint` the complaint and what got the reporter past it, `idea` the complaint and how they would remove it. Non-normative, the reconciler may recategorize. | The enum and both surfaces stay as built, so widening the scope later is a change of words. A `hint` tells the reconciler the workaround is already in the text. Product bugs go to the operator through the close-out report. |
 | Duplicates | `post` returns the candidates that clear the *related* threshold, at most 3, open and closed, with their reaction counts and what was ruled on them, and creates nothing; the reporter reacts, or creates with `force`. When nothing clears the threshold it creates and returns no candidates. | This response is the knowledge-delivery moment, so it must not cry wolf: a list that is always three long teaches the reporter to ignore it. Closed items stay matchable for as long as they are kept, so recurrence becomes a re-raise signal and a ruling reaches whoever meets the thing next. |
 | Reactions | One tool `react(id, emoji, text?, repo, session?)`; emoji uncurated, allows 👎. | Vote and comment merge cleanly; the emoji carries the claim type, text only when there is new information. |
-| Agent search | None. Only `post`, `react`, `get`. | Observations are unverified; agents reading them as facts would propagate errors. |
+| Agent search | None. Only `post`, `react`, `get`. What comes back from a `post` is to be trusted: the statement is the reconciler's, which has read every report across projects, and the `reason` is the operator's. | The store is not a reference. It is temporary: everything in it is on its way to being fixed or documented, and is deleted when it is. A search tool would make agents treat a complaint box as documentation. First ruled on the grounds that observations are unverified; re-ruled after gate 2, when curation and rulings turned out to carry most of what comes back. |
 | Reconciler | A session scheduled by a KubeCoder timer on a skill in the store repo, not a server feature. It owns the observation files and has free rein over them; everything outside the store is a proposal. | Keeps the server dumb; all judgment lives in versioned skills. |
 | Vetting | The reconciler writes only the triage document. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
 | Output | Triage doc in the store (ask, evidence, recommendation, impact → ruling) plus a Telegram message. No cap, no threshold. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. |
@@ -78,9 +85,11 @@ scope here.
    re-raise.
 5. FR-5 `get(id)` must return the full observation including reactions and comments.
 6. FR-6 The MCP server exposes exactly `post`, `react`, `get`. No search tool.
-7. FR-7 `area` is free text; `category` is one of `hint`, `idea`, `friction`; `repo` names the
-   repository, a path only where no repository applies; `session` is optional provenance. Product
-   bugs are not observations: they go to the operator through the close-out report.
+7. FR-7 `area` is free text; `category` is one of `hint`, `idea`, `friction`, all three of them
+   friction, told apart by what the reporter brings with the complaint (nothing, a way past it, a
+   way to remove it); `repo` names the repository, a path only where no repository applies;
+   `session` is optional provenance. Product bugs are not observations: they go to the operator
+   through the close-out report.
 
 **Store and lifecycle**
 
@@ -411,7 +420,7 @@ Each has a trigger that would justify it.
   reporter and the reconciler absorb.
 - Transcript mining ("dreaming") — not planned; the reporter's judgment at capture time is the
   filter.
-- Agent-facing search — not planned; observations are unverified and project documentation is the
+- Agent-facing search — not planned; the store is temporary and project documentation is the
   knowledge base agents read.
 - Multilingual models — trigger: Dutch observations appear.
 - A vector database — trigger: none foreseeable at this scale.

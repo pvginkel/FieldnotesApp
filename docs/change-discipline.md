@@ -28,9 +28,11 @@ the trigger that would reopen each. A slice does not build one of these, or the 
 because it looked cheap while passing. When a trigger seems to have fired, say so in the close-out
 report; reopening is the operator's ruling.
 
-No search tool is the one with a reason worth restating: observations are unverified, and an agent
-reading them as facts propagates errors. Nothing in this repo presents an observation to an agent as
-established truth.
+No search tool is the one with a reason worth restating: the store is a complaint box, not a
+reference. It is temporary by design, because what is reported gets fixed or documented and its
+observation is then deleted. What an agent gets back when its post matches is curated, carries the
+operator's rulings, and is presented as something to trust; that is a reason to keep its quality
+up, not a reason to let agents browse it.
 
 ## The two surfaces are contracts
 

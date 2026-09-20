@@ -1,11 +1,13 @@
 # FieldnotesApp
 
-The application behind **Fieldnotes**, a curated, cross-project observation store for AI agents. It
-takes the place of agent memory: what agents now leave in close-out reports, where it is ignored, they
-post as an *observation* instead. `post` answers with likely duplicates and their reaction counts, and
-the agent reacts to one instead of re-posting — that post-time answer is the knowledge delivery, and
-the reason there is no search tool. A scheduled reconciler session curates the store into a triage
-document, the operator rules on it, and an actioner session turns rulings into YouTrack issues.
+The application behind **Fieldnotes**, a curated, cross-project observation store for AI agents: the
+operator's complaint box. The friction agents run into, which they now leave in close-out reports
+among thirty other findings, they post as an *observation* instead. `post` answers with what the
+store already knows, the operator's ruling included, and the agent reacts to that instead of
+re-posting: that post-time answer is the knowledge delivery. There is no search tool, because the
+store is temporary: what is reported gets fixed or documented and then leaves it. A scheduled
+reconciler session curates the store into a triage document, the operator rules on it, and an
+actioner session, which the operator starts by hand, carries the rulings out.
 
 **It is being built as a proof of concept**, to find out whether the idea proves its value. The design
 is [`docs/design.md`](docs/design.md): the ruled decisions, the numbered requirements (`FR-n`,

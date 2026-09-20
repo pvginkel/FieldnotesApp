@@ -1,10 +1,24 @@
 .git/
+
+# Every tree below is listed TWICE, rooted and nested. `**/x` alone does not exclude a root-level
+# `x` under the matcher kaniko uses: build 2 carried the Validate stage's full dev venv into
+# `COPY . /app` — a 45 MB layer against 544 kB of tracked source — even though `**/.venv/` was
+# here, and `uv sync` deleting it in the next layer does not take it back out of that one. The
+# mechanism is `**/` expanding to something that needs a path separator before the name, so
+# `api/.venv/` matches and `.venv/` does not; the rooted form is what actually holds.
+.venv/
 **/.venv/
+__pycache__/
 **/__pycache__/
+*.py[cod]
 **/*.py[cod]
+.pytest_cache/
 **/.pytest_cache/
+.ruff_cache/
 **/.ruff_cache/
+.mypy_cache/
 **/.mypy_cache/
+
 .vscode/
 .kubecoder/
 .claude/

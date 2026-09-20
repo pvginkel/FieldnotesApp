@@ -1,0 +1,13 @@
+.git/
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+.vscode/
+.kubecoder/
+.claude/
+# A live check leaves pid files, logs and its tokens here (see .gitignore). Nothing in the image
+# reads them and a token must never ride into a layer.
+.run/

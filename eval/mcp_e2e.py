@@ -4,7 +4,7 @@ Streamable-HTTP transport, the way an agent does.
 
     cexec python uv run --all-packages python eval/mcp_e2e.py            # the local server
     cexec python uv run --all-packages python eval/mcp_e2e.py \
-        --url http://fieldnotes-mcp.home/mcp --token "$TOKEN"            # the deployment
+        --url https://fieldnotes-mcp.home/mcp --token "$TOKEN"           # the deployment
 
 The token is `--token` or `FIELDNOTES_MCP_TOKEN`; the deployment's is the OpenBao leaf
 `eso/prd/fieldnotes/prd/mcp-token#token`.
@@ -30,6 +30,7 @@ import argparse
 import asyncio
 import os
 import secrets
+import ssl
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -52,6 +53,10 @@ from fieldnotes_contracts import (
 
 DEFAULT_URL = "http://localhost:8766/mcp"
 TOKEN_ENV = "FIELDNOTES_MCP_TOKEN"
+
+# The deployment's endpoints are https, signed by the homelab's step-ca, whose root is in the
+# system trust store and not in certifi — which is what httpx verifies against left to itself.
+TRUST_STORE = ssl.create_default_context()
 
 # FR-6: exactly these, and no search.
 TOOLS = ["get", "post", "react"]
@@ -213,7 +218,7 @@ def error_text(result: CallToolResult) -> str:
 async def mcp_session(url: str, token: str, timeout: float) -> AsyncIterator[ClientSession]:
     """An initialized MCP client session with the server at `url`, presenting the bearer."""
     headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=timeout) as http:
+    async with httpx.AsyncClient(headers=headers, timeout=timeout, verify=TRUST_STORE) as http:
         async with streamable_http_client(url, http_client=http) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -237,7 +242,7 @@ async def refused(session: ClientSession, tool: str, arguments: dict[str, Any]) 
 
 async def check_the_bearer_gate(url: str, token: str) -> None:
     """NFR-4: the token is the server's boundary."""
-    async with httpx.AsyncClient(timeout=30) as http:
+    async with httpx.AsyncClient(timeout=30, verify=TRUST_STORE) as http:
         for what, headers in [
             ("without a bearer", {}),
             ("with a wrong bearer", {"Authorization": f"Bearer {token}x"}),

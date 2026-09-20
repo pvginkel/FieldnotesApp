@@ -121,7 +121,7 @@ until curl -sf localhost:8766/readyz; do sleep 1; done
    Each run takes the first of its eight invented scenarios the store does not hold already, so
    the script can be run against a store it has run against before until the pool runs out.
    `--url` points it at a deployed server instead of the local one
-   (`--url http://fieldnotes-mcp.home/mcp`, the bearer being the OpenBao leaf
+   (`--url https://fieldnotes-mcp.home/mcp`, the bearer being the OpenBao leaf
    `eso/prd/fieldnotes/prd/mcp-token#token`), and then it writes its observations into the real
    store.
 

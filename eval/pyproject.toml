@@ -8,6 +8,8 @@ dependencies = [
     "fieldnotes-api",
     "fieldnotes-contracts",
     "httpx>=0.28",
+    # The MCP client of `mcp_e2e.py`, pinned as the server is: mcp 2 changed its API.
+    "mcp>=1.28,<2",
     "numpy>=2",
 ]
 

@@ -264,6 +264,7 @@ dependencies = [
     { name = "fieldnotes-api" },
     { name = "fieldnotes-contracts" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "numpy" },
 ]
 
@@ -273,6 +274,7 @@ requires-dist = [
     { name = "fieldnotes-api", editable = "api" },
     { name = "fieldnotes-contracts", editable = "packages/fieldnotes-contracts" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "mcp", specifier = ">=1.28,<2" },
     { name = "numpy", specifier = ">=2" },
 ]
 

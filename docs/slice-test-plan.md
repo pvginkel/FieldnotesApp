@@ -101,15 +101,29 @@ cexec python sh -c 'cd /work/FieldnotesApp && set -a && . .run/live/mcp.env && s
 until curl -sf localhost:8766/readyz; do sleep 1; done
 ```
 
-7. The MCP row. A `POST localhost:8766/mcp` with no bearer, or a wrong one, is a `401`. Then, with
-   a real MCP client (the SDK's `ClientSession` over `streamable_http_client`, run with
-   `cexec python uv run --all-packages python`) presenting `Bearer live-agent-token`: `list_tools`
-   is exactly `get`, `post` and `react`. `post` a novel observation: an id, and a commit on
-   `.run/live/remote.git`. `post` a paraphrase from another repo: no id, the first as a `likely`
-   candidate with its reaction counts and next step, and no commit. `react` on it with text, then
-   `get` it: the reaction is there with its repo, session and client `mcp`, and `repos` and
-   `last_seen` moved. The paraphrase again with `force: true`: a new id and a commit. `get` of an
-   unknown id and a `post` with category `bug` are tool errors that say why.
+7. The MCP row, which is a script:
+
+   ```bash
+   cexec python uv run --all-packages python eval/mcp_e2e.py --token live-agent-token
+   ```
+
+   It drives the server with a real MCP client over the Streamable-HTTP transport, the way an
+   agent does, and checks: a `POST /mcp` with no bearer, or a wrong one, is a `401`; the tools are
+   exactly `get`, `post` and `react`; a novel post creates an observation; a paraphrase of it from
+   another repo creates nothing and comes back as a `likely` candidate with its reaction counts
+   and its next step; a reaction on it is appended with its repo, session and client `mcp`, and
+   moves `repos` and `last_seen`; the same paraphrase with `force` creates a second observation;
+   and an unknown id and the `bug` category are tool errors that say why. It exits non-zero naming
+   the check that failed, and prints the ids it wrote — three commits on `.run/live/remote.git`,
+   which `git -C .run/live/remote.git log --oneline main` shows are the two posts and the
+   reaction, and nothing for the paraphrase.
+
+   Each run takes the first of its eight invented scenarios the store does not hold already, so
+   the script can be run against a store it has run against before until the pool runs out.
+   `--url` points it at a deployed server instead of the local one
+   (`--url http://fieldnotes-mcp.home/mcp`, the bearer being the OpenBao leaf
+   `eso/prd/fieldnotes/prd/mcp-token#token`), and then it writes its observations into the real
+   store.
 
 Stop:
 
@@ -122,7 +136,7 @@ The board sync has no live check here: it needs YouTrack's webhook app pointed a
 The "Validation" table in [`design.md`](design.md) lists the checks that land here or in `eval/` as
 the services come to exist: the model smoke (`eval/smoke.py`), the replay and eval of gate 1
 (`eval/replay.py`, `eval/run.py`, over the private dataset by path), the index rebuild and the
-GitHub webhook (above), the MCP end-to-end, the board sync. A slice that delivers what one of those
+GitHub webhook (above), the MCP end-to-end (`eval/mcp_e2e.py`), the board sync. A slice that delivers what one of those
 rows tests brings the row to life in the same slice, as a script rather than a described manual step
 wherever it can be one. A slice that changes the match pipeline or its thresholds reruns the replay
 and the eval, and keeps their output out of this repo: it quotes the dataset. A slice that changes

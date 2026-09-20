@@ -95,4 +95,7 @@ word for word; a change to them is still a change to what every agent reads, and
 deliberately as one to the parameters. See [change-discipline.md](change-discipline.md).
 
 The suites drive the real server with a real MCP client over its Streamable-HTTP transport, served
-in-process, with only the API's HTTP boundary faked (`fieldnotes_mcp.testing`).
+in-process, with only the API's HTTP boundary faked (`fieldnotes_mcp.testing`). A running
+server — the local pair of [slice-test-plan.md](slice-test-plan.md) §2, or the deployment — is
+driven end to end against a real API and the real models by `eval/mcp_e2e.py`, which takes the
+`/mcp` URL and the bearer as arguments.

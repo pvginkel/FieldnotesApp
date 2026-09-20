@@ -47,6 +47,7 @@ MODELS = {
         "status": "Status",
         "outcome": "Outcome | None",
         "pointer": "str | None",
+        "reason": "str | None",
         "reactions": "list[str]",
         "cosine": "float",
         "score": "float",

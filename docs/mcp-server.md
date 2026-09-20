@@ -49,6 +49,9 @@ required one is refused, and the lengths are the API's (see [rest-api.md](rest-a
 A candidate carries the literal next step the API writes into it (FR-2), and the descriptions say
 the same things the steering does: post what is out of scope and not urgent, product bugs go to the
 close-out report, react instead of posting again, and a candidate is a lead to check, not a fact.
+The one part of a candidate an agent is told to follow is its `reason`: that is not an observation
+but what the operator decided about one, and for what was ruled and never carded it is the whole
+delivery.
 
 The result is the API's reply model as structured content, with its JSON as text beside it. Each
 result's schema is the contract model's, whose fields the API's surface test pins.

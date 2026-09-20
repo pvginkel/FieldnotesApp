@@ -171,6 +171,35 @@ async def test_an_empty_store_matches_nothing_and_calls_no_model(store):
     assert store.models.embedded == []
 
 
+async def test_a_ruling_s_reason_is_returned_and_never_matched(store):
+    # FR-2: what the operator ruled reaches the agent who meets the thing next, in the answer to
+    # their post. Only `area: canonical` is embedded, so the reason's words change no score.
+    reason = "Expected: the environment restarts and nudges the session. Trust it and carry on."
+    store.add(
+        1,
+        "a push restarts the pod of the session pushing",
+        status="closed",
+        outcome="wont-do",
+        reason=reason,
+    )
+    store.add(2, "uv sync installs no workspace members")
+    matcher = await store.matcher()
+
+    found = {
+        match.entry.observation.id: candidate(match)
+        for text in (
+            "a push restarts the pod of the session pushing",
+            "uv sync installs no workspace members",
+        )
+        for match in await matcher.match(f"a: {text}", 3)
+    }
+
+    assert found[ulid(1)].reason == reason
+    assert (found[ulid(1)].status, found[ulid(1)].outcome) == ("closed", "wont-do")
+    assert found[ulid(2)].reason is None
+    assert not any("Trust it" in text for text in store.models.embedded)
+
+
 async def test_a_candidate_carries_what_fr_2_names(store):
     store.add(1, "uv sync installs no workspace members", status="closed", outcome="done")
     store.add(

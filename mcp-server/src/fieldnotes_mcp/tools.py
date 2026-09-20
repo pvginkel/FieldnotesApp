@@ -123,12 +123,14 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
         Before it creates anything, `post` matches the observation against every one in the
         store, open and closed. When some look like the same observation, it creates nothing and
         answers `{id: null, candidates: [...]}`, at most 3. A candidate carries `id`, `area`,
-        `canonical` (its statement), `status`, `outcome` and `pointer` once closed, `reactions`
-        as `emoji (n)` counts, `cosine`, `score`, `match_class` (`likely` or `related`) and
-        `next_step`. Read them: a candidate is a lead to check, not an established fact. If one
-        is the observation you were posting, `react` to it instead of posting again. If none is,
-        call `post` again with the same arguments and `force=true`. When nothing matches, `post`
-        creates the observation and answers `{id, candidates: []}`."""
+        `canonical` (its statement), `status`, `outcome` and `pointer` once closed, `reason`
+        once it was ruled on, `reactions` as `emoji (n)` counts, `cosine`, `score`, `match_class`
+        (`likely` or `related`) and `next_step`. Read them: a candidate is a lead to check, not an
+        established fact. The `reason` is the exception: when the candidate is the thing you met,
+        its reason is what the operator decided about it, written for you, so follow it. If a
+        candidate is the observation you were posting, `react` to it instead of posting again. If
+        none is, call `post` again with the same arguments and `force=true`. When nothing
+        matches, `post` creates the observation and answers `{id, candidates: []}`."""
         request = PostRequest(
             area=area, category=category, text=text, repo=repo, session=session, force=force
         )

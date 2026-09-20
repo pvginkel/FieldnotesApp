@@ -61,7 +61,7 @@ In the order a new file has them:
 | `last_seen` | the latest post or reaction | on post and react |
 | `canonical` | the statement; starts as the post's text | on post |
 | `outcome` | `done` or `wont-do` once closed | by board sync |
-| `reason` | why, for a `wont-do` ruling | never |
+| `reason` | what the operator ruled or the board decided, written for the agent who meets the observation next: a candidate carries it back to the reporter ([rest-api.md](rest-api.md#candidate)) | never (the actioner and the reconciler set it) |
 | `card` | the YouTrack issue's readable id, e.g. `FN-12` | never (the actioner sets it) |
 | `card_updated` | the time of the card's latest change, comments included | by board sync |
 | `pointer` | where the work landed, from a `Resolved:` comment on the card | by board sync |
@@ -112,8 +112,8 @@ index has caught up with the edit that broke it, answers 409 with the fault name
 
 ## What is matched
 
-Only `area + ": " + canonical` is embedded and matched. Reactions and comments are never embedded,
-so they never change what matches; a rewritten canonical does. See
+Only `area + ": " + canonical` is embedded and matched. Reactions, comments and the `reason` are
+never embedded, so they never change what matches; a rewritten canonical does. See
 [match-pipeline.md](match-pipeline.md) for how that text is used.
 
 Skills edit these files directly and push; the API takes their edits in through the

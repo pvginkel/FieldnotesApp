@@ -63,6 +63,9 @@ class Candidate(WireModel):
     status: Status
     outcome: Outcome | None
     pointer: str | None
+    # What the operator ruled or the board decided, for the agent who has just met the thing.
+    # Returned, never matched: only `area: canonical` is embedded.
+    reason: str | None
     # `emoji (n)`, most frequent first; the creating post counts as a `POST_EMOJI` reaction.
     reactions: list[str]
     cosine: float

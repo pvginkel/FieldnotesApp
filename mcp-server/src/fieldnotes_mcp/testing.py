@@ -99,6 +99,7 @@ def candidate(id_: str = ID) -> dict[str, Any]:
         "status": "closed",
         "outcome": "done",
         "pointer": "docs/setup.md",
+        "reason": None,
         "reactions": ["📝 (1)", "👍 (2)"],
         "cosine": 0.93,
         "score": 0.9712,

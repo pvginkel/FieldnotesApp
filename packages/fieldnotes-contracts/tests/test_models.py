@@ -30,6 +30,7 @@ def candidate(id_="01J00000000000000000000000"):
         status=Status.open,
         outcome=None,
         pointer=None,
+        reason=None,
         reactions=["📝 (1)"],
         cosine=0.9,
         score=0.8,

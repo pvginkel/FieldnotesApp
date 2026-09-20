@@ -69,7 +69,8 @@ unknown fields are refused.
 ## Candidate
 
 The element of `candidates` and `neighbors` (FR-2): `id`, `area`, `canonical`, `status`, `outcome`,
-`pointer`, `reactions` (a list of `emoji (n)` strings, most frequent first, ties in order of first
+`pointer`, `reason` (what the operator ruled or the board decided, null until someone wrote one;
+returned for the reporting agent to act on, never matched), `reactions` (a list of `emoji (n)` strings, most frequent first, ties in order of first
 appearance; the creating post counts as `📝`), `cosine` (4 decimals), `score` (what the thresholds
 read, 4 decimals: the cosine, plus the lexical overlap where the API weighs it in), `match_class` (`likely`, `related`, or null), `next_step`
 (literal text for the reporting agent). For an id `X` the next_step text is exactly:

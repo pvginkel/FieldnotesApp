@@ -122,6 +122,26 @@ def test_a_closed_observation_still_matches(start, auth, remote, pull):
         "done",
         "pvginkel/Example#9",
     )
+    assert candidate["reason"] is None
+
+
+def test_a_ruling_reaches_the_next_reporter(start, auth, remote, pull):
+    # FR-2, FR-19: the actioner wrote the operator's `no` into `reason`; the next agent to post the
+    # same thing is told why, which is the whole delivery for what was ruled and never carded.
+    reason = "Expected behaviour: pass --all-packages, as the setup verb does."
+    with start() as api:
+        id_ = post(api, auth).json()["id"]
+        path = observation_path(id_)
+        ruled = Document(remote.file(path)).with_fields(
+            status="closed", outcome="wont-do", reason=reason
+        )
+        remote.push({path: ruled.text})
+        pull(api)
+
+        response = post(api, auth)
+
+    [candidate] = response.json()["candidates"]
+    assert (candidate["id"], candidate["outcome"], candidate["reason"]) == (id_, "wont-do", reason)
 
 
 def test_a_reaction_is_appended_with_its_provenance(start, auth, remote, clock):

@@ -17,7 +17,9 @@ just-in-time knowledge base without any search tool.
 A scheduled reconciler session curates the store, researches selected observations, checks the board
 and writes a triage document. The operator rules; an actioner session turns rulings into YouTrack
 issues and recorded decisions. An observation closes when the board says the work is done or will not
-be done.
+be done, and leaves the store once what it says is better learned somewhere else. A decision not to
+act stays, and its reason is part of the answer the next reporter gets: for those the store does the
+job a memory note used to do.
 
 The tool exists to take work off the operator that the operator does not want to do, so that
 observations with potential value are not lost when a project's close-out pile is cleared in one
@@ -34,13 +36,14 @@ Everything below follows from that.
 | --- | --- | --- |
 | Scope | Three bins for the reporting agent: in scope → do it; out of scope and urgent → close-out report, flagged; out of scope and not urgent → Fieldnotes. Refactoring opportunities stay in close-out reports. | Ownership is something the reporter can judge; severity is not. Fieldnotes is cross-project memory with an editor, not a tech-debt register. |
 | Category | Enum `hint` / `idea` / `friction`, no `bug`; non-normative, the reconciler may recategorize. | A forcing function: the reporter must articulate the observation as one thing. Product bugs go to the operator through the close-out report; friction covers environment and harness cost. |
-| Duplicates | `post` returns the candidates that clear the *related* threshold, at most 3, open and closed, with their reaction counts, and creates nothing; the reporter reacts, or creates with `force`. When nothing clears the threshold it creates and returns no candidates. | This response is the knowledge-delivery moment, so it must not cry wolf: a list that is always three long teaches the reporter to ignore it. Closed items stay matchable so recurrence becomes a re-raise signal. |
+| Duplicates | `post` returns the candidates that clear the *related* threshold, at most 3, open and closed, with their reaction counts and what was ruled on them, and creates nothing; the reporter reacts, or creates with `force`. When nothing clears the threshold it creates and returns no candidates. | This response is the knowledge-delivery moment, so it must not cry wolf: a list that is always three long teaches the reporter to ignore it. Closed items stay matchable for as long as they are kept, so recurrence becomes a re-raise signal and a ruling reaches whoever meets the thing next. |
 | Reactions | One tool `react(id, emoji, text?, repo, session?)`; emoji uncurated, allows 👎. | Vote and comment merge cleanly; the emoji carries the claim type, text only when there is new information. |
 | Agent search | None. Only `post`, `react`, `get`. | Observations are unverified; agents reading them as facts would propagate errors. |
 | Reconciler | A session scheduled by a KubeCoder timer on a skill in the store repo, not a server feature. It owns the observation files and has free rein over them; everything outside the store is a proposal. | Keeps the server dumb; all judgment lives in versioned skills. |
 | Vetting | The reconciler writes only the triage document. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
 | Output | Triage doc in the store (ask, evidence, recommendation, impact → ruling) plus a Telegram message. No cap, no threshold. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. |
-| Rulings | `yes`, `no` + reason, `later` + revisit trigger, `merge into <id>`. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. |
+| Rulings | `yes`, `no` + reason, `later` + revisit trigger, `merge into <id>`, written as the operator would say it, with a note line for whatever else the actioner should know. The actioner reads a ruling; it does not parse one. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the triage document is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. |
+| Retirement | An observation is deleted once what it says is better learned elsewhere: the friction was fixed, or the hint went into documentation agents read anyway. The reconciler decides that on its own, as a rule when the card closes as done; the actioner does it for a ruling that says the work is already delivered. What was ruled and never carded stays for good. | The store is for what an agent cannot learn any other way. A recurrence after a deletion arrives as a fresh post, which is the signal that the fix did not hold. Git history is the record. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
 | Expiry | No TTL. Validity comes from 👎 reactions and the reconciler checking the project. | The TTL was a proxy for validity; project access replaces the proxy. |
@@ -64,8 +67,11 @@ scope here.
    `force` is set. With candidates at or above the *related* threshold it must return them, at most
    3, and create nothing. Otherwise it must create the observation and return its id.
 2. FR-2 A candidate must carry: id, canonical statement, status, outcome and pointer if closed,
-   reaction counts as an `emoji (n)` list, match score and class (`likely` or `related`), and the
-   literal next step (`react` with the id, or `post` with `force`).
+   the `reason` when it has one, reaction counts as an `emoji (n)` list, match score and class
+   (`likely` or `related`), and the literal next step (`react` with the id, or `post` with `force`).
+   The reason is what the operator ruled or the board decided, written for the agent who has just
+   met the thing. It is returned, never matched: only the area and the canonical statement are
+   embedded.
 3. FR-3 Matching must include closed observations.
 4. FR-4 `react(id, emoji, text?, repo, session?)` must append a reaction with provenance and update
    `last_seen`. Reactions on closed observations are allowed; the reconciler treats them as a
@@ -90,7 +96,9 @@ scope here.
 11. FR-11 Condensing, merging and splitting are reconciler maintenance, not states. A closed
     observation may be rewritten into a compact record and stays matchable; new information may
     still be merged into it. A merged-away observation's file is removed and its content folded into
-    the survivor; git history is the record.
+    the survivor; git history is the record. An observation whose content is better learned
+    elsewhere (the friction was fixed, the hint is now in documentation agents read anyway) is
+    deleted; a recurrence arrives as a new post.
 
 **Reconciler**
 
@@ -103,12 +111,14 @@ scope here.
     board, covering missed webhooks.
 14. FR-14 Owns the observation files and may do with them whatever it judges right: merge, split,
     condense, recategorize, rewrite canonical statements, edit, merge or delete reactions and
-    comments, add its own, close as duplicate. Must not change project repositories, documentation
-    or the board; its only outputs are the store and the triage document.
+    comments, add its own, close as duplicate, delete an observation that has done its work (FR-11),
+    without asking. Must not change project repositories, documentation or the board; its only
+    outputs are the store and the triage document.
 15. FR-15 Must write `triage/YYYY-MM-DD.md`. Which observations it lists is at its discretion: only
     what it judges of interest, never everything. Per item: id, ask, evidence (count, distinct repos,
-    first and last seen), recommendation, impact, empty `ruling` field. Recommended documentation
-    changes are described in text, not drafted.
+    first and last seen), recommendation, impact, an empty ruling block (FR-18). Listing an `open`
+    observation makes it `proposed`. Recommended documentation changes are described in text, not
+    drafted.
 16. FR-16 Must read prior triage docs and rulings before composing, and must send a Telegram message
     with the triage doc path.
 17. FR-17 To understand an item it may clone the relevant repository or start a KubeCoder
@@ -116,13 +126,25 @@ scope here.
 
 **Ruling and actioner**
 
-18. FR-18 Rulings are `yes`, `no: <reason>`, `later: <trigger>`, `merge: <id>`, written in the triage
-    doc in a machine-readable block.
-19. FR-19 The `actioner` skill, run manually in a store checkout, executes each unactioned ruling
-    through the YouTrack MCP tools: `yes` → issue whose description names the observation id for the
-    reader, the issue id written to the observation's `card`, status `raised`; `no` → `closed`, outcome
-    `wont-do`, reason recorded; `later` → trigger noted, stays `open`; `merge` → merged. Each ruling
-    is marked actioned with a reference; reruns are no-ops.
+18. FR-18 Each triage item ends in a ruling block with two lines that are the operator's, `ruling`
+    and `note`, and one that is the actioner's, `actioned`. A ruling is `yes`, `no: <reason>`,
+    `later: <trigger>` or `merge: <id>`, and may go on in prose. The note is whatever else the
+    actioner should know or do: a card the operator already raised, a fix that already shipped,
+    where an issue belongs, what the observation should say. The block is the operator's channel to
+    the actioner and is read, not parsed: the verb is the lead, the prose is the instruction.
+19. FR-19 The `actioner` skill, run manually in a store checkout, carries out each ruled block that
+    has no `actioned` stamp, through the YouTrack MCP tools and on the observation files, with the
+    judgment the reconciler has over the files (FR-14). Its defaults: `yes` → an issue whose
+    description names the observation id for the reader, the issue id written to the observation's
+    `card`, status `raised`; a card the operator says they raised themselves is linked and no issue
+    is created; work the operator says is already delivered gets no issue and the observation is
+    deleted, on the operator's word or after a read-only check (as FR-17), as the actioner judges.
+    `no` → `closed`, outcome `wont-do`, and the ruling written into `reason` for the agent who meets
+    the observation next (FR-2); a `no` that asks for a card on something else gets both. `later` →
+    the trigger noted on the observation, status back to `open`. `merge` → merged. An issue goes to
+    the intake queue of the project that owns the fix, and to `FN` when no project owns it or it
+    spans repositories. Each block dealt with is stamped `actioned` with the date and a reference; a
+    stamped block is skipped, so reruns are no-ops.
 
 **Board sync**
 
@@ -287,12 +309,16 @@ stateDiagram-v2
   proposed --> raised: ruling yes → issue
   proposed --> closed: ruling no
   proposed --> open: ruling later
+  proposed --> [*]: ruling says already delivered
   raised --> closed: board resolution
   closed --> open: re-raise via reactions
+  closed --> [*]: done, and learned elsewhere
 ```
 
 Condensing, merging and splitting change file contents, not status. `outcome`, `reason`, `card` and
-`pointer` are fields on the file; a re-raise reopens with history attached.
+`pointer` are fields on the file; a re-raise reopens with history attached. The two ways out are
+deletions (FR-11): a `closed` / `wont-do` observation never takes one, because its `reason` is what
+it is kept for.
 
 ### Webhooks
 
@@ -329,9 +355,12 @@ rendered from an item list. A `--dry-run` mode pushes nothing and sends nothing.
 store root as a parameter, defaulting to its own repo, so it can be run against a generated test
 store.
 
-**Actioner.** Run manually after rulings. Parses the ruling blocks, executes FR-19 through the
-YouTrack MCP tools, writes references back into the triage doc and observations, commits, pushes. A
-ruling with a reference is skipped.
+**Actioner.** Run manually after rulings. A helper lists the ruled blocks that carry no stamp; the
+session reads each one, ruling and note together, and carries it out (FR-19): issues through the
+YouTrack MCP tools, fields on the observation through the reconciler's helpers, a deletion where the
+work is already delivered. It writes the `reason` of a `no` for the agent who will be shown it, not
+as a copy of what the operator wrote to the actioner. Each block is stamped as it is finished, then
+the run commits and pushes. A stamped block is skipped.
 
 ### Security and config
 

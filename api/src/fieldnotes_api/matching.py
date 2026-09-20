@@ -114,6 +114,7 @@ def candidate(scored: Scored) -> Candidate:
         status=observation.status,
         outcome=observation.outcome,
         pointer=observation.pointer,
+        reason=observation.reason,
         reactions=reaction_counts(observation),
         cosine=round(scored.cosine, 4),
         score=round(scored.score, 4),

@@ -125,11 +125,16 @@ scope here.
     outputs are the store and the triage document.
 15. FR-15 Must write `triage/YYYY-MM-DD.md`. Which observations it lists is at its discretion: only
     what it judges of interest, never everything. Per item: id, ask, evidence (count, distinct repos,
-    first and last seen), recommendation, impact, an empty ruling block (FR-18). Listing an `open`
-    observation makes it `proposed`. Recommended documentation changes are described in text, not
-    drafted.
+    first and last seen), every report on it in the agent's own words, recommendation, impact, an
+    empty ruling block (FR-18). Listing an `open` observation makes it `proposed`. Recommended
+    documentation changes are described in text, not drafted. After the items the document shows
+    every report made since the last document, word for word, under the observation that holds it
+    now and beside the statement as the run left it, each report once: the operator reads the raw
+    input, to see how agents use the store and to judge the curation against what was said (ruled
+    2026-09-21, "for a while at least"). A run with reports and nothing to rule on writes the
+    document for that half alone; a run with neither writes none.
 16. FR-16 Must read prior triage docs and rulings before composing, and must send a Telegram message
-    with the triage doc path.
+    with the triage doc path when it wrote one, and none when it did not.
 17. FR-17 To understand an item it may clone the relevant repository or start a KubeCoder
     environment. Research only; no changes there.
 
@@ -384,7 +389,8 @@ ever in a config file, an image or this repo.
 
 The mined dataset (observations extracted from the close-out reports and agent memory files of
 earlier work, with labeled duplicate clusters and pairs) is private and lives in the spec repo. It is
-test material: whether any of it seeds the production store is decided after validation, not before.
+test material and stays that: the production store starts empty (ruled 2026-09-21: "if these really
+are issues, they'll surface soon enough").
 
 | Check | How | Pass |
 | --- | --- | --- |

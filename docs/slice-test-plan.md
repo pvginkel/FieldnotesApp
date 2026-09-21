@@ -6,14 +6,22 @@ names it. Read it top to bottom and do what it says.
 
 ## What this phase proves, and what it does not
 
-**Verification here is local.** Nothing is deployed yet: there is no dev instance and no production
-one, and a push to `main` builds and deploys nothing. So this phase runs the suites in this
-environment, from the merged working tree, and then pushes.
+**There is one deployment, and it is production.** A push to `main` runs the `FieldnotesApp` Jenkins
+job (setup, lint, test, the image), which triggers `IaC/HelmCharts`, which rolls `fieldnotes-prd`:
+the pod every agent on the host posts to, over the store the reconciler curates every morning.
+There is no dev instance. So this phase proves the slice **locally first** (the suites, then the
+services run here against a generated store and the real models), pushes only what that proved,
+confirms the rollout, and then checks the deployment for what only it can show.
 
-There is no `devlock`: with no dev instance, nothing contends.
+Two things follow from production being the only instance:
 
-The slice that first deploys a service changes all three of those sentences, and rewrites this doc in
-the same slice.
+- **What a check writes there is real.** A test observation is matched against by every agent's
+  `post` and shown to the operator, word for word, in the next triage document. Run a deployed
+  check only when the slice changes what it tests, use the invented `fieldnotes-e2e/*` data, and
+  clear it in the same phase (step 5).
+- There is no `devlock`: nothing is occupied for the length of a check. Two slices that push close
+  together both deploy, the later image holds both, and a deployed check run against it still
+  proves the earlier slice.
 
 ## 0. Preconditions
 
@@ -37,7 +45,7 @@ prints its output only on failure, so read its exit code directly and never thro
 While the manifest declares no `build` verb, `kc project build` is a skip and proves nothing; `test`
 and `lint` carry the gate. Say so in the close-out report rather than reporting the build green.
 
-## 2. The live check
+## 2. The local live check
 
 `fieldnotes-api` runs in the `python` tool container against a store generated under the gitignored
 `.run/` and the real models pod. The store lives in `.run/` and not in `/tmp` because every
@@ -120,10 +128,8 @@ until curl -sf localhost:8766/readyz; do sleep 1; done
 
    Each run takes the first of its eight invented scenarios the store does not hold already, so
    the script can be run against a store it has run against before until the pool runs out.
-   `--url` points it at a deployed server instead of the local one
-   (`--url https://fieldnotes-mcp.home/mcp`, the bearer being the OpenBao leaf
-   `eso/prd/fieldnotes/prd/mcp-token#token`), and then it writes its observations into the real
-   store.
+   `--url` points it at a deployed server instead of the local one, and then it writes its
+   observations into the real store: that is step 4, with its conditions.
 
 Stop:
 
@@ -131,7 +137,8 @@ Stop:
 cexec python sh -c 'kill $(cat /work/FieldnotesApp/.run/live/mcp.pid) $(cat /work/FieldnotesApp/.run/live/api.pid)'
 ```
 
-The board sync has no live check here: it needs YouTrack's webhook app pointed at a deployed API.
+The board sync has no local check: it needs YouTrack's webhook app, which points at the
+deployment. Its live check is in step 4.
 
 The "Validation" table in [`design.md`](design.md) lists the checks that land here or in `eval/` as
 the services come to exist: the model smoke (`eval/smoke.py`), the replay and eval of gate 1
@@ -145,22 +152,100 @@ the present one in `eval/bench.py`, at matched false-alarm rates, since a thresh
 from one scorer to the next; `eval/embed_local.py` embeds the dataset with a model the pod does not
 serve.
 
-Until then, a slice whose acceptance criteria need a real board reports those criteria as *not
-verified*, never as passed.
-
-## 3. Check off `verification.json`
-
-Mark each acceptance criterion with the evidence that settled it: the command run and what it
-returned, or the call made and what it answered. A criterion nothing in steps 1–2 exercised has not
-passed by inspection. It is either an untested criterion (a finding) or a check this doc is missing.
-
-## 4. Push
+## 3. Push, and confirm the rollout
 
 Pushing is this phase's job. The driver ff-merges locally and never pushes a code phase, then checks
 before the doc phase that every repo in `state.json`'s `bases` reached `origin`. Push each one,
 honouring any repo named in `plan.md`'s `## Push holds`.
 
-No CI job follows a push yet, so there is no build to confirm.
+A push of this repo builds and deploys. Follow it to the end:
+
+```bash
+track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
+```
+
+It waits for the build of that commit and for `IaC/HelmCharts`, which it triggers; it needs
+`JENKINS_TOKEN`, which this environment projects. Run it under `timeout`: the two take about
+five minutes together.
+
+**A green `IaC/HelmCharts` is not a good deploy**: it has reported success with the pod in
+`CreateContainerConfigError`. Look at the pod, read-only, through the `iac` tool container:
+
+```bash
+cexec iac kubectl -n fieldnotes-prd get pods
+cexec iac kubectl -n fieldnotes-prd get pod -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'
+curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+  http://registry:5000/v2/fieldnotes/manifests/<build> | grep -i docker-content-digest
+curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-api.home/readyz
+curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-mcp.home/readyz
+```
+
+The pod is `3/3 Running`, its image digest is the build's, and both `/readyz` answer `200`. The
+deployment is `Recreate`, so the service is away for about a minute during the roll: a `502` then
+is the roll, not a finding. The API's log is
+`cexec iac kubectl -n fieldnotes-prd logs deploy/fieldnotes -c api`.
+
+A slice that changes the chart pushes `pvginkel/HelmCharts` as well, and that push is what rolls
+the pod: track `IaC/HelmCharts --hash` of that commit instead. A slice that changes only the store's
+skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
+
+## 4. The deployed checks
+
+Only what the local run cannot show, and only when the slice touches it. Each of these writes to
+the production store or to the board, so each ends with step 5.
+
+**The MCP end-to-end**, when the slice changes the MCP server, the API's `post`/`react`/`get` path,
+the image or the chart:
+
+```bash
+cexec python sh -c 'cd /work/FieldnotesApp && set -a && . ./.env && set +a &&
+  uv run --all-packages python eval/mcp_e2e.py --url https://fieldnotes-mcp.home/mcp'
+```
+
+The bearer is `FIELDNOTES_MCP_TOKEN` in the gitignored `.env` of this checkout, put there by the
+operator; no environment can read the deployment's secrets, so an environment without that file
+reports this check as *not verified*. The endpoints are https with a step-ca certificate: `curl`
+and the system Python trust it, a client that verifies against `certifi` does not (the script
+passes the system context for that reason).
+
+**Board sync and card feedback**, when the slice changes the YouTrack webhook, `board.py` or what a
+sync writes. It takes the YouTrack MCP tools, a push to the store, and patience of five seconds a
+step, the webhook's settle time ([webhooks.md](webhooks.md)):
+
+1. Raise a trial issue in `FN` that says it is one. In `pvginkel/Fieldnotes`, set a
+   `fieldnotes-e2e/*` test observation's `card` to it and its `status` to `raised`
+   (`python3 skills/reconciler/reconcile.py set <id> card=FN-<n> status=raised`), commit, push.
+2. Comment a workaround on the issue. Within ten seconds the store gets one `board-sync` commit
+   whose `card_updated` is the comment's own time, to the second. A time one event old means the
+   card was read before YouTrack committed the change.
+3. A second sync writes nothing: `reconcile.py board-scan` answers `unchanged` and `origin/main`
+   does not move. It needs the API's `skills` token, which only an environment of
+   `pvginkel/Fieldnotes` holds, as does a `--dry-run` reconciler run, whose edit should carry the
+   workaround. From here that is a headless session in that environment, through the fleet tools.
+4. Move the issue to Done with resolution Resolved and a `Resolved: <pointer>` comment: one commit,
+   `closed` / `done` with the pointer, from one read however many deliveries the change made. Change
+   the resolution to Won't Do: `outcome: wont-do`.
+
+Every sync is a commit on the store and a line in the API's log, so both are read from there.
+
+**The reconciler and the actioner** are not deployed services: they are skills in the store repo,
+proven by a `--dry-run` session over a generated store and a local API
+([the gate-2 handover](../../FieldnotesAppSpecs/handovers/gate-2-and-what-follows.md), section 4),
+never over production.
+
+## 5. Clear what the checks wrote
+
+In `pvginkel/Fieldnotes`, `git rm` every observation whose `repos` are `fieldnotes-e2e/*`
+(`grep -l fieldnotes-e2e observations/*.md`), commit and push; close the trial issue as Won't Do
+with a comment. The reconciler shows the operator every report it has not shown before, so test
+data left overnight is in the morning's triage document. `observations/` keeps its `.gitkeep`: the
+store's helpers refuse a root without that directory.
+
+## 6. Check off `verification.json`
+
+Mark each acceptance criterion with the evidence that settled it: the command run and what it
+returned, or the call made and what it answered. A criterion nothing in steps 1–4 exercised has not
+passed by inspection. It is either an untested criterion (a finding) or a check this doc is missing.
 
 ## Findings
 

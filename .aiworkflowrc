@@ -5,8 +5,9 @@ spec_repo = "../FieldnotesAppSpecs"
 design_philosophy = "docs/change-discipline.md"
 
 [test_phase]
-# Local verification: nothing is deployed yet, so there is no dev instance. The
-# doc runs the suites here, then pushes.
+# Local verification first, then the push, which builds and rolls production:
+# there is one deployment and no dev instance. The doc says which deployed
+# checks a slice owes and how to clear what they write.
 strategy = "docs/slice-test-plan.md"
 
 [doc_phase]
@@ -15,4 +16,5 @@ plan = "docs/slice-doc-plan.md"
 [push]
 enabled = true
 
-# No [devlock]: with no dev instance, nothing contends over one.
+# No [devlock]: there is no dev instance to occupy, and a deployed check holds
+# nothing for its length.

@@ -9,16 +9,19 @@ store is temporary: what is reported gets fixed or documented and then leaves it
 reconciler session curates the store into a triage document, the operator rules on it, and an
 actioner session, which the operator starts by hand, carries the rulings out.
 
-**It is being built as a proof of concept**, to find out whether the idea proves its value. The design
-is [`docs/design.md`](docs/design.md): the ruled decisions, the numbered requirements (`FR-n`,
+**It is a proof of concept, built and live since 2026-09-21**, to find out whether the idea proves
+its value: `fieldnotes-prd` is the one deployment, every agent on the host is told to post to it,
+and a timer runs the reconciler each morning. **A push to `main` builds and rolls production.** The
+design is [`docs/design.md`](docs/design.md): the ruled decisions, the numbered requirements (`FR-n`,
 `NFR-n`), the technical design and the validation checks. Read it before writing code, and cite its
 requirement numbers in tests and commits. A decision it leaves open is the operator's to rule, not
 something to settle in code.
 
-The build follows
-[`../FieldnotesAppSpecs/plan/implementation-plan.md`](../FieldnotesAppSpecs/plan/implementation-plan.md):
-take the first unchecked item, check it off when it is done, and stop at a gate, which is the
-operator's decision.
+The greenfield build followed
+[`../FieldnotesAppSpecs/plan/implementation-plan.md`](../FieldnotesAppSpecs/plan/implementation-plan.md),
+which is now the record of how it was built and why: its notes hold what the deployment taught
+(the seven OpenBao leaves, why `enableServiceLinks` is off, the webhook's settle time), and its last
+two items, which wait on real use, are the only ones open.
 
 ## Repo structure
 
@@ -61,10 +64,11 @@ repo and reaches the eval harness by path.
 
 ## The dev pipeline
 
-The greenfield build does not use slices: it follows the implementation plan. Once the plan is done,
-code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
+Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
 `/dev:run-slice`), which the operator drives. The project's half of that contract is `.aiworkflowrc`
-and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file.
+and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file. The
+store's skills (`pvginkel/Fieldnotes`) are prose the operator and a session change together, outside
+the slice workflow.
 
 Issue tracking follows the host convention. This project's owner tag is **`FieldnotesApp`**, and its
 YouTrack project key is **`FN`**.

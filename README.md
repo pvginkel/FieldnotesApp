@@ -14,10 +14,10 @@ A scheduled reconciler session curates the store, researches selected observatio
 triage document. A human rules on it; an actioner session turns the rulings into tracker issues and
 recorded decisions. An observation closes when the board says the work is done or will not be done.
 
-**Status: a proof of concept under construction.** The design is settled
-([`docs/design.md`](docs/design.md)); the first version is being built to find out whether the idea
-proves its value. `fieldnotes-api` and `fieldnotes-mcp` are built and run locally; the deployment is
-not built yet.
+**Status: a proof of concept, built and in use.** The design is
+[`docs/design.md`](docs/design.md); the first version is deployed, agents post to it, and a
+reconciler session curates the store every morning. What it has to show now is whether the idea
+proves its value.
 
 ## Shape
 
@@ -41,7 +41,7 @@ stays dumb.
 ## Development
 
 Development runs in a [KubeCoder](https://github.com/pvginkel/KubeCoder) environment. The first
-version follows an implementation plan; after that, changes go through the slice workflow of the
+version followed an implementation plan; changes now go through the slice workflow of the
 [`dev` plugin](https://github.com/pvginkel/AIWorkflow). [`CLAUDE.md`](CLAUDE.md) is the entry point
 for a session; [`docs/`](docs/) holds the design, a topic doc for each part as built, the change
 discipline and the two procedure docs the pipeline executes. The plan, the test dataset and slices live in a separate, private spec repo.

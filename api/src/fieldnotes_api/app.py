@@ -246,7 +246,8 @@ def create_app(
     async def youtrack_hook(request: Request) -> HookReply:
         """FR-20, FR-21: an event naming an issue that is some observation's card queues a board
         sync of it; every other event is ignored without a call to YouTrack. The Webhook Triggers
-        app waits for each answer, so nothing is read or written before it."""
+        app waits for each answer, so nothing is read or written before it, and it sends the
+        delivery before YouTrack commits the change, so the read waits `settle` seconds."""
         hook = settings.youtrack_hook
         if hook is None or not youtrack_verified(hook, request.headers.get(hook.header)):
             raise ProblemException(
@@ -262,7 +263,7 @@ def create_app(
         entry = index.by_card(issue)
         if entry is None:
             return HookReply(action="ignored")
-        observations.sync_later(entry.observation.id)
+        observations.sync_later(entry.observation.id, hook.settle)
         return HookReply(action="queued")
 
     return app

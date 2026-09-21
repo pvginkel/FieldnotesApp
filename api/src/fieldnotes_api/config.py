@@ -23,6 +23,7 @@
 | `FIELDNOTES_YOUTRACK_OUTCOMES` | the design's map | `<value>=<outcome>`, comma-separated |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN` | none | the YouTrack webhook's shared token (secret) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | `X-YouTrack-Token` | the header it arrives in |
+| `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | `5` | seconds a delivery waits before its card is read |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |
 
@@ -68,6 +69,9 @@ DEFAULT_RESOLUTION_FIELD = "Resolution"
 # FR-21's map: Resolved and Absorbed are done, Won't Do is wont-do.
 DEFAULT_OUTCOMES = "Resolved=done,Absorbed=done,Won't Do=wont-do"
 DEFAULT_YOUTRACK_WEBHOOK_HEADER = "X-YouTrack-Token"
+# YouTrack sends a delivery before it commits the change the delivery is about: a card read at
+# once is the card as it was one event ago (seen live, 2026-09-21).
+DEFAULT_YOUTRACK_WEBHOOK_SETTLE = 5.0
 
 
 class SettingsError(RuntimeError):
@@ -196,7 +200,10 @@ def _youtrack_hook(environ: Mapping[str, str]) -> YouTrackHookSettings | None:
     if token is None:
         return None
     header = _get(environ, "YOUTRACK_WEBHOOK_HEADER", DEFAULT_YOUTRACK_WEBHOOK_HEADER)
-    return YouTrackHookSettings(token=token, header=header)
+    settle = _number(environ, "YOUTRACK_WEBHOOK_SETTLE", float, DEFAULT_YOUTRACK_WEBHOOK_SETTLE)
+    if settle < 0:
+        raise SettingsError(f"{PREFIX}YOUTRACK_WEBHOOK_SETTLE is negative: {settle}")
+    return YouTrackHookSettings(token=token, header=header, settle=settle)
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:

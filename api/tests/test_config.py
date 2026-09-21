@@ -110,3 +110,12 @@ def test_the_board_defaults_to_the_designs_field_and_map():
         "Won't Do": "wont-do",
     }
     assert settings.youtrack_hook.header == "X-YouTrack-Token"
+    assert settings.youtrack_hook.settle == 5.0
+
+
+def test_the_webhooks_settle_time_is_a_number_of_seconds_and_not_negative():
+    hook = {"FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN": "w" * 32}
+    settle = "FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE"
+    assert load_settings(BASE | hook | {settle: "0.5"}).youtrack_hook.settle == 0.5
+    with pytest.raises(SettingsError, match="negative"):
+        load_settings(BASE | hook | {settle: "-1"})

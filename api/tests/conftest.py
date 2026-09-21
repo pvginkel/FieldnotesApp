@@ -120,6 +120,7 @@ def environ(tmp_path, remote, youtrack) -> dict[str, str]:
         "FIELDNOTES_YOUTRACK_URL": "https://youtrack.example.invalid",
         "FIELDNOTES_YOUTRACK_TOKEN": youtrack.token,
         "FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN": YOUTRACK_WEBHOOK_TOKEN,
+        "FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE": "0",
         **{f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token for name, token in TOKENS.items()},
     }
 

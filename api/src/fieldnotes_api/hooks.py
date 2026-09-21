@@ -29,6 +29,7 @@ class GithubSettings:
 class YouTrackHookSettings:
     token: str
     header: str
+    settle: float  # seconds between a delivery and the read of its card
 
 
 def youtrack_verified(settings: YouTrackHookSettings, presented: str | None) -> bool:

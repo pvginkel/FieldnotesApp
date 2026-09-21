@@ -41,6 +41,14 @@ call to YouTrack; most board events are of that kind. For a card it queues a boa
 observation and answers `{"action": "queued"}`: the app sends its webhooks one after another and
 waits for each answer, at most five seconds, so nothing is read or written before the answer.
 
+**The card is read `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` seconds after the delivery** (default 5).
+YouTrack sends a delivery before it commits the change the delivery is about, so a card read at once
+is the card as it was one event earlier: seen live on 2026-09-21, where the sync a comment's delivery
+queued read the card within 600 ms and did not find the comment, and the next event's sync recorded
+it. A delivery that arrives while an earlier one for the same observation is still waiting restarts
+the wait, so a burst of events costs one read. The wait is not spent in the write queue. A change the
+wait still misses is picked up by the reconciler's board scan.
+
 A payload with no string `id`, or that is not JSON, is ignored. A token that does not verify is a
 401; without the token configured every delivery is refused; before the index is built the answer
 is `503 not-ready`.

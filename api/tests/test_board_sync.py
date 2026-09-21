@@ -2,6 +2,8 @@
 YouTrack. The design's "Board sync" row is `test_a_resolved_card_closes_...` and
 `test_a_later_resolution_...`; "Card feedback" is `test_a_comment_moves_card_updated_...`."""
 
+import time
+
 import pytest
 
 from fieldnotes_api.document import Document
@@ -181,6 +183,28 @@ def test_a_comment_event_queues_a_sync_too(carded, auth, clock, youtrack, eventu
             "the queued sync",
         )
     assert reply.json() == {"action": "queued"}
+
+
+def test_the_card_is_read_once_the_delivery_has_settled(carded, auth, clock, youtrack, eventually):
+    """YouTrack sends the delivery before it commits the change: the card is as it was when the
+    delivery arrives, and the change is on it a moment later."""
+    with carded(FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE="0.3") as (api, id_):
+        reads = len(youtrack.reads)
+        assert hook(api, {"id": "FN-12"}).json() == {"action": "queued"}
+        assert len(youtrack.reads) == reads
+        youtrack.resolve("FN-12", clock.tick(), "Resolved")
+        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the settled sync")
+
+
+def test_deliveries_that_arrive_together_cost_one_read(carded, auth, clock, youtrack, eventually):
+    with carded(FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE="0.3") as (api, id_):
+        reads = len(youtrack.reads)
+        youtrack.comment("FN-12", "A proposed fix.", clock.tick(600))
+        for event in ("commentAdded", "issueUpdated", "issueUpdated"):
+            hook(api, {"event": event, "id": "FN-12"})
+        eventually(lambda: observation(api, auth, id_)["card_updated"] is not None, "the sync")
+        time.sleep(0.5)
+    assert len(youtrack.reads) == reads + 1
 
 
 def test_an_event_for_any_other_issue_is_ignored_without_a_read(carded, youtrack):

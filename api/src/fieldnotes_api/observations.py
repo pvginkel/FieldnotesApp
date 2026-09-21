@@ -84,6 +84,7 @@ class Observations:
         self.board = board
         self.outcomes = outcomes
         self._syncs: set[asyncio.Task[BoardSyncReply]] = set()
+        self._settling: dict[str, asyncio.Task[BoardSyncReply]] = {}
 
     def get(self, id_: str) -> Observation:
         entry = self.index.get(id_)
@@ -226,10 +227,26 @@ class Observations:
             (observation_path(id_),), message
         )
 
-    def sync_later(self, id_: str) -> None:
+    def sync_later(self, id_: str, settle: float = 0.0) -> None:
         """Queue a board sync and return at once: the YouTrack webhook's answer cannot wait for
-        a read from YouTrack and a push. A failure is logged."""
-        task = asyncio.create_task(self.board_sync(id_), name=f"board-sync {id_}")
+        a read from YouTrack and a push. A failure is logged.
+
+        The card is read `settle` seconds from now, because YouTrack sends a delivery before it
+        commits the change the delivery is about. A delivery that arrives while an earlier one for
+        the same observation is still waiting restarts the wait: one read then covers both. The
+        wait is spent here, not in the store's write queue."""
+        waiting = self._settling.pop(id_, None)
+        if waiting is not None:
+            waiting.cancel()
+
+        async def settled() -> BoardSyncReply:
+            await asyncio.sleep(settle)
+            if self._settling.get(id_) is task:
+                del self._settling[id_]
+            return await self.board_sync(id_)
+
+        task = asyncio.create_task(settled(), name=f"board-sync {id_}")
+        self._settling[id_] = task
         self._syncs.add(task)
         task.add_done_callback(self._synced)
 

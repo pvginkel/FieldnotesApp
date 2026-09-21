@@ -147,5 +147,6 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_YOUTRACK_URL`, `FIELDNOTES_YOUTRACK_TOKEN` | none | see [webhooks.md](webhooks.md); set together or not at all |
 | `FIELDNOTES_YOUTRACK_RESOLUTION_FIELD`, `FIELDNOTES_YOUTRACK_OUTCOMES` | see webhooks.md | |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN`, `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | none, `X-YouTrack-Token` | see [webhooks.md](webhooks.md) |
+| `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | 5 | seconds between a YouTrack delivery and the read of its card; see [webhooks.md](webhooks.md) |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT` | `0.0.0.0`, 8080 | |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |

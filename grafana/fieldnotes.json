@@ -1,0 +1,1012 @@
+{
+  "uid": "fieldnotes",
+  "title": "Fieldnotes",
+  "description": "Whether the post-time answer lands, the store, and the API's health.",
+  "tags": [
+    "fieldnotes"
+  ],
+  "timezone": "browser",
+  "refresh": "5m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Does the answer land",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Posts",
+      "description": "Posts in the range, created, matched and forced alike.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum (increase(fieldnotes_posts_total{}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Answered from the store",
+      "description": "The share of posts that were answered with candidates and created nothing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum (increase(fieldnotes_posts_total{outcome=\"matched\"}[$__range])) / sum (increase(fieldnotes_posts_total{}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Answer landed",
+      "description": "Of the matched posts that were settled, the share whose reporter reacted to a candidate it was offered. The rest reacted elsewhere, forced, reposted or left it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum (increase(fieldnotes_match_follow_ups_total{result=\"reacted\"}[$__range])) / sum (increase(fieldnotes_match_follow_ups_total{}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Reactions",
+      "description": "Reactions in the range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum (increase(fieldnotes_reactions_total{}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Open observations",
+      "description": "Open observations in the store now: posted, not yet proposed or raised.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum(fieldnotes_observations{status=\"open\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "In the store",
+      "description": "Every observation now.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum(fieldnotes_observations)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Posts by outcome",
+      "description": "created: nothing matched. matched: candidates came back and nothing was created. forced: the reporter posted with force.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (outcome) (increase(fieldnotes_posts_total{}[$__interval]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "After a matched post",
+      "description": "What the same reporter (repo and session) did next, within 30 minutes. reacted: to a candidate it was offered. reacted_other: to another observation. forced, reposted, or abandoned: nothing in the window.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (result) (increase(fieldnotes_match_follow_ups_total{}[$__interval]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Best candidate's score",
+      "description": "Matched posts by their best candidate's score, per bucket, over the range: where the matches sit against the thresholds.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (le) (increase(fieldnotes_post_top_score_bucket[$__range]))",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "instant": true,
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Candidates by match class",
+      "description": "Candidates returned to matched posts over the range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (match_class) (increase(fieldnotes_post_candidates_total{}[$__range]))",
+          "legendFormat": "{{match_class}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "The store",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Observations by status",
+      "description": "The store's observations, from the index.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (status) (fieldnotes_observations)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Observations by category",
+      "description": "The store's observations, from the index.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (category) (fieldnotes_observations)",
+          "legendFormat": "{{category}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "title": "Posts in the store by repo",
+      "description": "The observations each repo posted that are still in the store. Retired ones leave it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji=\"📝\"}))",
+          "legendFormat": "{{repo}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 16,
+      "type": "bargauge",
+      "title": "Reactions in the store by repo",
+      "description": "Reactions each repo left on observations still in the store, posts left out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 30,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji!=\"📝\"}))",
+          "legendFormat": "{{repo}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 17,
+      "type": "bargauge",
+      "title": "Reactions in the store by emoji",
+      "description": "Reactions on observations still in the store, posts left out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 30,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sort_desc(sum by (emoji) (fieldnotes_store_reactions{emoji!=\"📝\"}))",
+          "legendFormat": "{{emoji}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "The service",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Requests",
+      "description": "Requests per second by route; health checks and scrapes left out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (route) (rate(fieldnotes_http_request_duration_seconds_count{route!~\"/metrics|/healthz|/readyz|unmatched\"}[$__rate_interval]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Latency p95",
+      "description": "The 95th percentile by route. A post embeds its text on the models pod first.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(fieldnotes_http_request_duration_seconds_bucket{route!~\"/metrics|/healthz|/readyz|unmatched\"}[$__rate_interval])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Errors",
+      "description": "4xx and 5xx answers by route and status. A 401 on a webhook is a refused delivery.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (route, status) (increase(fieldnotes_http_request_duration_seconds_count{status=~\"[45]..\"}[$__interval]))",
+          "legendFormat": "{{status}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Webhook deliveries",
+      "description": "Verified deliveries: queued work, or ignored as none of ours.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (source, action) (increase(fieldnotes_webhook_deliveries_total{}[$__interval]))",
+          "legendFormat": "{{source}} {{action}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Board syncs",
+      "description": "Syncs of an observation's card: changed, unchanged, or failed when queued.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 47,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (result) (increase(fieldnotes_board_syncs_total{}[$__interval]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Reads by id",
+      "description": "Observations read in full, by client: mcp is an agent's get, skills the reconciler.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 47,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (client) (increase(fieldnotes_gets_total{}[$__interval]))",
+          "legendFormat": "{{client}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ]
+}

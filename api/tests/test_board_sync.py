@@ -248,3 +248,19 @@ def test_the_token_header_is_configurable(start):
 def test_without_a_webhook_token_every_delivery_is_refused(start):
     with start(FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN="") as api:
         assert hook(api, {"id": "FN-12"}).status_code == 401
+
+
+def test_syncs_and_deliveries_are_counted(carded, auth, clock, youtrack, eventually, scrape):
+    with carded() as (api, id_):
+        sync(api, auth, id_)
+        sync(api, auth, id_)
+        hook(api, {"event": "issueUpdated", "id": "KC-65"})
+        youtrack.resolve("FN-12", clock.tick(), "Resolved")
+        hook(api, {"event": "issueUpdated", "id": "FN-12"})
+        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync")
+        value = scrape(api)
+
+    assert value("fieldnotes_board_syncs_total", result="changed") == 2
+    assert value("fieldnotes_board_syncs_total", result="unchanged") == 1
+    assert value("fieldnotes_webhook_deliveries_total", source="youtrack", action="ignored") == 1
+    assert value("fieldnotes_webhook_deliveries_total", source="youtrack", action="queued") == 1

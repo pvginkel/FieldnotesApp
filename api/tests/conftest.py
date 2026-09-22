@@ -187,3 +187,23 @@ def pull():
         api.portal.call(pulled)
 
     return run
+
+
+@pytest.fixture
+def scrape():
+    """`scrape(api)(name, **labels)`: a sample's value in the API's `/metrics`; 0 when absent."""
+    from prometheus_client.parser import text_string_to_metric_families
+
+    def scraped(api: TestClient):
+        families = list(text_string_to_metric_families(api.get("/metrics").text))
+
+        def value(name: str, **labels: str) -> float:
+            for family in families:
+                for sample in family.samples:
+                    if sample.name == name and labels.items() <= sample.labels.items():
+                        return sample.value
+            return 0.0
+
+        return value
+
+    return scraped

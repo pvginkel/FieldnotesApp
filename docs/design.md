@@ -242,7 +242,7 @@ equality.
 
 API endpoints: `POST /observations`, `POST /observations/{id}/reactions`, `GET /observations/{id}`,
 `POST /observations/{id}/board-sync`, `POST /match`, `GET /observations/{id}/neighbors`,
-`POST /hooks/github`, `POST /hooks/youtrack`, `GET /healthz`, `GET /readyz`.
+`POST /hooks/github`, `POST /hooks/youtrack`, `GET /healthz`, `GET /readyz`, `GET /metrics`.
 
 Callers authenticate with a bearer token that resolves to a named client (`mcp`, `skills`); the name
 is logged with each write. The MCP server takes its own inbound bearer token from agents and holds

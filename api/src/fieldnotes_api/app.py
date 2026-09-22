@@ -14,6 +14,7 @@ globals, and the dependency aliases are local to `create_app`.
 import asyncio
 import logging
 import os
+import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from typing import Annotated
 import httpx
 from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from fieldnotes_contracts import (
     ID_PATTERN,
@@ -55,6 +57,7 @@ from .errors import (
 from .hooks import github_push_to, github_verified, youtrack_issue, youtrack_verified
 from .index import EmbeddingCache, Index
 from .matching import Matcher
+from .metrics import Metrics
 from .models import HttpModels, Models, ModelsError
 from .observations import Clock, Observations
 from .store import GitError, Store
@@ -107,7 +110,8 @@ def create_app(
         settings.store.root, EmbeddingCache(settings.cache_dir, settings.embed_model), models
     )
     matcher = Matcher(index, models, settings.match)
-    observations = Observations(store, index, matcher, clock, board, outcomes)
+    metrics = Metrics(index, clock)
+    observations = Observations(store, index, matcher, clock, board, outcomes, metrics)
     runtime = Runtime(settings, store, index, observations)
 
     async def start() -> None:
@@ -146,6 +150,16 @@ def create_app(
     app.add_exception_handler(BoardError, _board_unreachable)
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
+    @app.middleware("http")
+    async def timed(request: Request, call_next):
+        started = time.perf_counter()
+        response = await call_next(request)
+        route = request.scope.get("route")
+        metrics.requests.labels(
+            request.method, route.path if route is not None else "unmatched", response.status_code
+        ).observe(time.perf_counter() - started)
+        return response
+
     def ready() -> Observations:
         if not runtime.ready:
             raise not_ready()
@@ -177,6 +191,11 @@ def create_app(
         ready()
         return HealthReply(status="ok")
 
+    @app.get("/metrics", response_class=Response)
+    async def prometheus() -> Response:
+        """The Prometheus exposition; unauthenticated like the health checks, and counts only."""
+        return Response(metrics.exposition(), media_type=CONTENT_TYPE_LATEST)
+
     @app.post("/observations", status_code=201)
     async def post_observation(
         request: PostRequest, response: Response, observations: Ready, name: Client
@@ -195,9 +214,11 @@ def create_app(
         return await observations.react(id, request, name)
 
     @app.get("/observations/{id}")
-    async def get_observation(id: ObservationId, observations: Ready, _: Client) -> Observation:
+    async def get_observation(id: ObservationId, observations: Ready, name: Client) -> Observation:
         """FR-5."""
-        return observations.get(id)
+        observation = observations.get(id)
+        metrics.gets.labels(name).inc()
+        return observation
 
     @app.get("/observations/{id}/neighbors")
     async def neighbors(
@@ -232,8 +253,10 @@ def create_app(
                 detail="sign with the configured secret as X-Hub-Signature-256",
             )
         if not github_push_to(github, settings.store.branch, x_github_event, body):
+            metrics.webhooks.labels("github", "ignored").inc()
             return HookReply(action="ignored")
         store.pull()
+        metrics.webhooks.labels("github", "queued").inc()
         return HookReply(action="queued")
 
     @app.post("/observations/{id}/board-sync")
@@ -258,12 +281,15 @@ def create_app(
             )
         issue = youtrack_issue(await request.body())
         if issue is None:
+            metrics.webhooks.labels("youtrack", "ignored").inc()
             return HookReply(action="ignored")
         ready()
         entry = index.by_card(issue)
         if entry is None:
+            metrics.webhooks.labels("youtrack", "ignored").inc()
             return HookReply(action="ignored")
         observations.sync_later(entry.observation.id, hook.settle)
+        metrics.webhooks.labels("youtrack", "queued").inc()
         return HookReply(action="queued")
 
     return app

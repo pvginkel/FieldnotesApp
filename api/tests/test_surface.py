@@ -28,6 +28,7 @@ ROUTES = {
     ("POST", "/hooks/youtrack"): (None, "HookReply", 200, []),
     ("GET", "/healthz"): (None, "HealthReply", 200, []),
     ("GET", "/readyz"): (None, "HealthReply", 200, []),
+    ("GET", "/metrics"): (None, None, 200, []),
 }
 
 MODELS = {
@@ -171,7 +172,7 @@ def test_the_routes_are_pinned():
         [method] = route.methods
         routes[(method, route.path)] = (
             body[0] if body else None,
-            route.response_model.__name__,
+            route.response_model.__name__ if route.response_model else None,
             route.status_code or 200,
             [param.name for param in route.dependant.query_params],
         )

@@ -8,7 +8,7 @@ model, what each does, error shapes, startup behaviour and settings.
 The service listens on `FIELDNOTES_API_HOST`:`FIELDNOTES_API_PORT` (default `0.0.0.0:8080`), entry
 point `fieldnotes-api`.
 
-Every endpoint except `GET /healthz`, `GET /readyz` and the two webhooks requires
+Every endpoint except `GET /healthz`, `GET /readyz`, `GET /metrics` and the two webhooks requires
 `Authorization: Bearer <token>` (NFR-4). A token resolves to a named client configured as
 `FIELDNOTES_CLIENT_TOKEN_<NAME>`, the name being the suffix lowercased (`mcp`, `skills`).
 Resolution compares digests in constant time against every configured client. With no client
@@ -31,6 +31,7 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `POST /match` | `MatchRequest` | 200 `{candidates}` |
 | `POST /hooks/github`, `POST /hooks/youtrack` | the sender's payload | 200 `{action: "queued" or "ignored"}` |
 | `GET /healthz`, `GET /readyz` | | 200 `{status: "ok"}` |
+| `GET /metrics` | | 200 the Prometheus text exposition |
 
 Request models strip surrounding whitespace from strings; a blank required string is refused;
 unknown fields are refused.
@@ -65,6 +66,36 @@ unknown fields are refused.
   For the reconciler's search for missed duplicates.
 - **Board sync**: reconciles an observation's card with YouTrack. See
   [webhooks.md](webhooks.md#board-sync).
+- **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
+  annotations. They hold counts and repo names only, never text. See [Metrics](#metrics).
+
+## Metrics
+
+The counters are held in memory and start again at zero when the pod restarts. `increase()` over a
+range gets past a restart. The store gauge is read from the index at scrape time.
+
+| Metric | Labels | What it counts |
+| --- | --- | --- |
+| `fieldnotes_observations` | `status`, `category` | observations in the store (gauge) |
+| `fieldnotes_posts_total` | `client`, `repo`, `category`, `outcome` | posts: `created` (nothing matched), `matched` (candidates returned, nothing created), `forced` |
+| `fieldnotes_post_candidates_total` | `match_class` | candidates returned to matched posts |
+| `fieldnotes_post_top_score` | | the best candidate's score on a matched post (histogram) |
+| `fieldnotes_match_follow_ups_total` | `result` | what the reporter did after a matched post (below) |
+| `fieldnotes_reactions_total` | `client`, `repo`, `emoji` | reactions |
+| `fieldnotes_gets_total` | `client` | observations read by id |
+| `fieldnotes_webhook_deliveries_total` | `source`, `action` | verified deliveries, `queued` or `ignored`; a refused one shows only as a 401 in the request metric |
+| `fieldnotes_board_syncs_total` | `result` | `changed`, `unchanged`, or `failed` (a queued sync that raised) |
+| `fieldnotes_http_request_duration_seconds` | `method`, `route`, `status` | requests by route template (histogram) |
+
+A matched post is remembered for its reporter, meaning the `(repo, session)` it came from or the repo
+alone when no session was passed, for 30 minutes. The reporter's next move settles it as one
+follow-up:
+
+- `reacted`: it reacted to one of the candidates it was offered, so the answer landed.
+- `reacted_other`: it reacted to an observation it was not offered.
+- `forced`: it posted with `force`, so no candidate was the thing.
+- `reposted`: it posted again and matched again.
+- `abandoned`: it did nothing within the window.
 
 ## Candidate
 

@@ -34,6 +34,7 @@ from .document import Document, DocumentError, new_document
 from .errors import ProblemException, not_found
 from .index import Index, embedded_text, observation_path
 from .matching import Matcher, candidate, reaction_counts
+from .metrics import Metrics
 from .store import Commit, Store
 from .ulid import new_ulid
 
@@ -76,6 +77,7 @@ class Observations:
         clock: Clock,
         board: Board | None,
         outcomes: Mapping[str, Outcome],
+        metrics: Metrics,
     ) -> None:
         self.store = store
         self.index = index
@@ -83,6 +85,7 @@ class Observations:
         self.clock = clock
         self.board = board
         self.outcomes = outcomes
+        self.metrics = metrics
         self._syncs: set[asyncio.Task[BoardSyncReply]] = set()
         self._settling: dict[str, asyncio.Task[BoardSyncReply]] = {}
 
@@ -98,6 +101,14 @@ class Observations:
                 embedded_text(request.area, request.text), POST_CANDIDATES
             )
             if matches:
+                self.metrics.posted(
+                    client,
+                    request.repo,
+                    request.session,
+                    request.category,
+                    forced=False,
+                    candidates=[(m.entry.observation.id, m.match_class, m.score) for m in matches],
+                )
                 return PostReply(candidates=[candidate(match) for match in matches])
 
         id_ = new_ulid(self.clock())
@@ -124,6 +135,9 @@ class Observations:
             return id_, Commit((path,), f"post {id_} ({client}): {request.area}")
 
         await self.store.write(create)
+        self.metrics.posted(
+            client, request.repo, request.session, request.category, forced=request.force
+        )
         logger.info("post %s by %s from %s", id_, client, request.repo)
         return PostReply(id=id_)
 
@@ -157,6 +171,7 @@ class Observations:
             return reaction_counts(document.observation), Commit((observation_path(id_),), message)
 
         reactions = await self.store.write(append)
+        self.metrics.reacted(client, request.repo, request.session, id_, request.emoji)
         logger.info("react %s %s by %s from %s", id_, request.emoji, client, request.repo)
         return ReactReply(id=id_, reactions=reactions)
 
@@ -195,7 +210,9 @@ class Observations:
                 f"the card {observation.card} is not on the board",
                 detail=f"observation {id_} names an issue YouTrack does not have; correct its card",
             ) from exc
-        return await self.store.write(lambda root: self._apply(root, id_, card))
+        reply = await self.store.write(lambda root: self._apply(root, id_, card))
+        self.metrics.board_syncs.labels("changed" if reply.changed else "unchanged").inc()
+        return reply
 
     def _apply(self, root: Path, id_: str, card: Card) -> tuple[BoardSyncReply, Commit | None]:
         file = root / observation_path(id_)
@@ -256,6 +273,7 @@ class Observations:
             return
         exc = task.exception()
         if exc is not None:
+            self.metrics.board_syncs.labels("failed").inc()
             logger.error("%s failed", task.get_name(), exc_info=exc)
             return
         reply = task.result()

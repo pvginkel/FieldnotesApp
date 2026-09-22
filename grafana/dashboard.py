@@ -13,7 +13,20 @@ from pathlib import Path
 DATASOURCE = {"type": "prometheus", "uid": "ce0kvu6exy9z4c"}
 OUT = Path(__file__).with_name("fieldnotes.json")
 
+POST = 'emoji="📝"'
+NOT_POST = 'emoji!="📝"'
 API_ROUTES = 'route!~"/metrics|/healthz|/readyz|unmatched"'
+
+
+# The store gauges, one series per label set: a pod that is being replaced is still a target for a
+# while, and summing across targets would count the store twice.
+def store(selector=""):
+    return f"max by (status, category) (fieldnotes_observations{{{selector}}})"
+
+
+def reactions(selector=""):
+    return f"max by (repo, emoji) (fieldnotes_store_reactions{{{selector}}})"
+
 
 _ids = iter(range(1, 1000))
 
@@ -162,10 +175,10 @@ def dashboard():
             "Open observations",
             16,
             1,
-            'sum(fieldnotes_observations{status="open"})',
+            "sum(" + store('status="open"') + ")",
             "Open observations in the store now: posted, not yet proposed or raised.",
         ),
-        stat("In the store", 20, 1, "sum(fieldnotes_observations)", "Every observation now."),
+        stat("In the store", 20, 1, f"sum({store()})", "Every observation now."),
         bars(
             "Posts by outcome",
             0,
@@ -213,7 +226,7 @@ def dashboard():
             0,
             22,
             12,
-            "sum by (status) (fieldnotes_observations)",
+            f"sum by (status) ({store()})",
             "{{status}}",
             "The store's observations, from the index.",
             stacked=True,
@@ -223,7 +236,7 @@ def dashboard():
             12,
             22,
             12,
-            "sum by (category) (fieldnotes_observations)",
+            f"sum by (category) ({store()})",
             "{{category}}",
             "The store's observations, from the index.",
             stacked=True,
@@ -233,7 +246,7 @@ def dashboard():
             0,
             30,
             8,
-            'sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji="📝"}))',
+            "sort_desc(sum by (repo) (" + reactions(POST) + "))",
             "{{repo}}",
             "The observations each repo posted that are still in the store. Retired ones leave it.",
         ),
@@ -242,7 +255,7 @@ def dashboard():
             8,
             30,
             8,
-            'sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji!="📝"}))',
+            "sort_desc(sum by (repo) (" + reactions(NOT_POST) + "))",
             "{{repo}}",
             "Reactions each repo left on observations still in the store, posts left out.",
         ),
@@ -251,7 +264,7 @@ def dashboard():
             16,
             30,
             8,
-            'sort_desc(sum by (emoji) (fieldnotes_store_reactions{emoji!="📝"}))',
+            "sort_desc(sum by (emoji) (" + reactions(NOT_POST) + "))",
             "{{emoji}}",
             "Reactions on observations still in the store, posts left out.",
         ),

@@ -219,7 +219,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sum(fieldnotes_observations{status=\"open\"})",
+          "expr": "sum(max by (status, category) (fieldnotes_observations{status=\"open\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -262,7 +262,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sum(fieldnotes_observations)",
+          "expr": "sum(max by (status, category) (fieldnotes_observations{}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -506,7 +506,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sum by (status) (fieldnotes_observations)",
+          "expr": "sum by (status) (max by (status, category) (fieldnotes_observations{}))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -551,7 +551,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sum by (category) (fieldnotes_observations)",
+          "expr": "sum by (category) (max by (status, category) (fieldnotes_observations{}))",
           "legendFormat": "{{category}}",
           "refId": "A"
         }
@@ -596,7 +596,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji=\"📝\"}))",
+          "expr": "sort_desc(sum by (repo) (max by (repo, emoji) (fieldnotes_store_reactions{emoji=\"📝\"})))",
           "legendFormat": "{{repo}}",
           "refId": "A",
           "instant": true,
@@ -642,7 +642,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sort_desc(sum by (repo) (fieldnotes_store_reactions{emoji!=\"📝\"}))",
+          "expr": "sort_desc(sum by (repo) (max by (repo, emoji) (fieldnotes_store_reactions{emoji!=\"📝\"})))",
           "legendFormat": "{{repo}}",
           "refId": "A",
           "instant": true,
@@ -688,7 +688,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sort_desc(sum by (emoji) (fieldnotes_store_reactions{emoji!=\"📝\"}))",
+          "expr": "sort_desc(sum by (emoji) (max by (repo, emoji) (fieldnotes_store_reactions{emoji!=\"📝\"})))",
           "legendFormat": "{{emoji}}",
           "refId": "A",
           "instant": true,

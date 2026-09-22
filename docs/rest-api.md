@@ -67,21 +67,27 @@ unknown fields are refused.
 - **Board sync**: reconciles an observation's card with YouTrack. See
   [webhooks.md](webhooks.md#board-sync).
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
-  annotations. They hold counts and repo names only, never text. See [Metrics](#metrics).
+  annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard
+  reads them. See [Metrics](#metrics).
 
 ## Metrics
 
 The counters are held in memory and start again at zero when the pod restarts. `increase()` over a
-range gets past a restart. The store gauge is read from the index at scrape time.
+range gets past a restart. Every counter label comes from a closed set, and every combination
+exists at 0 from startup. Otherwise a series would first appear at 1, and `increase()` would miss
+that first increment, which at this volume would be most of them. The repo and the emoji are
+open-ended, so they come from the store gauges instead, which are read from the index at scrape
+time.
 
 | Metric | Labels | What it counts |
 | --- | --- | --- |
 | `fieldnotes_observations` | `status`, `category` | observations in the store (gauge) |
-| `fieldnotes_posts_total` | `client`, `repo`, `category`, `outcome` | posts: `created` (nothing matched), `matched` (candidates returned, nothing created), `forced` |
+| `fieldnotes_store_reactions` | `repo`, `emoji` | reactions on the observations in the store; a post is its 📝 (gauge) |
+| `fieldnotes_posts_total` | `client`, `category`, `outcome` | posts: `created` (nothing matched), `matched` (candidates returned, nothing created), `forced` |
 | `fieldnotes_post_candidates_total` | `match_class` | candidates returned to matched posts |
 | `fieldnotes_post_top_score` | | the best candidate's score on a matched post (histogram) |
 | `fieldnotes_match_follow_ups_total` | `result` | what the reporter did after a matched post (below) |
-| `fieldnotes_reactions_total` | `client`, `repo`, `emoji` | reactions |
+| `fieldnotes_reactions_total` | `client` | reactions |
 | `fieldnotes_gets_total` | `client` | observations read by id |
 | `fieldnotes_webhook_deliveries_total` | `source`, `action` | verified deliveries, `queued` or `ignored`; a refused one shows only as a 401 in the request metric |
 | `fieldnotes_board_syncs_total` | `result` | `changed`, `unchanged`, or `failed` (a queued sync that raised) |

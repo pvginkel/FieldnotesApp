@@ -11,9 +11,13 @@ move settles it as one `fieldnotes_match_follow_ups_total` result:
 - `reposted`: another matched post, as when the reporter rewords rather than decides;
 - `abandoned`: nothing within the window.
 
-A reporter that passes no session is told apart by its repo alone. The counters live in memory and
-restart at zero with the pod; the store's own numbers are gauges read from the index at scrape
-time, so they survive a restart.
+A reporter that passes no session is told apart by its repo alone.
+
+The counters live in memory and restart at zero with the pod. Every label they carry is from a
+closed set, and every combination is created at zero on startup: a series that is born at 1 is an
+increment `increase()` never sees, and at a handful of posts a day that would be most of them. What
+is open-ended, the repo and the emoji, is read from the store at scrape time instead, as gauges that
+survive a restart.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from prometheus_client import CollectorRegistry, Counter, Histogram, generate_la
 from prometheus_client.core import GaugeMetricFamily, Metric
 from prometheus_client.registry import Collector
 
-from fieldnotes_contracts import Category, Status
+from fieldnotes_contracts import Category, MatchClass, Status
 
 from .index import Index
 
@@ -36,6 +40,9 @@ SCORE_BUCKETS = (0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95
 
 Reporter = tuple[str, str | None]
 
+POST_OUTCOMES = ("created", "matched", "forced")
+FOLLOW_UPS = ("reacted", "reacted_other", "forced", "reposted", "abandoned")
+
 
 class _StoreCollector(Collector):
     def __init__(self, index: Index) -> None:
@@ -43,9 +50,13 @@ class _StoreCollector(Collector):
 
     def collect(self) -> Iterable[Metric]:
         counts = {(status, category): 0 for status in Status for category in Category}
+        reactions: dict[tuple[str, str], int] = {}
         for entry in self.index.entries():
             observation = entry.observation
             counts[(observation.status, observation.category)] += 1
+            for reaction in observation.reactions:
+                key = (reaction.repo, reaction.emoji)
+                reactions[key] = reactions.get(key, 0) + 1
         gauge = GaugeMetricFamily(
             "fieldnotes_observations",
             "Observations in the store, by status and category.",
@@ -54,10 +65,18 @@ class _StoreCollector(Collector):
         for (status, category), n in counts.items():
             gauge.add_metric([status.value, category.value], n)
         yield gauge
+        gauge = GaugeMetricFamily(
+            "fieldnotes_store_reactions",
+            "Reactions on the observations in the store, by repo and emoji; a post is its 📝.",
+            labels=["repo", "emoji"],
+        )
+        for (repo, emoji), n in sorted(reactions.items()):
+            gauge.add_metric([repo, emoji], n)
+        yield gauge
 
 
 class Metrics:
-    def __init__(self, index: Index, clock: Callable[[], datetime]) -> None:
+    def __init__(self, index: Index, clock: Callable[[], datetime], clients: Sequence[str]) -> None:
         self.clock = clock
         self.registry = CollectorRegistry()
         self.registry.register(_StoreCollector(index))
@@ -65,7 +84,7 @@ class Metrics:
             "fieldnotes_posts",
             "Posts, by outcome: created (nothing matched), matched (candidates returned, nothing "
             "created) or forced.",
-            ["client", "repo", "category", "outcome"],
+            ["client", "category", "outcome"],
             registry=self.registry,
         )
         self.candidates = Counter(
@@ -89,7 +108,7 @@ class Metrics:
         self.reactions = Counter(
             "fieldnotes_reactions",
             "Reactions to observations.",
-            ["client", "repo", "emoji"],
+            ["client"],
             registry=self.registry,
         )
         self.gets = Counter(
@@ -118,6 +137,21 @@ class Metrics:
             registry=self.registry,
         )
         self._offered: dict[Reporter, tuple[datetime, frozenset[str]]] = {}
+        for client in clients:
+            self.reactions.labels(client)
+            self.gets.labels(client)
+            for category in Category:
+                for outcome in POST_OUTCOMES:
+                    self.posts.labels(client, category.value, outcome)
+        for match_class in MatchClass:
+            self.candidates.labels(match_class.value)
+        for result in FOLLOW_UPS:
+            self.follow_ups.labels(result)
+        for source in ("github", "youtrack"):
+            for action in ("queued", "ignored"):
+                self.webhooks.labels(source, action)
+        for result in ("changed", "unchanged", "failed"):
+            self.board_syncs.labels(result)
 
     def exposition(self) -> bytes:
         self._expire()
@@ -150,14 +184,14 @@ class Metrics:
                 self.follow_ups.labels("forced").inc()
         else:
             outcome = "created"
-        self.posts.labels(client, repo, category.value, outcome).inc()
+        self.posts.labels(client, category.value, outcome).inc()
 
-    def reacted(self, client: str, repo: str, session: str | None, id_: str, emoji: str) -> None:
+    def reacted(self, client: str, repo: str, session: str | None, id_: str) -> None:
         self._expire()
         offered = self._offered.pop((repo, session), None)
         if offered is not None:
             self.follow_ups.labels("reacted" if id_ in offered[1] else "reacted_other").inc()
-        self.reactions.labels(client, repo, emoji).inc()
+        self.reactions.labels(client).inc()
 
     def _expire(self) -> None:
         cutoff = self.clock() - FOLLOW_UP_WINDOW

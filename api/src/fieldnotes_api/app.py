@@ -110,7 +110,7 @@ def create_app(
         settings.store.root, EmbeddingCache(settings.cache_dir, settings.embed_model), models
     )
     matcher = Matcher(index, models, settings.match)
-    metrics = Metrics(index, clock)
+    metrics = Metrics(index, clock, settings.clients.names)
     observations = Observations(store, index, matcher, clock, board, outcomes, metrics)
     runtime = Runtime(settings, store, index, observations)
 

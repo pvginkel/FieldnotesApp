@@ -29,6 +29,23 @@ def test_metrics_answer_without_a_token_and_count_the_store(start, auth, scrape)
     assert value("fieldnotes_observations", status="open", category="hint") == 1
     assert value("fieldnotes_observations", status="open", category="friction") == 1
     assert value("fieldnotes_observations", status="closed", category="idea") == 0
+    assert value("fieldnotes_store_reactions", repo=REPO, emoji="📝") == 2
+
+
+def test_every_closed_label_set_is_there_from_the_start(start, scrape):
+    """A series born at 1 is an increment `increase()` never sees."""
+    with start() as api:
+        text = api.get("/metrics").text
+
+    for line in (
+        'fieldnotes_posts_total{category="idea",client="skills",outcome="forced"} 0.0',
+        'fieldnotes_match_follow_ups_total{result="reacted"} 0.0',
+        'fieldnotes_post_candidates_total{match_class="related"} 0.0',
+        'fieldnotes_reactions_total{client="mcp"} 0.0',
+        'fieldnotes_webhook_deliveries_total{action="queued",source="github"} 0.0',
+        'fieldnotes_board_syncs_total{result="failed"} 0.0',
+    ):
+        assert line in text
 
 
 def test_posts_are_counted_by_outcome(start, auth, scrape):
@@ -39,7 +56,7 @@ def test_posts_are_counted_by_outcome(start, auth, scrape):
         value = scrape(api)
 
     for outcome in ("created", "matched", "forced"):
-        labels = {"client": "mcp", "repo": REPO, "category": "hint", "outcome": outcome}
+        labels = {"client": "mcp", "category": "hint", "outcome": outcome}
         assert value("fieldnotes_posts_total", **labels) == 1, outcome
     assert value("fieldnotes_post_candidates_total", match_class="likely") == 1
     assert value("fieldnotes_post_top_score_count") == 1
@@ -59,7 +76,8 @@ def test_a_reaction_to_an_offered_candidate_is_a_landed_answer(start, auth, scra
 
     assert value("fieldnotes_match_follow_ups_total", result="reacted") == 1
     assert value("fieldnotes_match_follow_ups_total", result="reacted_other") == 1
-    assert value("fieldnotes_reactions_total", client="mcp", repo=REPO, emoji="👍") == 3
+    assert value("fieldnotes_reactions_total", client="mcp") == 3
+    assert value("fieldnotes_store_reactions", repo=REPO, emoji="👍") == 3
 
 
 def test_a_matched_post_left_alone_is_abandoned_and_a_second_is_a_repost(

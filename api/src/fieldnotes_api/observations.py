@@ -171,7 +171,7 @@ class Observations:
             return reaction_counts(document.observation), Commit((observation_path(id_),), message)
 
         reactions = await self.store.write(append)
-        self.metrics.reacted(client, request.repo, request.session, id_, request.emoji)
+        self.metrics.reacted(client, request.repo, request.session, id_)
         logger.info("react %s %s by %s from %s", id_, request.emoji, client, request.repo)
         return ReactReply(id=id_, reactions=reactions)
 

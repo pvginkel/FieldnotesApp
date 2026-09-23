@@ -8,6 +8,7 @@ library identifier: 'JenkinsPipelineUtils', changelog: false
 // store's suites (api/tests, eval/tests) drive a real `git` against bare repos in tmp_path rather
 // than a fake. `registry:5000/python` would run the unit tests and fail those.
 podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
+    containerTemplates.k8s('k8s'),
     containerTemplates.modern_app_dev('modern-app-dev'),
 ]) {
     node(POD_LABEL) {
@@ -43,8 +44,14 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
 
         // Push-to-deploy: trigger the HelmCharts target-state pipeline so the freshly built image
         // rolls out. The `fieldnotes` release pins `:latest` and redeploys on the digest move.
-        stage('Deploy Helm charts') {
-            cicd.helmDeploy()
+        // The build hands its image to Argo CD by pinning it in the deploy repo (argo-cd D53);
+        // Argo syncs the commit. HelmCharts no longer deploys this app.
+        stage('Write image pins') {
+            container('k8s') {
+                cicd.writeVersionPins(repo: 'pvginkel/FieldnotesDeploy', pins: [
+                    'config/prd/values.yaml': ['images.fieldnotes': ":${currentBuild.number}"]
+                ])
+            }
         }
     }
 }

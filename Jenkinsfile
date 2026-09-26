@@ -18,14 +18,10 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
 
         stage('Run validation') {
             container('k8s') {
-                // Resolve the Playwright version from the frontend lockfile to
-                // select the matching base image (browsers pre-baked).
-                def playwrightVersion = sh(
-                    script: "grep -m1 '^  playwright@' frontend/pnpm-lock.yaml | sed 's/.*@//;s/://'",
-                    returnStdout: true,
-                ).trim()
-                def validationImage = "registry:5000/modern-app-dev-playwright:playwright-${playwrightVersion}"
-                echo "Validation image: ${validationImage}"
+                // The validation Job runs in the image of the dev environment's
+                // `modern-app` sidecar. It carries Chromium's OS dependencies but no
+                // browser (run-suite downloads it), and no /work: uid 1000 cannot
+                // create one at the filesystem root, so the pod mounts an emptyDir there.
 
                 // Stream the whole monorepo working tree in instead of baking an image.
                 sh "tar czf /tmp/context.tar.gz --exclude=.git --exclude=node_modules --exclude=.venv --exclude=test-results --exclude=.pnpm-store ."
@@ -56,13 +52,19 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
                                           operator: Equal
                                           value: large
                                           effect: PreferNoSchedule
+                                    volumes:
+                                        - name: work
+                                          emptyDir: {}
                                     containers:
                                         - name: validation
-                                          image: ${validationImage}
+                                          image: registry:5000/kube-coder-modern-app-toolchain:node-24
                                           imagePullPolicy: Always
                                           securityContext:
                                               runAsUser: 1000
                                               runAsGroup: 1000
+                                          volumeMounts:
+                                              - name: work
+                                                mountPath: /work
                                           command: ["sh", "-c"]
                                           args:
                                               - |

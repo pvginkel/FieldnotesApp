@@ -232,8 +232,9 @@ def run_tests(args):
                 progress_skip(col)
                 results.append(("frontend playwright", False, "Skipped (build failed)", None))
             else:
-                # Ensure Chromium is present. The validation base image pre-bakes
-                # the matching browser, so this is a fast no-op there.
+                # Download the Chromium build the installed Playwright pins; a no-op
+                # when it is already in the browser cache. The CI validation image
+                # carries no browser, so every CI run downloads it.
                 col = progress_start("Installing Playwright browser")
                 ok_pw, detail_pw = _install_cmd(
                     ["pnpm", "playwright", "install", "chromium"], cwd=frontend, timeout=900

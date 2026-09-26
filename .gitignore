@@ -1,0 +1,10 @@
+.pnpm-store
+/test_results.md
+.claude/sessions/
+__pycache__
+/logs
+/tmp
+.env*
+!.env.example
+node_modules
+*.tsbuildinfo

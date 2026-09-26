@@ -1,0 +1,34 @@
+# KubeCoder environment manifest for the FieldnotesApp monorepo.
+#
+# One sidecar rather than `python` + `frontend`: the Playwright harness boots the
+# Flask backend and the SSE gateway per worker
+# (frontend/tests/support/process/servers.ts), so a single command needs both
+# toolsets in the same container.
+#
+# No imageBuilder: both Dockerfiles are built by Jenkins with
+# helmCharts.kaniko(...), and nothing builds an image from inside this
+# environment.
+
+repos:
+  # The AI workflow's spec repository, shared across every environment that
+  # works on FieldnotesApp.
+  - url: https://github.com/pvginkel/FieldnotesAppSpecs
+    shared: true
+
+capabilities:
+  github: rw
+
+tools:
+  - use: modern-app
+
+ports:
+  - name: frontend
+    port: 3400
+    type: http
+    sslOffload: true
+  - name: backend
+    port: 3401
+    type: http
+  - name: sse-gateway
+    port: 3402
+    type: http

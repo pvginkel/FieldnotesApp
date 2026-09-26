@@ -1,0 +1,33 @@
+{
+  // The repository root, plus the shared spec repository the AI workflow uses.
+  // backend/ and frontend/ are not listed separately: the root folder already
+  // covers them, and adding them would show every file twice in the explorer.
+  "folders": [
+    { "path": "." },
+    { "path": "../FieldnotesAppSpecs" }
+  ],
+  // Only the repo's own dev runner needs a task. Starting a Claude session and
+  // every `kc project` verb are commands the KubeCoder VS Code extension already
+  // publishes (F1 -> "KubeCoder: ..."), so tasks for those would just be a
+  // second, drifting copy.
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Dev Services",
+        "type": "shell",
+        "command": "scripts/dev.py",
+        "options": { "cwd": "${workspaceFolder}" },
+        "icon": { "id": "server-process" },
+        "problemMatcher": [],
+        "presentation": {
+          "panel": "dedicated",
+          "reveal": "always",
+          "focus": true,
+          "showReuseMessage": false
+        },
+        "isBackground": true
+      }
+    ]
+  }
+}

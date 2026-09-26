@@ -1,0 +1,16 @@
+# One-command dev startup: `scripts/dev.py` (honcho launcher — clean child cleanup +
+# per-service logs under logs/). Lower-level: `poetry run honcho -f Procfile.dev start`.
+# The backend runs in debug mode (Werkzeug auto-reload). The frontend dev server
+# proxies API calls to the backend on :3401 (override with BACKEND_URL) and SSE to
+# the gateway on :3402 (override with SSE_GATEWAY_URL). The gateway is the
+# `ssegateway` package (a frontend devDependency, github:pvginkel/SSEGateway#stable)
+# — no sibling checkout needed.
+# scripts/dev.py runs honcho itself inside the modern-app tool container (the
+# dev container has neither poetry nor pnpm, and every service needs that
+# container anyway), so these lines run there natively — no cexec.
+# honcho runs from the root project's poetry venv and children inherit
+# VIRTUAL_ENV, which makes the backend's `poetry run` reuse the root venv and
+# miss its own dependencies. Clear it so poetry resolves backend/ properly.
+backend:  cd backend && env -u VIRTUAL_ENV -u POETRY_ACTIVE PORT=3401 poetry run dev
+frontend: cd frontend && pnpm dev
+gateway:  scripts/dev-sse-gateway.sh

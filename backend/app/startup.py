@@ -27,7 +27,12 @@ def create_container() -> ServiceContainer:
 
 def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     """Register all app-specific blueprints on api_bp (under /api prefix)."""
-    pass
+    # Flask refuses a child blueprint once api_bp is registered on an app, and api_bp is a
+    # module-level singleton the suites register on an app per test: register the children once.
+    if not api_bp._got_registered_once:
+        from app.api.fieldnotes import fieldnotes_bp
+
+        api_bp.register_blueprint(fieldnotes_bp)
 
 
 def register_error_handlers(app: Flask) -> None:

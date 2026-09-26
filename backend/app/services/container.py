@@ -8,6 +8,7 @@ from dependency_injector import containers, providers
 from app.app_config import AppSettings
 from app.config import Settings
 from app.services.auth_service import AuthService
+from app.services.fieldnotes_service import FieldnotesService
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
 from app.services.metrics_service import MetricsService
@@ -97,6 +98,16 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.frontend_version_service())
+
+    # Fieldnotes: the store checkout, its write queue, the index and the match pipeline. Its
+    # startup clones and indexes on a thread of its own.
+    fieldnotes_service = providers.Singleton(
+        FieldnotesService,
+        config=config,
+        health_service=health_service,
+        lifecycle_coordinator=lifecycle_coordinator,
+    )
+    register_for_background_startup(lambda c: c.fieldnotes_service().start())
 
 
 def start_background_services(container: Any) -> None:

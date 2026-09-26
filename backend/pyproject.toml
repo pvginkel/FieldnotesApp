@@ -20,6 +20,9 @@ dependencies = [
     "pyjwt>=2.11.0,<3",
     "cryptography>=46.0.4,<47",
     "httpx>=0.28.1,<0.29",
+    "numpy>=2,<3",
+    "pyyaml>=6,<7",
+    "prometheus-client>=0.21,<1",
     "fieldnotes-contracts",
     # Shipped in this image as its second entry point, `fieldnotes-mcp`.
     "fieldnotes-mcp",
@@ -41,6 +44,7 @@ dev = [
     "pytest-cov>=4.1.0,<5",
     "types-flask-cors>=4.0.0,<5",
     "types-requests>=2.31.0,<3",
+    "types-pyyaml>=6,<7",
     "types-waitress>=3.0.1.20250801,<4",
     "vulture>=2.14,<3",
 ]

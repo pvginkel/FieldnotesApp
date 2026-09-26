@@ -384,7 +384,7 @@
       "id": 10,
       "type": "bargauge",
       "title": "Best candidate's score",
-      "description": "Matched posts by their best candidate's score, per bucket, over the range: where the matches sit against the thresholds.",
+      "description": "Matched posts by their best candidate's score, per bucket, over the range: where the matches sit against the thresholds (related 0.85, likely 0.94).",
       "datasource": {
         "type": "prometheus",
         "uid": "ce0kvu6exy9z4c"
@@ -401,7 +401,7 @@
             "type": "prometheus",
             "uid": "ce0kvu6exy9z4c"
           },
-          "expr": "sum by (le) (increase(fieldnotes_post_top_score_bucket[$__range]))",
+          "expr": "sum by (le) (increase(fieldnotes_post_top_score_bucket[$__range])) and on (le) sum by (le) (fieldnotes_post_top_score_bucket)",
           "legendFormat": "{{le}}",
           "refId": "A",
           "instant": true,
@@ -423,7 +423,10 @@
             "lastNotNull"
           ]
         },
-        "showUnfilled": true
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 12,
+        "maxVizHeight": 300
       }
     },
     {

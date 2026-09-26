@@ -126,7 +126,9 @@ def ranking(title, x, y, w, expr, legend, description, heatmap=False):
             "displayMode": "basic",
             "reduceOptions": {"calcs": ["lastNotNull"]},
             "showUnfilled": True,
-        },
+        }
+        # Thin bars, so a histogram's eleven buckets fit the panel without scrolling.
+        | ({"sizing": "manual", "minVizHeight": 12, "maxVizHeight": 300} if heatmap else {}),
     )
 
 
@@ -205,10 +207,12 @@ def dashboard():
             0,
             13,
             12,
-            "sum by (le) (increase(fieldnotes_post_top_score_bucket[$__range]))",
+            # Only the buckets the pod reports now: retired ones would interleave with them.
+            "sum by (le) (increase(fieldnotes_post_top_score_bucket[$__range]))"
+            " and on (le) sum by (le) (fieldnotes_post_top_score_bucket)",
             "{{le}}",
             "Matched posts by their best candidate's score, per bucket, over the range: where "
-            "the matches sit against the thresholds.",
+            "the matches sit against the thresholds (related 0.85, likely 0.94).",
             heatmap=True,
         ),
         ranking(

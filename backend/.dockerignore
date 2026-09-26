@@ -1,0 +1,15 @@
+# The image build context is this directory (kaniko is handed backend/), so a
+# repository-root .dockerignore does not apply to it.
+.git
+.venv
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+tests
+docs
+.claude
+logs
+tmp

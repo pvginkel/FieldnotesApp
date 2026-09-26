@@ -1,0 +1,17 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.13.2
+_src_path: ../../ModernAppTemplate/backend
+author_email: pvginkel@gmail.com
+author_name: Pieter van Ginkel
+backend_port: 3401
+database_name: fieldnotes
+frontend_port: 3400
+project_description: Curated, cross-project observation store for AI agents
+project_name: fieldnotes
+s3_bucket_name: fieldnotes-attachments
+sse_gateway_port: 3402
+testing_port_offset: 10
+use_database: false
+use_oidc: true
+use_s3: false
+use_sse: true

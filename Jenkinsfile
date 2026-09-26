@@ -7,11 +7,13 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
 ]) {
     node(POD_LABEL) {
         def gitRev
+        def gitBranch
         def k8sNamespace = kubectl.currentNamespace()
 
         stage('Cloning repo') {
             def scmVars = checkout scm
             gitRev = scmVars.GIT_COMMIT
+            gitBranch = scmVars.GIT_BRANCH
         }
 
         stage('Run validation') {
@@ -182,10 +184,13 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
 
         // The build hands its images to Argo CD by pinning them in the deploy repo (argo-cd D53);
         // Argo syncs the commit. HelmCharts no longer deploys this app.
+        // TEMPORARY, while the app is rebuilt on the `dev` branch: a dev build pins the
+        // fieldnotes-dev stage, never prd. Revert at cut-over, when dev fast-forwards main.
         stage('Write image pins') {
+            def pinsFile = gitBranch.endsWith('/dev') ? 'config/dev/values.yaml' : 'config/prd/values.yaml'
             container('k8s') {
                 cicd.writeVersionPins(repo: 'pvginkel/FieldnotesDeploy', pins: [
-                    'config/prd/values.yaml': [
+                    (pinsFile): [
                         'images.fieldnotes': ":${currentBuild.number}",
                         'images.fieldnotesUI': ":${currentBuild.number}"
                     ]

@@ -1,0 +1,14 @@
+/**
+ * App-specific theme overrides.
+ * App-owned — not overwritten by template updates.
+ *
+ * Override CSS custom properties defined in index.css to set brand colors.
+ * Add app-specific utilities with @utility directives.
+ *
+ * Example:
+ *   @layer base {
+ *     :root {
+ *       --primary: 200 80% 50%;
+ *     }
+ *   }
+ */

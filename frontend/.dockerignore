@@ -1,0 +1,14 @@
+# The image build context is this directory (kaniko is handed frontend/), so a
+# repository-root .dockerignore does not apply to it.
+#
+# node_modules matters for correctness, not just speed: the Dockerfile runs
+# pnpm install and then COPY . ., so an uploaded host node_modules would
+# overwrite the freshly installed one.
+.git
+.pnpm-store
+node_modules
+test-results
+playwright-report
+dist
+.claude
+logs

@@ -45,6 +45,8 @@ dev = [
     "types-flask-cors>=4.0.0,<5",
     "types-requests>=2.31.0,<3",
     "types-pyyaml>=6,<7",
+    # The replay and eval harness: a workspace member for the suites, never in the image.
+    "fieldnotes-eval",
     "types-waitress>=3.0.1.20250801,<4",
     "vulture>=2.14,<3",
 ]
@@ -64,11 +66,12 @@ packages = ["app"]
 # API and the MCP server share, and the MCP server, which ships in this image as
 # a second entry point (`fieldnotes-mcp`).
 [tool.uv.workspace]
-members = ["packages/*", "mcp-server"]
+members = ["packages/*", "mcp-server", "eval"]
 
 [tool.uv.sources]
 fieldnotes-contracts = { workspace = true }
 fieldnotes-mcp = { workspace = true }
+fieldnotes-eval = { workspace = true }
 
 [tool.ruff]
 target-version = "py313"
@@ -104,7 +107,7 @@ known-first-party = ["app", "fieldnotes_contracts", "fieldnotes_mcp"]
 python_version = "3.13"
 # The workspace members' tests are no package, so no module override reaches
 # them; like tests/ here, they are not type-checked.
-exclude = ['^(mcp-server|packages/[^/]+)/tests/']
+exclude = ['^(mcp-server|packages/[^/]+)/tests/', '^eval/']
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
@@ -126,13 +129,14 @@ ignore_errors = true
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages", "mcp-server"]
+testpaths = ["tests", "packages", "mcp-server", "eval"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v"
+# importlib: the workspace members' suites share basenames (test_package.py, test_config.py).
+addopts = "-v --import-mode=importlib"
 markers = [
     "integration: marks tests as integration tests (requires external dependencies)",
     "slow: marks tests as slow running tests"

@@ -13,6 +13,7 @@ resolution-markers = [
 members = [
     "fieldnotes",
     "fieldnotes-contracts",
+    "fieldnotes-eval",
     "fieldnotes-mcp",
 ]
 
@@ -488,6 +489,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "copier" },
+    { name = "fieldnotes-eval" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -526,6 +528,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "copier", specifier = ">=9.0.0,<10" },
+    { name = "fieldnotes-eval", editable = "eval" },
     { name = "mypy", specifier = ">=1.8.0,<2" },
     { name = "pytest", specifier = ">=8,<9" },
     { name = "pytest-asyncio", specifier = ">=1,<2" },
@@ -548,6 +551,27 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2,<3" }]
+
+[[package]]
+name = "fieldnotes-eval"
+version = "0.1.0"
+source = { editable = "eval" }
+dependencies = [
+    { name = "fieldnotes" },
+    { name = "fieldnotes-contracts" },
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fieldnotes", editable = "." },
+    { name = "fieldnotes-contracts", editable = "packages/fieldnotes-contracts" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "mcp", specifier = ">=1.28,<2" },
+    { name = "numpy", specifier = ">=2" },
+]
 
 [[package]]
 name = "fieldnotes-mcp"

@@ -12,3 +12,6 @@ dist/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# The eval harness's output (replays, benches): it holds the private dataset's text.
+.run/

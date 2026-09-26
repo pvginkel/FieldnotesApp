@@ -3,6 +3,9 @@ matched post and what the same reporter did next."""
 
 from datetime import timedelta
 
+from fieldnotes_api.config import DEFAULT_LEXICAL_WEIGHT, DEFAULT_LIKELY, DEFAULT_RELATED
+from fieldnotes_api.metrics import SCORE_BUCKETS
+
 DUPLICATE = "uv sync installs no workspace members"
 REPO = "pvginkel/Example"
 
@@ -103,3 +106,10 @@ def test_gets_and_requests_are_counted_by_route(start, auth, scrape):
     assert value("fieldnotes_gets_total", client="mcp") == 1
     labels = {"method": "GET", "route": "/observations/{id}", "status": "200"}
     assert value("fieldnotes_http_request_duration_seconds_count", **labels) == 1
+
+
+def test_score_buckets_span_a_matched_post_under_the_default_scorer():
+    """A matched post scores from `related` to 1 + the weight; the buckets split at `likely`."""
+    assert DEFAULT_RELATED < SCORE_BUCKETS[0]
+    assert DEFAULT_LIKELY in SCORE_BUCKETS
+    assert SCORE_BUCKETS[-1] == 1 + DEFAULT_LEXICAL_WEIGHT

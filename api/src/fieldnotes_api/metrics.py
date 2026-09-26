@@ -35,8 +35,10 @@ from .index import Index
 
 FOLLOW_UP_WINDOW = timedelta(minutes=30)
 
-# The thresholds sit between 0.25 and 0.7; a score is a cosine plus a weighted overlap.
-SCORE_BUCKETS = (0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.5)
+# A matched post's best score lies between `DEFAULT_RELATED` and 1 + `DEFAULT_LEXICAL_WEIGHT` (a
+# cosine plus the weighted overlap), so the buckets span that alone: three for the related band,
+# then the likely band from `DEFAULT_LIKELY`. They belong to the scorer, like its thresholds.
+SCORE_BUCKETS = (0.88, 0.91, 0.94, 0.97, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25)
 
 Reporter = tuple[str, str | None]
 

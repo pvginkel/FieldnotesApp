@@ -20,6 +20,9 @@ dependencies = [
     "pyjwt>=2.11.0,<3",
     "cryptography>=46.0.4,<47",
     "httpx>=0.28.1,<0.29",
+    "fieldnotes-contracts",
+    # Shipped in this image as its second entry point, `fieldnotes-mcp`.
+    "fieldnotes-mcp",
 ]
 
 [project.scripts]
@@ -32,7 +35,9 @@ dev = [
     "copier>=9.0.0,<10",
     "ruff>=0.11.0,<0.12",
     "mypy>=1.8.0,<2",
-    "pytest>=7.4.0,<8",
+    "pytest>=8,<9",
+    # The MCP server's async tests (asyncio_mode = "auto" below).
+    "pytest-asyncio>=1,<2",
     "pytest-cov>=4.1.0,<5",
     "types-flask-cors>=4.0.0,<5",
     "types-requests>=2.31.0,<3",
@@ -49,6 +54,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# The code the template does not know about lives here as workspace members, out
+# of copier's way (it only writes paths the template has): the wire models the
+# API and the MCP server share, and the MCP server, which ships in this image as
+# a second entry point (`fieldnotes-mcp`).
+[tool.uv.workspace]
+members = ["packages/*", "mcp-server"]
+
+[tool.uv.sources]
+fieldnotes-contracts = { workspace = true }
+fieldnotes-mcp = { workspace = true }
 
 [tool.ruff]
 target-version = "py313"
@@ -73,12 +89,18 @@ ignore = [
     "W191", # indentation contains tabs
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app", "fieldnotes_contracts", "fieldnotes_mcp"]
+
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tools/**" = ["ERA001"]
 
 [tool.mypy]
 python_version = "3.13"
+# The workspace members' tests are no package, so no module override reaches
+# them; like tests/ here, they are not type-checked.
+exclude = ['^(mcp-server|packages/[^/]+)/tests/']
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
@@ -100,7 +122,9 @@ ignore_errors = true
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "packages", "mcp-server"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

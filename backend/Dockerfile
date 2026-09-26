@@ -22,9 +22,13 @@ WORKDIR /app
 
 # --- Reproduce the environment ---
 COPY pyproject.toml uv.lock /app/
+# The workspace members are dependencies of the project, built from source.
+COPY packages /app/packages
+COPY mcp-server /app/mcp-server
 
-# Install project deps into .venv
-RUN uv sync --locked --no-dev --no-install-project
+# Install project deps into .venv, the members copied in (not linked), so the
+# venv carries the `fieldnotes-mcp` entry point the pod's mcp container runs.
+RUN uv sync --locked --no-dev --no-install-project --no-editable
 
 # copy your source (no re-resolution needed)
 COPY *.py /app/

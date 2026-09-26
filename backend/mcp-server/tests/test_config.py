@@ -8,7 +8,7 @@ TOKENS = {"FIELDNOTES_API_TOKEN": "api-token", "FIELDNOTES_MCP_TOKEN": "mcp-toke
 def test_defaults():
     settings = load_settings(TOKENS)
 
-    assert settings.api_url == "http://localhost:8080"
+    assert settings.api_url == "http://localhost:3401/api"
     assert settings.api_token == "api-token"
     assert settings.mcp_token == "mcp-token"
     assert (settings.host, settings.port) == ("0.0.0.0", 8081)

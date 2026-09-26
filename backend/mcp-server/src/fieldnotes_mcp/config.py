@@ -2,7 +2,7 @@
 
 | Variable | Default | What |
 | --- | --- | --- |
-| `FIELDNOTES_API_URL` | `http://localhost:8080` | the API, a container of the same pod |
+| `FIELDNOTES_API_URL` | `http://localhost:3401/api` | the API's surface, a container of the same pod |
 | `FIELDNOTES_API_TOKEN` | required | the bearer of the API's `mcp` client (secret) |
 | `FIELDNOTES_MCP_TOKEN` | required | the bearer agents present to this server (secret) |
 | `FIELDNOTES_MCP_HOST`, `_PORT` | `0.0.0.0`, 8081 | where the server listens |
@@ -21,8 +21,10 @@ from dataclasses import dataclass
 
 PREFIX = "FIELDNOTES_"
 
-DEFAULT_API_URL = "http://localhost:8080"
-# The API listens on 8080 in the same pod, so this server takes the next port.
+# The backend listens on 3401 in the same pod and serves the surface under /api; the client's
+# paths are relative to this.
+DEFAULT_API_URL = "http://localhost:3401/api"
+# Clear of the pod's 3400-3402 (UI, backend, SSE gateway).
 DEFAULT_MCP_PORT = 8081
 
 

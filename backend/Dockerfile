@@ -38,8 +38,10 @@ COPY app /app/app
 #   We'll just copy the env and the PATH reference.
 FROM python:3.13-slim
 
+# git because the store is a real checkout the API fetches, commits to and pushes through the
+# git CLI; ca-certificates so the HTTPS remote, the models pod and YouTrack all verify.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tini netcat-openbsd \
+    apt-get install -y --no-install-recommends tini netcat-openbsd git ca-certificates \
    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 3401

@@ -47,8 +47,10 @@ Other repos the work touches:
 - **The store**, `pvginkel/Fieldnotes`, private: `observations/`, `triage/`, and the `install`,
   `reconciler` and `actioner` skills. It is data plus skills, not application code, and nothing of it
   lives here.
-- **`pvginkel/HelmCharts`** holds both charts: `models` (the Text Embeddings Inference pod, which no
-  application owns) and `fieldnotes`. **`pvginkel/DockerImages`** holds `webhook-relay`.
+- **`pvginkel/FieldnotesDeploy`** holds the `fieldnotes` chart and its prd values, which CI pins the
+  image into; Argo CD syncs it. **`pvginkel/ModelsDeploy`** holds `models` (the Text Embeddings
+  Inference pod, which no application owns). Both left `pvginkel/HelmCharts` on 2026-09-26.
+  **`pvginkel/DockerImages`** holds `webhook-relay`.
 
 The environment is composed by AIWorkflow's `.kubecoder/config.yaml`, which checks this repo out as a
 sibling. Python runs in the `python` tool container, so an ad-hoc command is `cexec python uv …`. The

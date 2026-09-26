@@ -9,14 +9,14 @@ Reads the repo-root Procfile.dev. Per-service logs (ANSI-stripped) are written
 to logs/<service>.log. Ctrl-C stops everything cleanly.
 
 honcho runs inside the modern-app tool container: the dev container has neither
-poetry nor honcho, and every service needs that container anyway, so the
+uv nor honcho, and every service needs that container anyway, so the
 Procfile lines run there natively without their own cexec. Terminating the
 cexec client stops the processes in the sidecar with it.
 
 This wrapper still runs honcho under a PID namespace (unshare --user --pid
 --fork) so nothing local is left behind.
 
-Note: run `kc project setup` first — it installs the poetry and pnpm
+Note: run `kc project setup` first — it installs the uv and pnpm
 dependencies the services need (the SSE gateway on :3402 runs the
 `ssegateway` frontend devDependency).
 """
@@ -86,7 +86,7 @@ def main() -> None:
     status = pty.spawn(
         ["unshare", "--user", "--pid", "--fork",
          "cexec", "modern-app",
-         "poetry", "run", "honcho", "start", "-f", "Procfile.dev"] + sys.argv[1:],
+         "uv", "run", "honcho", "start", "-f", "Procfile.dev"] + sys.argv[1:],
         read,
     )
 

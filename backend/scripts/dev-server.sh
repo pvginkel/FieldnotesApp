@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 while true; do
-    poetry run dev
+    uv run dev
 
     echo
     echo "Press any key to restart the server..."

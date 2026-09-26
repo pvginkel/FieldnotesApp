@@ -1,47 +1,54 @@
-[tool.poetry]
+[project]
 name = "fieldnotes"
 version = "0.1.0"
 description = "Curated, cross-project observation store for AI agents"
-authors = ["Pieter van Ginkel <pvginkel@gmail.com>"]
+authors = [{ name = "Pieter van Ginkel", email = "pvginkel@gmail.com" }]
 readme = "README.md"
-packages = [{include = "app"}]
+requires-python = ">=3.13,<4"
+dependencies = [
+    "flask>=3.0.0,<4",
+    "pydantic>=2.5.0,<3",
+    "pydantic-settings>=2.1.0,<3",
+    "spectree>=1.2.0,<2",
+    "flask-cors>=4.0.0,<5",
+    "waitress>=3.0.0,<4",
+    "paste>=3.10.1,<4",
+    "dependency-injector>=4.48.1,<5",
+    "requests>=2.31.0,<3",
+    "prometheus-flask-exporter>=0.23.0,<0.24",
+    "python-dotenv>=1.0.0,<2",
+    "pyjwt>=2.11.0,<3",
+    "cryptography>=46.0.4,<47",
+    "httpx>=0.28.1,<0.29",
+]
 
-[tool.poetry.scripts]
+[project.scripts]
 cli = "app.cli:main"
 dev = "run:main"
 check = "scripts.check:main"
 
-[tool.poetry.dependencies]
-python = "^3.13"
-flask = "^3.0.0"
-pydantic = "^2.5.0"
-pydantic-settings = "^2.1.0"
-spectree = "^1.2.0"
-flask-cors = "^4.0.0"
-waitress = "^3.0.0"
-paste = "^3.10.1"
-dependency-injector = "^4.48.1"
-requests = "^2.31.0"
-prometheus-flask-exporter = "^0.23.0"
-python-dotenv = "^1.0.0"
-pyjwt = "^2.11.0"
-cryptography = "^46.0.4"
-httpx = "^0.28.1"
+[dependency-groups]
+dev = [
+    "copier>=9.0.0,<10",
+    "ruff>=0.11.0,<0.12",
+    "mypy>=1.8.0,<2",
+    "pytest>=7.4.0,<8",
+    "pytest-cov>=4.1.0,<5",
+    "types-flask-cors>=4.0.0,<5",
+    "types-requests>=2.31.0,<3",
+    "types-waitress>=3.0.1.20250801,<4",
+    "vulture>=2.14,<3",
+]
 
-[tool.poetry.group.dev.dependencies]
-copier = "^9.0.0"
-ruff = "^0.11.0"
-mypy = "^1.8.0"
-pytest = "^7.4.0"
-pytest-cov = "^4.1.0"
-types-flask-cors = "^4.0.0"
-types-requests = "^2.31.0"
-types-waitress = "^3.0.1.20250801"
-vulture = "^2.14"
-
+# Only app/ is a package; run.py and scripts/ are reached through the editable
+# install's path entry (the project root), which is what `uv run dev` and
+# `uv run check` need. The image installs no project at all (--no-install-project).
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [tool.ruff]
 target-version = "py313"

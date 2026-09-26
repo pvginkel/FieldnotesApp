@@ -1,8 +1,9 @@
 FROM python:3.13-slim AS build
 
-ENV POETRY_HOME=/opt/poetry
-ENV POETRY_VIRTUALENVS_IN_PROJECT=1
-ENV POETRY_VIRTUALENVS_CREATE=1
+# uv uses the image's own Python and never downloads one; copy mode, because
+# the cache and the venv are on different filesystems in a build.
+ENV UV_PYTHON_DOWNLOADS=never
+ENV UV_LINK_MODE=copy
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -15,15 +16,15 @@ RUN apt-get update && \
       libffi-dev libssl-dev pkg-config \
    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install poetry
+RUN pip install uv
 
 WORKDIR /app
 
 # --- Reproduce the environment ---
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml uv.lock /app/
 
 # Install project deps into .venv
-RUN poetry install --only main --no-root --no-interaction --no-ansi
+RUN uv sync --locked --no-dev --no-install-project
 
 # copy your source (no re-resolution needed)
 COPY *.py /app/

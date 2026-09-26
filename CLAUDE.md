@@ -6,12 +6,12 @@ Curated, cross-project observation store for AI agents
 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, and the `Jenkinsfile`.
-- **`backend/`** — the Flask API (Python, Poetry).
+- **`backend/`** — the Flask API (Python, uv).
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 
 Everything builds through `kc project build|test|lint|setup`, run **from the repo root** — those
-verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc `poetry`/`pnpm`
+verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc `uv`/`pnpm`
 commands need `cexec modern-app`. `scripts/dev.py` starts the dev stack. After a backend API change,
 `scripts/regenerate-openapi.py --frontend` refreshes the frontend's OpenAPI cache and client.
 

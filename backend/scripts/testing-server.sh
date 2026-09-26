@@ -88,4 +88,4 @@ echo "Server will run on http://$HOST:$PORT"
 echo "Press Ctrl+C to stop"
 echo
 
-exec poetry run python -m flask run --host="$HOST" --port="$PORT"
+exec uv run python -m flask run --host="$HOST" --port="$PORT"

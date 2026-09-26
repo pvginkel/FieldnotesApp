@@ -74,8 +74,8 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
                                                 echo "Code received, extracting..."
                                                 tar xzf /work/staging/context.tar.gz -C /work
                                                 rm -rf /work/staging
-                                                cd /work && poetry install --no-interaction --without dev
-                                                poetry run run-suite --output-mode full --junitxml-dir /work/results --retries 2
+                                                cd /work && uv sync --locked --no-dev
+                                                uv run --no-sync run-suite --output-mode full --junitxml-dir /work/results --retries 2
                                                 echo \$? > /work/results/exit-code
                                                 sleep infinity
                                           resources:

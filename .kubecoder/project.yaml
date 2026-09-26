@@ -3,29 +3,29 @@ projects:
     description: >-
       FieldnotesApp monorepo — orchestration tooling (the suite runner), the
       shared Procfile.dev dev stack, and CI.
-    setup: cexec modern-app poetry install --no-interaction
+    setup: cexec modern-app uv sync --locked
     # The root's own Python only; backend/ and frontend/ lint themselves. The
     # rule set and the Ruff version are pinned in the root pyproject.toml.
-    lint: cexec modern-app poetry run ruff check scripts tools
+    lint: cexec modern-app uv run ruff check scripts tools
     # No `test:` here on purpose. The root project owns `run-suite`
     # (tools/suite_runner), which is CI's single entry point and runs the
     # backend and frontend suites itself — declaring it here would make
     # `kc project test` run both suites two extra times. The per-component
     # verbs below are those same two suites, once each. CI keeps using
-    # `poetry run run-suite` because it also needs the JUnit XML, the retries
+    # `uv run run-suite` because it also needs the JUnit XML, the retries
     # and the ===SUITE_RESULT:=== markers the Jenkinsfile parses.
 
   backend:
     description: >-
       Curated, cross-project observation store for AI agents — Flask backend.
     setup:
-      - cexec modern-app poetry install --no-interaction
-    test: cexec modern-app poetry run pytest
+      - cexec modern-app uv sync --locked
+    test: cexec modern-app uv run pytest
     # The same three checks backend/scripts/check.py runs.
     lint:
-      - cexec modern-app poetry run ruff check .
-      - cexec modern-app poetry run mypy .
-      - cexec modern-app poetry run vulture app/ vulture_whitelist.py --min-confidence 80
+      - cexec modern-app uv run ruff check .
+      - cexec modern-app uv run mypy .
+      - cexec modern-app uv run vulture app/ vulture_whitelist.py --min-confidence 80
 
   frontend:
     description: >-

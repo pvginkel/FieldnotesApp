@@ -3,14 +3,14 @@
 The same command runs locally and in CI (the Jenkinsfile's validation Job).
 
 Flow:
-  1. install the backend (Poetry)
+  1. install the backend (uv)
   2. wait for services, when backend/scripts/wait-for-services.py exists
   3. run backend pytest
   4. install the frontend's npm deps (standalone pnpm project), build the
      frontend, install the Playwright browser, run Playwright
 
 Step 2 is the app's hook for sidecars that are slow to come up in CI (a search
-engine, a message broker): the script runs under the backend's Poetry venv and
+engine, a message broker): the script runs under the backend's uv venv and
 must exit non-zero if a service never becomes ready.
 
 Output modes:
@@ -39,7 +39,7 @@ from .process import run, run_streamed, run_tracked
 
 APP_NAME = "FieldnotesApp"
 
-# The backend requires Python 3.13 (e.g. queue.ShutDown). Pin its Poetry venv to
+# The backend requires Python 3.13 (e.g. queue.ShutDown). Pin its uv venv to
 # python3.13 when that interpreter is on PATH; in CI the base image's default
 # python is already 3.13 (the binary may be absent by that name), so we skip it.
 HAS_PYTHON313 = shutil.which("python3.13") is not None
@@ -147,10 +147,7 @@ def run_tests(args):
     backend_installed = False
     col = progress_start("Installing backend dependencies")
     if backend.is_dir():
-        cmds = []
-        if HAS_PYTHON313:
-            cmds.append(["poetry", "env", "use", "python3.13"])
-        cmds.append(["poetry", "install", "--no-interaction"])
+        cmds = [["uv", "sync", "--locked"] + (["--python", "python3.13"] if HAS_PYTHON313 else [])]
         ok, detail = True, ""
         for cmd in cmds:
             ok, detail = _install_cmd(cmd, cwd=backend, timeout=600)
@@ -168,7 +165,7 @@ def run_tests(args):
     if backend_installed and wait_script.is_file():
         col = progress_start("Waiting for services")
         ok, detail = _install_cmd(
-            ["poetry", "run", "python", str(wait_script)], cwd=backend, timeout=300
+            ["uv", "run", "python", str(wait_script)], cwd=backend, timeout=300
         )
         progress_end(ok, col)
         results.append(("services", ok, detail, None))
@@ -182,7 +179,7 @@ def run_tests(args):
             progress_skip(col)
             results.append(("backend pytest", False, "Skipped (install failed)", None))
         else:
-            pytest_cmd = ["poetry", "run", "pytest", "-v", "--tb=short"]
+            pytest_cmd = ["uv", "run", "pytest", "-v", "--tb=short"]
             if args.junitxml_dir:
                 pytest_cmd.append(f"--junitxml={args.junitxml_dir}/backend.xml")
             if args.max_failures is not None:

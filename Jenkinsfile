@@ -3,13 +3,14 @@ library identifier: 'JenkinsPipelineUtils', changelog: false
 // FieldnotesApp's pipeline: the uv workspace's own gates, then the one image both services ship in,
 // then the HelmCharts target-state deploy that rolls it out.
 //
-// The validate stage runs in `modern-app-dev` for the same reasons KubeCoder's does: it is the
-// agent image that carries uv, and it carries git — which is not incidental here, because the
-// store's suites (api/tests, eval/tests) drive a real `git` against bare repos in tmp_path rather
-// than a fake. `registry:5000/python` would run the unit tests and fail those.
+// The validate stage runs in the modern-app toolchain container, as KubeCoder's does: its image
+// (registry:5000/kube-coder-modern-app-toolchain) carries uv, and it carries git — which is not
+// incidental here, because the store's suites (api/tests, eval/tests) drive a real `git` against
+// bare repos in tmp_path rather than a fake. `registry:5000/python` would run the unit tests and
+// fail those.
 podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
     containerTemplates.k8s('k8s'),
-    containerTemplates.modern_app_dev('modern-app-dev'),
+    containerTemplates.modern_app_toolchain('modern-app-toolchain'),
 ]) {
     node(POD_LABEL) {
         stage('Cloning repo') {
@@ -23,7 +24,7 @@ podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
         // where a re-sync would prune it back. pytest's testpaths covers every member, so one run
         // is the whole suite.
         stage('Validate (lint + tests)') {
-            container('modern-app-dev') {
+            container('modern-app-toolchain') {
                 sh 'uv sync --all-packages --frozen'
                 sh 'uv run --no-sync ruff check .'
                 sh 'uv run --no-sync ruff format --check .'

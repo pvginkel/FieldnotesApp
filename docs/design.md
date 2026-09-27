@@ -154,7 +154,7 @@ scope here.
     observation should say, a merge. The ruling is the operator's channel to the actioner and is
     read, not parsed: the verb is the lead, the prose is the instruction. A ruling that is not
     submitted is a draft, and nobody but the operator acts on it.
-19. FR-19 The `actioner` skill, run unattended by a KubeCoder timer that the triage UI runs when the
+19. FR-19 The `actioner` skill, run unattended by a KubeCoder timer the API runs (FR-27) when the
     operator submits, carries out each submitted item that has no `actioned` stamp, through the
     YouTrack MCP tools and on the observation files, with the judgment the reconciler has over the
     files (FR-14). Its defaults: `yes` → an issue whose description names the observation id for the
@@ -193,13 +193,66 @@ scope here.
     the observation what bears on it, such as a solution, a proposed one or a workaround, in
     whatever form it judges right (FR-14).
 
+**Triage**
+
+23. FR-23 The operator's queue: every item in `triage/` (not `triage/done/`, not `triage/archive/`)
+    whose ruling is absent or not submitted. An item with a `question` and no `submitted` is a
+    returned item: it is in the queue with the ruling it had, so the operator sees what they ruled
+    before. Returned items come first, then the rest, each group by the time the item was written
+    (`written`), oldest first. Beside the items the queue carries each item's observation as it
+    stands now, in the fields of the item's snapshot, or null for an observation the store no
+    longer has (merged away or deleted), so the UI shows what changed since the item was written.
+    The API reads the items at startup and after every pull, and each of its writes updates what it
+    read. An item that does not parse or does not pass the store's rules is left out of the queue
+    and logged; it never fails the whole queue. Skips and unsaved notes are the browser's, and the
+    API knows nothing of either.
+24. FR-24 The operator's writes, a ruling, its take-back and a submit (FR-25, FR-26), must each be
+    one commit on `main` through the API's write queue, pushed before the reply (FR-9): a success
+    means the write is on the remote. A write that fails is the reply (`store-unreachable`), and
+    nothing else reports it. The UI does not wait on a write: it applies a ruling and moves on at
+    once, and shows a failed reply. An item the API writes passes the store's rules, and its diff
+    is the `ruling` alone.
+25. FR-25 A ruling sets an item's `ruling` to a verb (`yes`, `no` or `later`), a note stripped of
+    surrounding whitespace, the time it was made (`at`) and no `submitted`, over any earlier draft.
+    A `no` or a `later` without a note is refused: the note is what the actioner and the next
+    reporter get (FR-18, FR-19). A returned item keeps its `question`, and a ruling made after the
+    question is its answer (FR-19). A take-back clears a draft (`ruling` null); on an item without a
+    ruling it writes nothing. Both carry the item's `written` as the operator's page saw it, and
+    both are refused, writing nothing: as `conflict` when the store's `written` no longer matches
+    it, because the reconciler rewrote the item after the page loaded and dropped any draft on it
+    (FR-15), or when the item is submitted and so the actioner's; as `not-found` when `triage/`
+    holds no such item (it was stamped, or withdrawn). Each refusal is decided on the item as the
+    store holds it at the tip the write lands on. A ruling refused for a rewrite is dropped, and
+    nothing but the refusal signals it: the operator meets the rewritten item on the next fetch of
+    the queue.
+26. FR-26 Submit marks every ruled, unsubmitted item in `triage/` submitted, with the time, in one
+    write, and answers with the ids it submitted. A returned item counts as ruled only once its
+    ruling's `at` is later than its question's; until the operator rules it again it is not
+    submitted and stays in the queue. With nothing to submit, submit writes nothing, starts nothing
+    and is not an error.
+27. FR-27 A submit that submitted something must start the actioner (FR-19) after its write and off
+    the request, so the reply does not wait on it: the API runs the actioner's timer through the
+    KubeCoder controller, with a client token of its own. When the controller refuses because a run
+    is in flight, the API tries again a minute later, for as long as submitted items without an
+    `actioned` stamp are waiting, and stops once none is. At most one start waits at a time, and a
+    submit made meanwhile is covered by it. Any other failure is logged and counted, not retried. A
+    restarted API resumes no waiting start: the items wait for the next submit or the timer's
+    **Run now** in KubeCoder. The API polls nothing for display and the UI hears nothing of the
+    actioner: a failed run is KubeCoder's own Telegram message, and **Run now** is its retry.
+    Without the controller's address, the token and the timer's id the API still starts and submit
+    still writes; the start is skipped and logged.
+
 **Non-functional**
 
-23. NFR-1 `post` p95 under 2 s.
-24. NFR-2 200 actions per week; 10,000 observations without redesign.
-25. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
-26. NFR-4 REST and MCP authenticated the way the KubeCoder MCP server is: a static bearer token on
-    each boundary. Webhook secrets verified on every request.
+28. NFR-1 `post` p95 under 2 s.
+29. NFR-2 200 actions per week; 10,000 observations without redesign.
+30. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
+31. NFR-4 The agents' and the skills' REST endpoints and the MCP server authenticated the way the
+    KubeCoder MCP server is: a static bearer token on each boundary. The operator's triage
+    endpoints (FR-23 to FR-27) take the template's OIDC session with the `editor` client role
+    instead, and no bearer: a request without a session, or with a bearer token, is refused as
+    unauthenticated, and a signed-in user without the role as forbidden, reads and writes alike.
+    Webhook secrets verified on every request.
 
 ## Technical design
 
@@ -236,7 +289,7 @@ workspace:
 | Path | Content |
 | --- | --- |
 | `backend/app/fieldnotes/` | The domain: the store and its write queue (a worker thread), the index, the match pipeline, board sync, the webhooks' verification, the metrics, and the `Runtime` that builds them from the settings. |
-| `backend/app/api/fieldnotes.py` | The REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
+| `backend/app/api/fieldnotes.py` | The agents' REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
 | `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
 | `backend/packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; the API validates with them directly. |
 | `backend/mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
@@ -260,12 +313,16 @@ what it does not (the model pod, GitHub, YouTrack); a test pins each surface by 
 
 API endpoints, under `/api`: `POST /observations`, `POST /observations/{id}/reactions`,
 `GET /observations/{id}`, `POST /observations/{id}/board-sync`, `POST /match`,
-`GET /observations/{id}/neighbors`, `POST /hooks/github`, `POST /hooks/youtrack`. Beside them the
-template's `GET /health/healthz`, `GET /health/readyz` and `GET /metrics`.
+`GET /observations/{id}/neighbors`, `POST /hooks/github`, `POST /hooks/youtrack`, and the operator's
+triage endpoints, `GET /triage/queue`, `PUT` and `DELETE /triage/items/{id}/ruling` and
+`POST /triage/submit` (FR-23 to FR-27), typed in the template's OpenAPI document, from which the UI
+generates its client. Beside them the template's `GET /health/healthz`, `GET /health/readyz` and
+`GET /metrics`.
 
-Callers authenticate with a bearer token that resolves to a named client (`mcp`, `skills`); the name
-is logged with each write. The MCP server takes its own inbound bearer token from agents and holds
-the `mcp` client token outbound.
+The agents' and the skills' callers authenticate with a bearer token that resolves to a named client
+(`mcp`, `skills`); the name is logged with each write. The triage endpoints take the operator's OIDC
+session instead (NFR-4), and their writes are logged and committed as the operator's. The MCP server
+takes its own inbound bearer token from agents and holds the `mcp` client token outbound.
 
 ### The store repo
 
@@ -399,12 +456,14 @@ and the run commits and pushes as it goes. A stamped item is skipped.
 
 ### Security and config
 
-Bearer tokens on the API and the MCP server; the GitHub webhook secret and the YouTrack webhook token
-verified before any processing. The API holds a GitHub credential scoped to the store repo and a
-read-only YouTrack token; skills use the session's own credentials, provided by KubeCoder. Thresholds,
-model names, the resolution field and value map, and endpoints are configuration, not code. Every
-secret is an OpenBao leaf materialised by External Secrets and referenced by `secretKeyRef`; none is
-ever in a config file, an image or this repo.
+Bearer tokens on the agents' API and the MCP server, and the template's OIDC session with the
+`editor` client role on the operator's triage endpoints (NFR-4); the GitHub webhook secret and the
+YouTrack webhook token verified before any processing. The API holds a GitHub credential scoped to
+the store repo, a read-only YouTrack token and the token of its own KubeCoder client, which runs the
+actioner's timer (FR-27); skills use the session's own credentials, provided by KubeCoder.
+Thresholds, model names, the resolution field and value map, the actioner's timer, and endpoints are
+configuration, not code. Every secret is an OpenBao leaf materialised by External Secrets and
+referenced by `secretKeyRef`; none is ever in a config file, an image or this repo.
 
 ## Validation
 

@@ -2,6 +2,9 @@
 # products, the surfaces they expose and what they consume. Hand-authored: this file is the source
 # of truth and its ids are minted once. The running instances, their hosts and the Specialization
 # edges to the products below are `fieldnotes-deploy`'s (pvginkel/FieldnotesDeploy).
+#
+# The UI is the product a person opens, so it carries the app's own name: the launcher titles a
+# tile with the label of the product behind the host.
 schemaVersion: "0.1"
 producer: fieldnotes-app
 
@@ -9,7 +12,7 @@ applicationComponents:
   # One image, two entry points: the Flask backend and `fieldnotes-mcp`. The deployment runs them
   # as two containers of the same pod, and both are instances of this one product.
   - id: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
-    label: Fieldnotes
+    label: Fieldnotes Backend
     summary: Backend of Fieldnotes, the curated, cross-project observation store for AI agents — the git-backed store, the in-memory match index, the GitHub and YouTrack webhooks and the operator's triage queue behind a REST API, plus the thin MCP server the same image ships as its second entry point.
     introduced: 2026-09-19
     lifecycle: active
@@ -20,7 +23,7 @@ applicationComponents:
       image: registry:5000/fieldnotes
 
   - id: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
-    label: Fieldnotes UI
+    label: Fieldnotes
     summary: React + Vite single-page web app for the operator — the triage queue and its rulings, behind the Keycloak sign-in, served as static assets by NGINX.
     introduced: 2026-09-19
     lifecycle: active

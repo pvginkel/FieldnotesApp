@@ -25,6 +25,8 @@ COPY pyproject.toml uv.lock /app/
 # The workspace members are dependencies of the project, built from source.
 COPY packages /app/packages
 COPY mcp-server /app/mcp-server
+# The eval harness is a member too, in the dev group only: --locked still reads its pyproject.
+COPY eval/pyproject.toml /app/eval/pyproject.toml
 
 # Install project deps into .venv, the members copied in (not linked), so the
 # venv carries the `fieldnotes-mcp` entry point the pod's mcp container runs.

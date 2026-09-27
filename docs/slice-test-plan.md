@@ -100,6 +100,21 @@ Drive it with `curl` at `localhost:3401/api`, `Authorization: Bearer live-mcp-to
    `.run/live/api.log` says `embedded 1 texts`. The same delivery with a wrong signature is a `401`.
 6. The index-rebuild row: stop the API, delete `.run/live/cache`, boot it again. `/neighbors` answers
    byte for byte as before, and the log says one text embedded per observation.
+7. The triage row. `OIDC_ENABLED=false` makes the template's authentication hook skip every
+   request, so `/api/triage/…` answers `curl` with no session; the `editor` gate is the suite's to
+   prove. In a clone of `.run/live/remote.git`, add two invented items as `triage/<id>.json` for
+   observations steps 1 and 2 created, shaped as the suite's `item()` in
+   `tests/fieldnotes/test_triage.py` builds them: a plain one, and a returned one (a ruling and a
+   `question`, no `submitted`). Push, and let the API pull with a delivery as in step 5.
+   `GET /triage/queue` lists the returned item first, each observation beside it. Rule both
+   (`PUT …/ruling` with the `written` the queue showed), take one back (`DELETE
+   …/ruling?written=…`), rule it again, then `POST /triage/submit`: each write is one commit on the
+   remote before its reply (`rule <id> <verb> (operator)`, `unrule <id> (operator)`,
+   `submit 2 (operator)`), a second submit answers `[]` and commits nothing, and the log says the
+   actioner is not started, since this env sets no `FIELDNOTES_KUBECODER_*`. Last, the store's own
+   rules over what the API wrote:
+   `python3 /work/Fieldnotes/skills/reconciler/reconcile.py --store .run/live/checkout check`
+   finds every file valid.
 
 `fieldnotes-mcp` runs beside it, as the API's `mcp` client, the same way:
 
@@ -116,7 +131,7 @@ until curl -sf localhost:8081/readyz; do sleep 1; done
 
 Its defaults are the pod's: the API at `http://localhost:3401/api`, listening on 8081.
 
-7. The MCP row, which is a script:
+8. The MCP row, which is a script:
 
    ```bash
    cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && .venv/bin/python eval/mcp_e2e.py --token live-agent-token'
@@ -214,8 +229,8 @@ store's skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run 
 
 ## 4. The deployed checks
 
-Only what the local run cannot show, and only when the slice touches it. Each of these writes to
-the production store or to the board, so each ends with step 5.
+Only what the local run cannot show, and only when the slice touches it. The MCP end-to-end and
+the board sync write to the production store or to the board, so each ends with step 5.
 
 **The MCP end-to-end**, when the slice changes the MCP server, the API's `post`/`react`/`get` path,
 the image or the chart:
@@ -250,6 +265,15 @@ step, the webhook's settle time ([webhooks.md](webhooks.md)):
    the resolution to Won't Do: `outcome: wont-do`.
 
 Every sync is a commit on the store and a line in the API's log, so both are read from there.
+
+**The triage endpoints**, when the slice changes them, the image or the chart. Reads only: a
+ruling on prd is the operator's real ruling, so the writes are proved in step 2 and never here, and
+no agent holds an `editor` session, so what the queue lists is the operator's to confirm.
+`GET https://fieldnotes-api.home/api/triage/queue` with no session, and with an agent's bearer,
+answers `401`. On `https://fieldnotes-api.home/metrics`, `fieldnotes_triage_queue` equals the
+store's open items (the `triage/*.json` on `pvginkel/Fieldnotes`'s `origin/main` whose ruling is
+absent or not submitted), and `fieldnotes_triage_rulings_total` and
+`fieldnotes_actioner_starts_total` carry every label from zero.
 
 **The reconciler and the actioner** are not deployed services: they are skills in the store repo,
 proven by a `--dry-run` session over a generated store and a local API

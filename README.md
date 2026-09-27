@@ -27,7 +27,7 @@ own (one markdown file per observation, every write a commit):
 
 | Part | What it is |
 | --- | --- |
-| `backend/` | The Flask backend and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, and the GitHub and YouTrack webhooks, under `/api`. A uv workspace whose members are the MCP server, the wire models it shares with the API, and the eval harness. |
+| `backend/` | The Flask backend and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, the GitHub and YouTrack webhooks, and the triage UI's queue and rulings, under `/api`. A uv workspace whose members are the MCP server, the wire models it shares with the API, and the eval harness. |
 | `backend/mcp-server/` | `fieldnotes-mcp`, a thin MCP server with exactly three tools, `post`, `react` and `get`, mapped 1:1 onto the API; the backend image's second entry point. |
 | `frontend/` | The operator's UI, behind the Keycloak sign-in. |
 

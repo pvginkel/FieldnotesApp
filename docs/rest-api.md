@@ -102,11 +102,14 @@ unknown fields are refused.
   tip the write lands on, never on the triage index, which can trail a skill's push: `not-found`
   when `triage/` has no such item (the actioner stamped it or the reconciler withdrew it);
   `conflict` when the item is submitted (the actioner's), when its `written` is not the one sent
-  (the reconciler rewrote it after the page loaded, and the ruling is dropped), or when it does not
-  pass the store's item rules. A refusal writes nothing.
+  (the reconciler rewrote it after the page loaded, and the ruling is dropped), or when its file is
+  one the queue leaves out (not JSON, against the store's item rules, or not parsing), the fault
+  named in the detail. A refusal writes nothing.
 - **Submit** (FR-26): marks every ruled, unsubmitted item in `triage/` submitted (`ruling.submitted:
   now`) and answers with their ids. A returned item counts as ruled only once its ruling's `at` is
-  later than its question's. With nothing ruled it writes nothing and answers `[]`.
+  later than its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`.
+  A submit that submitted something then starts the actioner, off the request: see
+  [The actioner start](#the-actioner-start).
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
   annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard
   reads them. See [Metrics](#metrics).
@@ -134,6 +137,7 @@ time.
 | `fieldnotes_webhook_deliveries_total` | `source`, `action` | verified deliveries, `queued` or `ignored`; a refused one shows only as a 401 in the request metric |
 | `fieldnotes_board_syncs_total` | `result` | `changed`, `unchanged`, or `failed` (a queued sync that raised) |
 | `fieldnotes_triage_rulings_total` | `verb` | the operator's rulings, `yes`, `no` or `later`; a refused one is not counted |
+| `fieldnotes_actioner_starts_total` | `result` | calls to run the actioner's timer: `started`, `in_flight` (refused while a run is in flight, tried again a minute later) or `failed` (any other failure, not retried); a start skipped for want of settings, or with nothing waiting, makes no call and is not counted |
 | `fieldnotes_http_request_duration_seconds` | `method`, `route`, `status` | requests by route template (histogram) |
 
 A matched post is remembered for its reporter, meaning the `(repo, session)` it came from or the repo
@@ -174,6 +178,28 @@ new tip and apply its edit again; a write that fails leaves nothing behind that 
 carry. A write that changes nothing commits nothing. The operator's writes write an item back as
 it was read, two-space indented, UTF-8 unescaped, with a trailing newline, and change nothing but
 its `ruling`, so a commit's diff is the ruling; timestamps are UTC, whole seconds, `Z`.
+
+## The actioner start
+
+A submit that submitted something starts the actioner (FR-27): the API runs the actioner's
+KubeCoder timer, `POST /timers/<FIELDNOTES_KUBECODER_ACTIONER_TIMER>/run` on
+`FIELDNOTES_KUBECODER_URL`, with `FIELDNOTES_KUBECODER_TOKEN` as a bearer. The call runs as a task
+on the template's task service, after the submit's write, so the reply does not wait for it.
+
+Each attempt first reads the triage index for the items that wait: submitted, and so not yet
+stamped `actioned` (an open item that carries the stamp breaks the store's rules and is not in the
+index). With none waiting it makes no call. The controller's `202` starts the run. A `409` whose
+problem `type` is `conflict` is taken for the controller's refusal while the timer has a run in
+flight, and is tried again 60 seconds later, and again after that for as long as items wait. Any other answer, a refused
+token included, or a controller that cannot be reached is logged at ERROR and not retried:
+KubeCoder's **Run now** on the timer is the retry. Each call is counted in
+`fieldnotes_actioner_starts_total`.
+
+At most one start is pending, from the submit that asked for it until the run starts, a call fails
+or nothing waits; a submit meanwhile starts nothing, since the pending start covers it. The pending
+start lives in the process alone: shutdown cancels a retry that waits, and a restarted API resumes
+none, so the items wait for the next submit or **Run now**. Without the three settings a submit
+still writes, and the start is skipped with a warning in the log.
 
 ## Errors
 
@@ -242,4 +268,5 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_YOUTRACK_RESOLUTION_FIELD`, `FIELDNOTES_YOUTRACK_OUTCOMES` | see webhooks.md | |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN`, `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | none, `X-YouTrack-Token` | see [webhooks.md](webhooks.md) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | 5 | seconds between a YouTrack delivery and the read of its card; see [webhooks.md](webhooks.md) |
+| `FIELDNOTES_KUBECODER_URL`, `FIELDNOTES_KUBECODER_TOKEN`, `FIELDNOTES_KUBECODER_ACTIONER_TIMER` | none | the KubeCoder controller, the API's client token there (secret) and the actioner's timer id; set together or not at all; see [The actioner start](#the-actioner-start) |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |

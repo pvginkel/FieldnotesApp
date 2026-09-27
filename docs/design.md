@@ -220,7 +220,8 @@ scope here.
     ruling it writes nothing. Both carry the item's `written` as the operator's page saw it, and
     both are refused, writing nothing: as `conflict` when the store's `written` no longer matches
     it, because the reconciler rewrote the item after the page loaded and dropped any draft on it
-    (FR-15), or when the item is submitted and so the actioner's; as `not-found` when `triage/`
+    (FR-15), when the item is submitted and so the actioner's, or when it does not parse or does
+    not pass the store's rules and so is not in the queue (FR-23); as `not-found` when `triage/`
     holds no such item (it was stamped, or withdrawn). Each refusal is decided on the item as the
     store holds it at the tip the write lands on. A ruling refused for a rewrite is dropped, and
     nothing but the refusal signals it: the operator meets the rewritten item on the next fetch of
@@ -275,10 +276,14 @@ flowchart LR
   S -->|MCP| T[Telegram]
   X[Actioner session] -->|MCP: create issues| Y
   X <-->|edit / push| G
+  O[Operator] -->|triage UI, OIDC| R
+  R -->|run the actioner timer| K[KubeCoder controller]
+  K -->|starts| X
 ```
 
 Agents talk only to the MCP server; the skills talk to the store, the API and the board. GitHub and
-the board talk back to the API alone.
+the board talk back to the API alone. The operator rules in the UI, and a submit makes the API run
+the actioner's timer at the KubeCoder controller.
 
 ### This repo
 
@@ -288,8 +293,9 @@ workspace:
 
 | Path | Content |
 | --- | --- |
-| `backend/app/fieldnotes/` | The domain: the store and its write queue (a worker thread), the index, the match pipeline, board sync, the webhooks' verification, the metrics, and the `Runtime` that builds them from the settings. |
+| `backend/app/fieldnotes/` | The domain: the store and its write queue (a worker thread), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the metrics, and the `Runtime` that builds them from the settings. |
 | `backend/app/api/fieldnotes.py` | The agents' REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
+| `backend/app/api/triage.py` | The triage UI's REST surface, a blueprint at `/api/triage`. Its endpoints are gated on the operator's OIDC session with the `editor` client role and typed in the template's OpenAPI document. |
 | `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
 | `backend/packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; the API validates with them directly. |
 | `backend/mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
@@ -302,7 +308,8 @@ dataclass, beside the template's own; errors as RFC 9457 `application/problem+js
 of `type` slugs and operator-facing prose; unauthenticated health checks (the template's
 `/health/healthz` and `/health/readyz` on the backend, `/healthz` and `/readyz` on the MCP server);
 ruff, mypy strict, vulture and pytest; tests run everything this repo owns for real and fake only
-what it does not (the model pod, GitHub, YouTrack); a test pins each surface by equality.
+what it does not (the model pod, GitHub, YouTrack, the KubeCoder controller); a test pins each
+surface by equality.
 
 ### Services
 

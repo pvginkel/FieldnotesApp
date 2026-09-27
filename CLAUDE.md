@@ -34,8 +34,10 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, and the `Jenkinsfile`.
 - **`backend/`**: the Flask backend, a uv workspace, and the only component with logic. The
   Fieldnotes domain is `app/fieldnotes/` (the git checkout and its write queue, the file model, the
-  in-memory index and its embedding cache, the match pipeline, the GitHub and YouTrack webhooks),
-  its surface `app/api/fieldnotes.py` under `/api`, its wiring `app/services/fieldnotes_service.py`.
+  in-memory index and its embedding cache, the match pipeline, the GitHub and YouTrack webhooks,
+  the triage index, the operator's rulings and the actioner start), its surfaces under `/api`
+  `app/api/fieldnotes.py`, the agents', and `app/api/triage.py`, the triage UI's, and its wiring
+  `app/services/fieldnotes_service.py`.
   The workspace members: **`packages/fieldnotes-contracts/`**, the pydantic wire models the API and
   the MCP server share; **`mcp-server/`**, `fieldnotes-mcp`, the thin MCP server with exactly three
   tools, `post`, `react` and `get`, mapped 1:1 onto the API, shipped as the image's second entry

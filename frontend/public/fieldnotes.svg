@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1254 1254" role="img" aria-labelledby="title">
+  <title id="title">Fieldnotes</title>
+  <rect width="1254" height="1254" rx="170" fill="#d97757"/>
+  <g fill="none" stroke="#fff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="rotate(-7.7)">
+      <rect x="217" y="299" width="674" height="815" rx="73"/>
+      <path d="M320 299V1114"/>
+    </g>
+    <path d="M537 748 809 383C822 365 839 363 855 374L877 390C896 404 899 423 887 439L616 798 510 876Z"/>
+    <path d="m777 426 76 58M537 748l79 50"/>
+  </g>
+</svg>

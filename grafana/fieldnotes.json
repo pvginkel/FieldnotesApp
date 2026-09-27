@@ -1,7 +1,7 @@
 {
   "uid": "fieldnotes",
   "title": "Fieldnotes",
-  "description": "Whether the post-time answer lands, the store, and the API's health.",
+  "description": "Whether the post-time answer lands, the store, the operator's triage, and the API's health.",
   "tags": [
     "fieldnotes"
   ],
@@ -719,7 +719,7 @@
     {
       "id": 18,
       "type": "row",
-      "title": "The service",
+      "title": "Triage",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -732,6 +732,160 @@
     {
       "id": 19,
       "type": "timeseries",
+      "title": "Triage queue",
+      "description": "Items waiting for the operator: open items in the store's triage/ whose ruling is absent or not submitted. A reconciler run, or an item the actioner returns with a question, adds to it; a submit takes out what was ruled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "max(fieldnotes_triage_queue)",
+          "legendFormat": "in the queue",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Rulings by verb",
+      "description": "The operator's rulings: every ruling written counts, a draft ruled over or taken back included; a refused one does not.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (verb) (increase(fieldnotes_triage_rulings_total{}[$__interval]))",
+          "legendFormat": "{{verb}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Actioner starts",
+      "description": "Starts of the actioner's timer after a submit. started: the controller ran it. in_flight: refused while a run was in flight, tried again a minute later. failed: any other failure, not retried; Run now in KubeCoder is the retry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 39,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (result) (increase(fieldnotes_actioner_starts_total{}[$__interval]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "The service",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
       "title": "Requests",
       "description": "Requests per second by route; health checks and scrapes left out.",
       "datasource": {
@@ -740,7 +894,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 48,
         "w": 8,
         "h": 8
       },
@@ -775,7 +929,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 24,
       "type": "timeseries",
       "title": "Latency p95",
       "description": "The 95th percentile by route. A post embeds its text on the models pod first.",
@@ -785,7 +939,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 39,
+        "y": 48,
         "w": 8,
         "h": 8
       },
@@ -820,7 +974,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 25,
       "type": "timeseries",
       "title": "Errors",
       "description": "4xx and 5xx answers by route and status. A 401 on a webhook is a refused delivery.",
@@ -830,7 +984,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 39,
+        "y": 48,
         "w": 8,
         "h": 8
       },
@@ -868,7 +1022,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 26,
       "type": "timeseries",
       "title": "Webhook deliveries",
       "description": "Verified deliveries: queued work, or ignored as none of ours.",
@@ -878,7 +1032,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 56,
         "w": 8,
         "h": 8
       },
@@ -916,7 +1070,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 27,
       "type": "timeseries",
       "title": "Board syncs",
       "description": "Syncs of an observation's card: changed, unchanged, or failed when queued.",
@@ -926,7 +1080,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 47,
+        "y": 56,
         "w": 8,
         "h": 8
       },
@@ -964,7 +1118,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 28,
       "type": "timeseries",
       "title": "Reads by id",
       "description": "Observations read in full, by client: mcp is an agent's get, skills the reconciler.",
@@ -974,7 +1128,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 47,
+        "y": 56,
         "w": 8,
         "h": 8
       },

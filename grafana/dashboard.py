@@ -28,6 +28,10 @@ def reactions(selector=""):
     return f"max by (repo, emoji) (fieldnotes_store_reactions{{{selector}}})"
 
 
+def triage_queue():
+    return "max(fieldnotes_triage_queue)"
+
+
 _ids = iter(range(1, 1000))
 
 
@@ -272,11 +276,44 @@ def dashboard():
             "{{emoji}}",
             "Reactions on observations still in the store, posts left out.",
         ),
-        row("The service", 38),
+        row("Triage", 38),
+        lines(
+            "Triage queue",
+            0,
+            39,
+            8,
+            triage_queue(),
+            "in the queue",
+            "Items waiting for the operator: open items in the store's triage/ whose ruling is "
+            "absent or not submitted. A reconciler run, or an item the actioner returns with a "
+            "question, adds to it; a submit takes out what was ruled.",
+        ),
+        bars(
+            "Rulings by verb",
+            8,
+            39,
+            8,
+            inc("fieldnotes_triage_rulings_total", by="verb", window="$__interval"),
+            "{{verb}}",
+            "The operator's rulings: every ruling written counts, a draft ruled over or taken "
+            "back included; a refused one does not.",
+        ),
+        bars(
+            "Actioner starts",
+            16,
+            39,
+            8,
+            inc("fieldnotes_actioner_starts_total", by="result", window="$__interval"),
+            "{{result}}",
+            "Starts of the actioner's timer after a submit. started: the controller ran it. "
+            "in_flight: refused while a run was in flight, tried again a minute later. failed: "
+            "any other failure, not retried; Run now in KubeCoder is the retry.",
+        ),
+        row("The service", 47),
         lines(
             "Requests",
             0,
-            39,
+            48,
             8,
             f"sum by (route) (rate({requests}_count{{{API_ROUTES}}}[$__rate_interval]))",
             "{{route}}",
@@ -286,7 +323,7 @@ def dashboard():
         lines(
             "Latency p95",
             8,
-            39,
+            48,
             8,
             "histogram_quantile(0.95, sum by (le, route) "
             f"(rate({requests}_bucket{{{API_ROUTES}}}[$__rate_interval])))",
@@ -297,7 +334,7 @@ def dashboard():
         bars(
             "Errors",
             16,
-            39,
+            48,
             8,
             inc(f"{requests}_count", 'status=~"[45].."', by="route, status", window="$__interval"),
             "{{status}} {{route}}",
@@ -306,7 +343,7 @@ def dashboard():
         bars(
             "Webhook deliveries",
             0,
-            47,
+            56,
             8,
             inc("fieldnotes_webhook_deliveries_total", by="source, action", window="$__interval"),
             "{{source}} {{action}}",
@@ -315,7 +352,7 @@ def dashboard():
         bars(
             "Board syncs",
             8,
-            47,
+            56,
             8,
             inc("fieldnotes_board_syncs_total", by="result", window="$__interval"),
             "{{result}}",
@@ -324,7 +361,7 @@ def dashboard():
         bars(
             "Reads by id",
             16,
-            47,
+            56,
             8,
             inc("fieldnotes_gets_total", by="client", window="$__interval"),
             "{{client}}",
@@ -334,7 +371,8 @@ def dashboard():
     return {
         "uid": "fieldnotes",
         "title": "Fieldnotes",
-        "description": "Whether the post-time answer lands, the store, and the API's health.",
+        "description": "Whether the post-time answer lands, the store, the operator's triage, "
+        "and the API's health.",
         "tags": ["fieldnotes"],
         "timezone": "browser",
         "refresh": "5m",

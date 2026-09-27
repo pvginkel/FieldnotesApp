@@ -31,7 +31,9 @@ on uv rather than the template's Poetry: the operator's ruling, carried in the t
 too (see "Template ownership" below). `kc project` runs `root`, `backend` and `frontend`.
 
 - **Root**: the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
-  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, and the `Jenkinsfile`.
+  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
+  repo's architecture artifact, `docs/architecture/` (producer `fieldnotes-app`, published by
+  `Jenkinsfile.architecture`).
 - **`backend/`**: the Flask backend, a uv workspace, and the only component with logic. The
   Fieldnotes domain is `app/fieldnotes/` (the git checkout and its write queue, the file model, the
   in-memory index and its embedding cache, the match pipeline, the GitHub and YouTrack webhooks,

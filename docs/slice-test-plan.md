@@ -189,7 +189,9 @@ track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120
 ```
 
 It needs `JENKINS_TOKEN`, which this environment projects. Run it under `timeout`: the build takes
-a few minutes. Then confirm Argo CD took the pin commit:
+a few minutes. The second job, `AaC/FieldnotesApp` (`Jenkinsfile.architecture`), validates and
+archives `docs/architecture/*.yaml`; follow it the same way when the slice touched the artifact.
+Then confirm Argo CD took the pin commit:
 
 ```bash
 git -C ../FieldnotesDeploy fetch -q && git -C ../FieldnotesDeploy log -1 --format='%H %s' origin/main

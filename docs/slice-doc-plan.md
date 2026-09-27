@@ -22,6 +22,11 @@ The change discipline, this plan and the slice testing strategy live here too. A
 what they describe (a service that is now runnable, a live check that is now written, a deployment
 that now exists) updates them.
 
+`docs/architecture/architecture.yaml` is the federated Architecture-as-Code model's, not this
+phase's: the products, the surfaces they expose and what they consume, published as producer
+`fieldnotes-app` and validated by the `AaC/FieldnotesApp` job. The central architecture update in
+`pvginkel/Architecture` keeps it current, so a doc pass does not edit it.
+
 ### 2. `README.md`
 
 The public face: what Fieldnotes is, its shape and its status. A slice that changes any of those

@@ -230,7 +230,9 @@ ends the process in production, so the pod is restarted: the template's liveness
 answers 200. The GitHub webhook queues its pull even before startup is done.
 
 Outside production a backend without `FIELDNOTES_STORE_URL` runs without a store, so the dev stack
-and the frontend's Playwright backend boot: its Fieldnotes endpoints answer `not-ready`.
+boots: its Fieldnotes endpoints answer `not-ready`. The frontend's Playwright backend, in testing
+mode, serves an empty store of its own instead, a bare repo in a temporary directory indexed with
+the fake models, so the triage queue it opens on answers empty.
 
 ## The pinned surface
 

@@ -580,15 +580,14 @@ def test_submit_with_nothing_ruled_writes_nothing(start, remote):
     assert remote.log() == before
 
 
-@pytest.mark.parametrize(
-    "write",
-    [
-        lambda api: rule(api, IDS[0], "no", "not ours"),
-        lambda api: take_back(api, IDS[0]),
-        submit,
-    ],
-    ids=["rule", "take back", "submit"],
-)
+WRITES = {
+    "rule": lambda api: rule(api, IDS[0], "no", "not ours"),
+    "take back": lambda api: take_back(api, IDS[0]),
+    "submit": submit,
+}
+
+
+@pytest.mark.parametrize("write", WRITES.values(), ids=list(WRITES))
 def test_a_write_the_store_refuses_is_the_reply(start, remote, write):
     seed(remote, item(IDS[0], ruling=ruling()))
     with start() as api:
@@ -602,6 +601,23 @@ def test_a_write_the_store_refuses_is_the_reply(start, remote, write):
     refused(response, 502, "store-unreachable")
     assert remote.log() == before
     assert queued == [item(IDS[0], ruling=ruling())]
+
+
+@pytest.mark.parametrize("write", WRITES.values(), ids=list(WRITES))
+def test_a_write_the_index_cannot_follow_is_store_unreachable(start, auth, remote, models, write):
+    """A write brings the observation index up to the tip before its edit, and the index embeds a
+    rewritten observation with the models pod: while the pod is down, the write fails (FR-24)."""
+    with start() as api:
+        id_ = post(api, auth)
+        path = observation_path(id_)
+        rewritten = Document(remote.file(path)).with_fields(canonical="a statement rewritten")
+        seed(remote, item(IDS[0], ruling=ruling()), **{path: rewritten.text})
+        models.fail = True
+        before = remote.log()
+        response = write(api)
+
+    refused(response, 502, "store-unreachable")
+    assert remote.log() == before
 
 
 # -- the writes' gate (NFR-4) --------------------------------------------------------------------

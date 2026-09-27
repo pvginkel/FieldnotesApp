@@ -189,7 +189,7 @@ Every non-2xx response is RFC 9457 `application/problem+json`: `type` (a slug fr
 | `validation-error` | 422 | a request that does not validate, a malformed id; a `no` or `later` ruling without a note |
 | `not-ready` | 503 | the store is still being cloned or the index built |
 | `models-unreachable` | 502 | the models pod did not answer |
-| `store-unreachable` | 502 | the store's remote could not be reached or refused the push; nothing was written |
+| `store-unreachable` | 502 | the store's remote could not be reached or refused the push, or, for a triage write, the models pod could not index the store's tip; nothing was written |
 | `board-unreachable` | 502, 503 | 502: YouTrack could not be reached or refused the read; 503: no board is configured |
 | `internal` | 500 | anything unmapped, in fixed words, with the traceback in the log |
 

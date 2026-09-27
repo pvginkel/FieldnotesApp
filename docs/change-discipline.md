@@ -13,8 +13,10 @@ implementation's to assume.
 
 The value of Fieldnotes sits in the reconciler and in the post-time duplicate response; capture is
 plumbing. All judgment lives in versioned skills that live with the store, not in this repo. The API
-commits, indexes, matches and verifies webhooks. It holds no scheduler, no triage logic and no opinion
-about which observations matter. A change that moves judgment into a service is the wrong change,
+commits, indexes, matches, verifies webhooks, and carries the operator's triage rulings to the store.
+It holds no judgment: which observations matter, what a triage item asks and what a ruling means are
+the skills'. It starts a skill only when the operator asks for it (a submit starts the actioner),
+never on a schedule of its own. A change that moves judgment into a service is the wrong change,
 however convenient.
 
 `fieldnotes-mcp` is thinner still: three tools mapped 1:1 onto the API, and nothing the API does not

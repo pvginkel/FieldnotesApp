@@ -7,8 +7,9 @@ names it. Read it top to bottom and do what it says.
 ## What this phase proves, and what it does not
 
 **There is one deployment, and it is production.** A push to `main` runs the `FieldnotesApp` Jenkins
-job (setup, lint, test, the image), which triggers `IaC/HelmCharts`, which rolls `fieldnotes-prd`:
-the pod every agent on the host posts to, over the store the reconciler curates every morning.
+job (setup, lint, test, the images), which pins the images in `pvginkel/FieldnotesDeploy`, from
+which Argo CD rolls `fieldnotes-prd`: the pod every agent on the host posts to, over the store the
+reconciler curates every morning.
 There is no dev instance. So this phase proves the slice **locally first** (the suites, then the
 services run here against a generated store and the real models), pushes only what that proved,
 confirms the rollout, and then checks the deployment for what only it can show.
@@ -164,18 +165,29 @@ Pushing is this phase's job. The driver ff-merges locally and never pushes a cod
 before the doc phase that every repo in `state.json`'s `bases` reached `origin`. Push each one,
 honouring any repo named in `plan.md`'s `## Push holds`.
 
-A push of this repo builds and deploys. Follow it to the end:
+A push of this repo builds and deploys. The build writes its image pins into
+`pvginkel/FieldnotesDeploy` as a commit on that repo's `main`, and Argo CD syncs the `fieldnotes-prd`
+Application from there. Follow the build to the end:
 
 ```bash
 track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 ```
 
-It waits for the build of that commit and for `IaC/HelmCharts`, which it triggers; it needs
-`JENKINS_TOKEN`, which this environment projects. Run it under `timeout`: the two take about
-five minutes together.
+It needs `JENKINS_TOKEN`, which this environment projects. Run it under `timeout`: the build takes
+a few minutes. Then confirm Argo CD took the pin commit:
 
-**A green `IaC/HelmCharts` is not a good deploy**: it has reported success with the pod in
-`CreateContainerConfigError`. Look at the pod, read-only, through the `iac` tool container:
+```bash
+git -C ../FieldnotesDeploy fetch -q && git -C ../FieldnotesDeploy log -1 --format='%H %s' origin/main
+cexec iac kubectl -n argocd-prd get application fieldnotes-prd \
+  -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
+```
+
+The Application's revision is `origin/main`'s head (the pin commit), `Synced`, `Healthy`. Argo CD
+does not poll this Application (its reconciliation timeout is off), so a revision that has not
+moved a few minutes after the pin commit is a finding, not a wait.
+
+**A `Synced`, `Healthy` Application is not proof of a good deploy on its own.** Look at the pod,
+read-only, through the `iac` tool container:
 
 ```bash
 cexec iac kubectl -n fieldnotes-prd get pods
@@ -192,9 +204,13 @@ deployment is `Recreate`, so the service is away for about a minute during the r
 is the roll, not a finding. The API's log is
 `cexec iac kubectl -n fieldnotes-prd logs deploy/fieldnotes -c app`.
 
-A slice that changes the chart pushes `pvginkel/FieldnotesDeploy` as well, and that push is what rolls
-the pod: track `IaC/HelmCharts --hash` of that commit instead. A slice that changes only the store's
-skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
+A slice that changes the chart pushes `pvginkel/FieldnotesDeploy` as well. The build's pin commits
+land on that repo's `main` too, so fetch and rebase the chart commit onto `origin/main` before
+pushing it; a rejected push means a pin commit landed first, so rebase again, never force. The chart push rolls the pod
+on its own: confirm it the same way, the Application's revision being the chart commit (or a later
+pin commit). Push the chart first when the new image needs what the chart adds, the image first
+when the chart needs the new image, and either when neither does. A slice that changes only the
+store's skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
 
 ## 4. The deployed checks
 

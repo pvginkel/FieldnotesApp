@@ -51,7 +51,7 @@ from fieldnotes_contracts import (
     ReactReply,
 )
 
-DEFAULT_URL = "http://localhost:8766/mcp"
+DEFAULT_URL = "http://localhost:8081/mcp"
 TOKEN_ENV = "FIELDNOTES_MCP_TOKEN"
 
 # The deployment's endpoints are https, signed by the homelab's step-ca, whose root is in the

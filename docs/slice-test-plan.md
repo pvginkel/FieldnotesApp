@@ -47,37 +47,43 @@ and `lint` carry the gate. Say so in the close-out report rather than reporting 
 
 ## 2. The local live check
 
-`fieldnotes-api` runs in the `python` tool container against a store generated under the gitignored
-`.run/` and the real models pod. The store lives in `.run/` and not in `/tmp` because every
-container has its own `/tmp`, while the checkout is shared; the tool containers share the pod's
-network, so the API answers on `localhost` here. All texts are invented.
+The backend runs in the `modern-app` tool container, as the production image runs it
+(`FLASK_ENV=production`, no reloader), against a store generated under the gitignored `backend/.run/`
+and the real models pod. The store lives in `.run/` and not in `/tmp` because the checkout is what
+every container shares for certain; the tool containers share the pod's network, so the API answers
+on `localhost` here. All texts are invented.
 
-Boot, from the repo root:
+Boot, from `backend/` (after `kc project setup`, which builds `backend/.venv`):
 
 ```bash
 rm -rf .run/live && mkdir -p .run/live
 git init --quiet --bare --initial-branch main .run/live/remote.git
 cat > .run/live/env <<'EOF'
-FIELDNOTES_STORE_URL=/work/FieldnotesApp/.run/live/remote.git
-FIELDNOTES_STORE_DIR=/work/FieldnotesApp/.run/live/checkout
-FIELDNOTES_CACHE_DIR=/work/FieldnotesApp/.run/live/cache
+FLASK_ENV=production
+SECRET_KEY=live-secret-key-live-secret-key-00
+OIDC_ENABLED=false
+FIELDNOTES_STORE_URL=/work/FieldnotesApp/backend/.run/live/remote.git
+FIELDNOTES_STORE_DIR=/work/FieldnotesApp/backend/.run/live/checkout
+FIELDNOTES_CACHE_DIR=/work/FieldnotesApp/backend/.run/live/cache
 FIELDNOTES_CLIENT_TOKEN_MCP=live-mcp-token
 FIELDNOTES_CLIENT_TOKEN_SKILLS=live-skills-token
 FIELDNOTES_GITHUB_WEBHOOK_SECRET=live-github-secret
 FIELDNOTES_GITHUB_REPO=pvginkel/Fieldnotes
-FIELDNOTES_API_PORT=8765
 EOF
-cexec python sh -c 'cd /work/FieldnotesApp && set -a && . .run/live/env && set +a &&
-  setsid nohup .venv/bin/fieldnotes-api > .run/live/api.log 2>&1 < /dev/null &
+cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && set -a && . .run/live/env && set +a &&
+  setsid nohup .venv/bin/dev > .run/live/api.log 2>&1 < /dev/null &
   echo $! > .run/live/api.pid'
-until curl -sf localhost:8765/readyz; do sleep 1; done
+until curl -s localhost:3401/health/readyz | grep -q '"store":{"failed":false,"ok":true}'; do sleep 1; done
 ```
 
-The pid is written from inside the tool container: killing the local `cexec` client does not reach
-the process it started, and `.venv/bin/fieldnotes-api` rather than `uv run` keeps that pid the
+The API answers on 3401 under `/api`. `/health/readyz` as a whole stays `503`, because it also
+waits for the SSE gateway, which this check does not run; its `store` entry is the API's own
+readiness. The pid is written from inside the tool container: killing the local `cexec` client does
+not reach the process it started, and `.venv/bin/dev` rather than `uv run dev` keeps that pid the
 server's own.
 
-Drive it with `curl`, `Authorization: Bearer live-mcp-token` (or `live-skills-token`):
+Drive it with `curl` at `localhost:3401/api`, `Authorization: Bearer live-mcp-token` (or
+`live-skills-token`):
 
 1. `POST /observations` a novel observation: `201` with an id, and one commit on
    `.run/live/remote.git`'s `main`.
@@ -98,21 +104,21 @@ Drive it with `curl`, `Authorization: Bearer live-mcp-token` (or `live-skills-to
 
 ```bash
 cat > .run/live/mcp.env <<'EOF'
-FIELDNOTES_API_URL=http://localhost:8765
 FIELDNOTES_API_TOKEN=live-mcp-token
 FIELDNOTES_MCP_TOKEN=live-agent-token
-FIELDNOTES_MCP_PORT=8766
 EOF
-cexec python sh -c 'cd /work/FieldnotesApp && set -a && . .run/live/mcp.env && set +a &&
+cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && set -a && . .run/live/mcp.env && set +a &&
   setsid nohup .venv/bin/fieldnotes-mcp > .run/live/mcp.log 2>&1 < /dev/null &
   echo $! > .run/live/mcp.pid'
-until curl -sf localhost:8766/readyz; do sleep 1; done
+until curl -sf localhost:8081/readyz; do sleep 1; done
 ```
+
+Its defaults are the pod's: the API at `http://localhost:3401/api`, listening on 8081.
 
 7. The MCP row, which is a script:
 
    ```bash
-   cexec python uv run --all-packages python eval/mcp_e2e.py --token live-agent-token
+   cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && .venv/bin/python eval/mcp_e2e.py --token live-agent-token'
    ```
 
    It drives the server with a real MCP client over the Streamable-HTTP transport, the way an
@@ -134,7 +140,7 @@ until curl -sf localhost:8766/readyz; do sleep 1; done
 Stop:
 
 ```bash
-cexec python sh -c 'kill $(cat /work/FieldnotesApp/.run/live/mcp.pid) $(cat /work/FieldnotesApp/.run/live/api.pid)'
+cexec modern-app sh -c 'kill $(cat /work/FieldnotesApp/backend/.run/live/mcp.pid) $(cat /work/FieldnotesApp/backend/.run/live/api.pid)'
 ```
 
 The board sync has no local check: it needs YouTrack's webhook app, which points at the

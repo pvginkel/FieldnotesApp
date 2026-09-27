@@ -3,7 +3,7 @@
 This covers the two inbound webhooks, GitHub's push notifications and YouTrack's board events, and
 board sync, the routine that reconciles an observation with its YouTrack card (FR-20..FR-22).
 
-## GitHub: `POST /hooks/github`
+## GitHub: `POST /api/hooks/github`
 
 The store repo's webhook reaches the API through the homelab's `webhook-relay`, the only
 internet-facing container, which verifies the signature and forwards the raw delivery with its
@@ -25,7 +25,7 @@ The pull runs in the same queue as the writes described in [rest-api.md](rest-ap
 index up to the new commit; see [match-pipeline.md](match-pipeline.md) for how the index re-reads
 only what changed, re-embedding only a changed canonical.
 
-## YouTrack: `POST /hooks/youtrack`
+## YouTrack: `POST /api/hooks/youtrack`
 
 The board's events come from JetBrains' Webhook Triggers app, configured per YouTrack project,
 in-cluster with no relay. Point the app at the endpoint for issue updates and for comments added,

@@ -196,7 +196,7 @@ component that decides anything; everything else is off the shelf or thin.
 ```mermaid
 flowchart LR
   A[Agents in KubeCoder pods] -->|MCP| M[fieldnotes-mcp]
-  M -->|HTTP| R[fieldnotes-api]
+  M -->|HTTP| R[fieldnotes API]
   R -->|/embed| E[models]
   R <-->|pull / push| G[GitHub store repo]
   G -->|push delivery| W[webhook-relay]
@@ -216,33 +216,39 @@ the board talk back to the API alone.
 
 ### This repo
 
-One uv workspace, after KubeCoder's:
+A ModernAppTemplate app: the root, `backend/` and `frontend/` are each generated from a Copier
+template, and [CLAUDE.md](../CLAUDE.md) says which files the template owns. The backend is one uv
+workspace:
 
 | Path | Content |
 | --- | --- |
-| `packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; there is no OpenAPI document. |
-| `api/` | `fieldnotes-api`: FastAPI. Store, index, match pipeline, webhooks. |
-| `mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
-| `eval/` | The replay and eval harness. Code and invented fixtures only: the mined dataset is private and is passed in by path. |
-| `Dockerfile`, `Jenkinsfile` | One image carrying both entry points; built by kaniko on push to `main`. |
+| `backend/app/fieldnotes/` | The domain: the store and its write queue (a worker thread), the index, the match pipeline, board sync, the webhooks' verification, the metrics, and the `Runtime` that builds them from the settings. |
+| `backend/app/api/fieldnotes.py` | The REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
+| `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
+| `backend/packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; the API validates with them directly. |
+| `backend/mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
+| `backend/eval/` | The replay and eval harness. Code and invented fixtures only: the mined dataset is private and is passed in by path. |
+| `frontend/` | The operator's UI: React, TanStack Router and Query, a client generated from the backend's OpenAPI document, OIDC sign-in through the backend. |
+| `backend/Dockerfile`, `frontend/Dockerfile`, `Jenkinsfile` | Two images: the backend carries both entry points, the frontend serves the SPA. Built by kaniko on push. |
 
-Conventions carried over from KubeCoder: settings read once at startup from `FIELDNOTES_*`
-environment variables into a frozen dataclass; errors as RFC 9457 `application/problem+json` with a
-closed set of `type` slugs and operator-facing prose; unauthenticated `GET /healthz` and
-`GET /readyz` on both services; ruff and pytest only; tests run everything this repo owns for real
-and fake only what it does not (the model pod, GitHub, YouTrack); a test pins each surface by
-equality.
+Conventions: settings read once at startup from `FIELDNOTES_*` environment variables into a frozen
+dataclass, beside the template's own; errors as RFC 9457 `application/problem+json` with a closed set
+of `type` slugs and operator-facing prose; unauthenticated health checks (the template's
+`/health/healthz` and `/health/readyz` on the backend, `/healthz` and `/readyz` on the MCP server);
+ruff, mypy strict, vulture and pytest; tests run everything this repo owns for real and fake only
+what it does not (the model pod, GitHub, YouTrack); a test pins each surface by equality.
 
 ### Services
 
 | Service | What it is | Placement |
 | --- | --- | --- |
 | `models` | One pod: NGINX in front of a TEI CPU container per model, routing by path; today one, the embedder at `/embed`. A volume caches the downloaded models, so the pod starts without egress after the first run. | A chart of its own in the homelab's chart repo, pinned by node affinity and toleration to the high-performance node. |
-| `fieldnotes` | One pod, three containers: `api`, `mcp` and `webhook-relay`. A volume holds the store checkout and the embedding cache. Three Services select the pod: the API and the MCP server for in-cluster and intranet callers, the relay as the one public hostname. `Recreate` strategy, since the checkout has a single writer. | A chart in the homelab's chart repo; secrets from OpenBao through External Secrets. |
+| `fieldnotes` | One pod: the backend `app` (the API, on 3401), the `ui` (on 3400, which proxies `/api`), the template's `sse-gateway`, `mcp` and, where the store takes webhooks, `webhook-relay`. A volume holds the store checkout and the embedding cache. Services select the pod: the UI for the operator, the MCP server for agents, the relay as the one public hostname. `Recreate` strategy, since the checkout has a single writer. | The chart in `pvginkel/FieldnotesDeploy`, one values file per stage; secrets from OpenBao through External Secrets, or generated by it. |
 
-API endpoints: `POST /observations`, `POST /observations/{id}/reactions`, `GET /observations/{id}`,
-`POST /observations/{id}/board-sync`, `POST /match`, `GET /observations/{id}/neighbors`,
-`POST /hooks/github`, `POST /hooks/youtrack`, `GET /healthz`, `GET /readyz`, `GET /metrics`.
+API endpoints, under `/api`: `POST /observations`, `POST /observations/{id}/reactions`,
+`GET /observations/{id}`, `POST /observations/{id}/board-sync`, `POST /match`,
+`GET /observations/{id}/neighbors`, `POST /hooks/github`, `POST /hooks/youtrack`. Beside them the
+template's `GET /health/healthz`, `GET /health/readyz` and `GET /metrics`.
 
 Callers authenticate with a bearer token that resolves to a named client (`mcp`, `skills`); the name
 is logged with each write. The MCP server takes its own inbound bearer token from agents and holds
@@ -337,13 +343,13 @@ it is kept for.
 ### Webhooks
 
 **GitHub.** The store repo's webhook is registered at the relay's public hostname. The relay verifies
-the signature and forwards the raw delivery, signature headers included, to `/hooks/github`, which
+the signature and forwards the raw delivery, signature headers included, to `/api/hooks/github`, which
 verifies it again over the exact bytes received. The relay allows each receiver four seconds, so the
 handler never pulls inline: a `push` to the store's `main` queues a pull-and-reindex and answers at
 once; `ping`, every other event and every other repository are answered `200` and ignored. The
 server's own pushes come back as deliveries and cost one no-op fetch.
 
-**YouTrack.** The board posts issue and comment events to `/hooks/youtrack` with a shared token,
+**YouTrack.** The board posts issue and comment events to `/api/hooks/youtrack` with a shared token,
 in-cluster, with no relay. The handler takes the issue id from the event and looks up the
 observation whose `card` is that issue; most board events concern issues Fieldnotes never raised,
 and those are answered `200` and ignored without a call to YouTrack. For a match it runs the

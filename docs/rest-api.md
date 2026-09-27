@@ -41,6 +41,9 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `POST /api/match` | `MatchRequest` | 200 `{candidates}` |
 | `POST /api/hooks/github`, `POST /api/hooks/youtrack` | the sender's payload | 200 `{action: "queued" or "ignored"}` |
 | `GET /api/triage/queue` | | 200 `{items, observations}` |
+| `PUT /api/triage/items/{id}/ruling` | `RulingRequest` | 200 the item as it now stands |
+| `DELETE /api/triage/items/{id}/ruling?written=…` | `written` | 200 the item as it now stands |
+| `POST /api/triage/submit` | | 200 the ids submitted, a list, empty when nothing was ruled |
 | `GET /health/healthz`, `GET /health/readyz` | | the template's health checks; readiness carries a `store` entry, `{ok, failed}` |
 | `GET /metrics` | | 200 the Prometheus text exposition |
 
@@ -55,6 +58,9 @@ unknown fields are refused.
   is new), `repo`, `session` (optional).
 - `MatchRequest`: `text`, `area` (optional; when given, the query is `area: text`, the same shape as
   an observation's embedded text), `k` (1–12, default 3).
+- `RulingRequest`: `verb` (`yes`, `no` or `later`), `note` (≤10,000; blank is allowed on a `yes`
+  only), `written` (the item's `written` as the operator's page saw it, `YYYY-MM-DDTHH:MM:SSZ`). The
+  take-back's `written` query parameter is the same.
 
 ## What each endpoint does
 
@@ -87,6 +93,20 @@ unknown fields are refused.
   triage index, which reads `triage/*.json` at startup and after every pull and write. An item file
   that is not JSON, breaks the store's item rules (the app's own copy of the store's check) or does
   not parse is logged and left out.
+- **Ruling** (FR-25): sets the item's `ruling` to `{verb, note, at: now, submitted: null}` over any
+  draft. A returned item keeps its `question`; a ruling whose `at` is later than the question's is
+  its answer. A `no` or a `later` without a note is refused (`validation-error`).
+- **Take-back** (FR-25): sets the item's `ruling` to null. On an item without a ruling it writes
+  nothing.
+- **Refusals of a ruling and a take-back**, each decided on the item as the store holds it at the
+  tip the write lands on, never on the triage index, which can trail a skill's push: `not-found`
+  when `triage/` has no such item (the actioner stamped it or the reconciler withdrew it);
+  `conflict` when the item is submitted (the actioner's), when its `written` is not the one sent
+  (the reconciler rewrote it after the page loaded, and the ruling is dropped), or when it does not
+  pass the store's item rules. A refusal writes nothing.
+- **Submit** (FR-26): marks every ruled, unsubmitted item in `triage/` submitted (`ruling.submitted:
+  now`) and answers with their ids. A returned item counts as ruled only once its ruling's `at` is
+  later than its question's. With nothing ruled it writes nothing and answers `[]`.
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
   annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard
   reads them. See [Metrics](#metrics).
@@ -113,6 +133,7 @@ time.
 | `fieldnotes_gets_total` | `client` | observations read by id |
 | `fieldnotes_webhook_deliveries_total` | `source`, `action` | verified deliveries, `queued` or `ignored`; a refused one shows only as a 401 in the request metric |
 | `fieldnotes_board_syncs_total` | `result` | `changed`, `unchanged`, or `failed` (a queued sync that raised) |
+| `fieldnotes_triage_rulings_total` | `verb` | the operator's rulings, `yes`, `no` or `later`; a refused one is not counted |
 | `fieldnotes_http_request_duration_seconds` | `method`, `route`, `status` | requests by route template (histogram) |
 
 A matched post is remembered for its reporter, meaning the `(repo, session)` it came from or the repo
@@ -146,9 +167,13 @@ written), `status`, `outcome`, `pointer`, `card_updated`.
 
 Every write goes through one queue, is a commit on the store's `main`, and is pushed before the
 reply, so a 2xx means it is on the remote. Commit messages: `post <id> (<client>): <area>`,
-`react <id> <emoji> (<client>)`, `board-sync <id> <card>`. A write fetches and resets to the remote
-first; a push rejected because a skill pushed in between makes the write start over on the new tip
-and apply its edit again; a write that fails leaves nothing behind that a later push could carry.
+`react <id> <emoji> (<client>)`, `board-sync <id> <card>`, and the operator's `rule <id> <verb>
+(operator)`, `unrule <id> (operator)`, `submit <n> (operator)`. A write fetches and resets to the
+remote first; a push rejected because a skill pushed in between makes the write start over on the
+new tip and apply its edit again; a write that fails leaves nothing behind that a later push could
+carry. A write that changes nothing commits nothing. The operator's writes write an item back as
+it was read, two-space indented, UTF-8 unescaped, with a trailing newline, and change nothing but
+its `ruling`, so a commit's diff is the ruling; timestamps are UTC, whole seconds, `Z`.
 
 ## Errors
 
@@ -159,9 +184,9 @@ Every non-2xx response is RFC 9457 `application/problem+json`: `type` (a slug fr
 | Slug | Status | When |
 | --- | --- | --- |
 | `unauthenticated` | 401 | no bearer, or one that resolves to no client; a webhook delivery whose signature or token does not verify |
-| `not-found` | 404 | no observation by that id; it may have been merged into another, so the detail suggests posting again |
-| `conflict` | 409 | the observation's file no longer parses (the detail names the fault); a board sync of an observation with no card; a card YouTrack does not have |
-| `validation-error` | 422 | a request that does not validate, a malformed id |
+| `not-found` | 404 | no observation by that id; it may have been merged into another, so the detail suggests posting again; no triage item by that id in `triage/` |
+| `conflict` | 409 | the observation's file no longer parses (the detail names the fault); a board sync of an observation with no card; a card YouTrack does not have; a ruling or take-back on a triage item that is submitted, rewritten since the page loaded, or not valid |
+| `validation-error` | 422 | a request that does not validate, a malformed id; a `no` or `later` ruling without a note |
 | `not-ready` | 503 | the store is still being cloned or the index built |
 | `models-unreachable` | 502 | the models pod did not answer |
 | `store-unreachable` | 502 | the store's remote could not be reached or refused the push; nothing was written |

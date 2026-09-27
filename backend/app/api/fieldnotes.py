@@ -21,6 +21,7 @@ from app.fieldnotes.errors import (
     ProblemException,
     internal,
     problem_response,
+    store_unreachable,
     unauthenticated,
     validation_problem,
 )
@@ -139,14 +140,7 @@ def _board_unreachable(exc: BoardError) -> Response:
 @fieldnotes_bp.errorhandler(GitError)
 def _store_unreachable(exc: GitError) -> Response:
     logger.warning("store: %s", exc)
-    return problem_response(
-        ProblemException(
-            502,
-            ProblemType.store_unreachable,
-            "the store's remote could not be reached or refused the write",
-            detail="nothing was written; retry in a minute",
-        )
-    )
+    return problem_response(store_unreachable())
 
 
 @fieldnotes_bp.errorhandler(Exception)

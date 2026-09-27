@@ -51,6 +51,7 @@ def test_every_closed_label_set_is_there_from_the_start(start, scrape):
         'fieldnotes_reactions_total{client="mcp"} 0.0',
         'fieldnotes_webhook_deliveries_total{action="queued",source="github"} 0.0',
         'fieldnotes_board_syncs_total{result="failed"} 0.0',
+        'fieldnotes_triage_rulings_total{verb="later"} 0.0',
     ):
         assert line in text
 

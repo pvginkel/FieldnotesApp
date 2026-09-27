@@ -31,7 +31,7 @@ from prometheus_client.core import GaugeMetricFamily, Metric
 from prometheus_client.registry import Collector
 
 from app.fieldnotes.index import Index
-from app.fieldnotes.triage import TriageIndex
+from app.fieldnotes.triage import TriageIndex, Verb
 from fieldnotes_contracts import Category, MatchClass, Status
 
 FOLLOW_UP_WINDOW = timedelta(minutes=30)
@@ -155,6 +155,12 @@ class Metrics:
             ["result"],
             registry=self.registry,
         )
+        self.rulings = Counter(
+            "fieldnotes_triage_rulings",
+            "The operator's rulings on triage items, by verb.",
+            ["verb"],
+            registry=self.registry,
+        )
         self.requests = Histogram(
             "fieldnotes_http_request_duration_seconds",
             "HTTP requests, by route template, method and status.",
@@ -178,6 +184,8 @@ class Metrics:
                 self.webhooks.labels(source, action)
         for result in ("changed", "unchanged", "failed"):
             self.board_syncs.labels(result)
+        for verb in Verb:
+            self.rulings.labels(verb.value)
 
     def exposition(self) -> bytes:
         self._expire()

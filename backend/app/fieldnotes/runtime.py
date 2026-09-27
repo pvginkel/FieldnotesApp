@@ -1,5 +1,5 @@
 """The running store: its checkout and queue, the index, the triage index, the matcher, the
-observations and the metrics, built from the settings, and started in the background (design,
+observations, the operator's rulings and the metrics, built from the settings, and started in the background (design,
 "Services").
 
 Cloning the store and building the index can take minutes on a cold cache, and the health checks
@@ -26,6 +26,7 @@ from app.fieldnotes.matching import Matcher
 from app.fieldnotes.metrics import Metrics
 from app.fieldnotes.models import HttpModels, Models
 from app.fieldnotes.observations import Clock, Observations
+from app.fieldnotes.rulings import Rulings
 from app.fieldnotes.store import Store
 from app.fieldnotes.triage import TriageIndex
 
@@ -72,6 +73,7 @@ class Runtime:
         self.observations = Observations(
             self.store, self.index, self.matcher, clock, board, outcomes, self.metrics
         )
+        self.rulings = Rulings(self.store, clock, self.metrics)
         self.ready = False
         self.failed = False
         self._on_failure = on_failure

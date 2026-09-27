@@ -73,6 +73,15 @@ def not_ready() -> ProblemException:
     )
 
 
+def store_unreachable() -> ProblemException:
+    return ProblemException(
+        502,
+        ProblemType.store_unreachable,
+        "the store's remote could not be reached or refused the write",
+        detail="nothing was written; retry in a minute",
+    )
+
+
 def problem_response(exc: ProblemException) -> Response:
     return Response(
         exc.problem.model_dump_json(exclude_none=True),

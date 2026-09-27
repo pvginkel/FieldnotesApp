@@ -18,15 +18,23 @@ import json
 import logging
 import re
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from app.fieldnotes.index import Index
-from fieldnotes_contracts import ID_PATTERN, Observation
+from fieldnotes_contracts import ID_PATTERN, TEXT_MAX, Observation
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +71,22 @@ SNAPSHOT_KEYS = (
 )
 REPORT_KEYS = ("at", "emoji", "repo", "session", "client", "text")
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+TIME_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
 
 
 def item_path(id_: str) -> str:
     return f"{TRIAGE}/{id_}.json"
+
+
+def stamp(at: datetime) -> str:
+    """A time in the store's one spelling."""
+    return at.astimezone(UTC).strftime(TIME_FORMAT)
+
+
+def spelled(item: dict[str, Any]) -> str:
+    """An item as the store's writers write it: two spaces, UTF-8 as is, a trailing newline. The
+    keys keep the order they were read in, which a store writer made `ITEM_KEYS`."""
+    return json.dumps(item, indent=2, ensure_ascii=False) + "\n"
 
 
 # -- the store's rules ---------------------------------------------------------------------------
@@ -218,6 +238,13 @@ class TriageItem(_Model):
         """Handed back with a question and not submitted since."""
         return self.question is not None and not self.submitted
 
+    @property
+    def ruled(self) -> bool:
+        """A ruling in force: on a returned item, one made after its question."""
+        return self.ruling is not None and (
+            self.question is None or self.ruling.at > self.question.at
+        )
+
 
 class TriageQueue(_Model):
     """The operator's queue: the items, and each item's observation as it stands now, or null
@@ -225,6 +252,62 @@ class TriageQueue(_Model):
 
     items: list[TriageItem]
     observations: dict[str, Snapshot | None]
+
+
+class _Request(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+
+Written = Annotated[str, Field(pattern=TIME_PATTERN)]
+
+
+class RulingRequest(_Request):
+    """A ruling, with the item's `written` as the operator's page saw it."""
+
+    verb: Verb
+    note: Annotated[str, StringConstraints(max_length=TEXT_MAX)]
+    written: Written
+
+    @model_validator(mode="after")
+    def _noted(self) -> RulingRequest:
+        if self.verb is not Verb.yes and not self.note:
+            raise ValueError(
+                f"a {self.verb} needs a note: it is what the actioner and the next reporter get"
+            )
+        return self
+
+
+class TakeBackQuery(_Request):
+    """A take-back's query: the item's `written` as the operator's page saw it."""
+
+    written: Written
+
+
+class SubmitReply(RootModel[list[str]]):
+    """The ids of the items submitted; empty when nothing was ruled."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class ItemFault(ValueError):
+    """What makes a file under `triage/` no open item the app can read."""
+
+
+def parse_item(name: str, text: str) -> tuple[dict[str, Any], TriageItem]:
+    """The open item `triage/<name>`: its JSON as read, and its model."""
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ItemFault(f"not JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ItemFault("not a JSON object")
+    faults = item_faults(name, data)
+    if faults:
+        raise ItemFault("; ".join(faults))
+    try:
+        return data, TriageItem.model_validate(data)
+    except ValidationError as exc:
+        raise ItemFault(str(exc)) from exc
 
 
 # -- the index -----------------------------------------------------------------------------------
@@ -242,22 +325,11 @@ class TriageIndex:
 
     def _read(self, path: str, name: str) -> TriageItem | None:
         try:
-            data = json.loads((self.root / path).read_text())
-        except ValueError as exc:
-            logger.error("%s is left out of the triage queue: not JSON: %s", path, exc)
-            return None
-        if not isinstance(data, dict):
-            logger.error("%s is left out of the triage queue: not a JSON object", path)
-            return None
-        faults = item_faults(name, data)
-        if faults:
-            logger.error("%s is left out of the triage queue: %s", path, "; ".join(faults))
-            return None
-        try:
-            return TriageItem.model_validate(data)
-        except ValidationError as exc:
+            _, item = parse_item(name, (self.root / path).read_text())
+        except ItemFault as exc:
             logger.error("%s is left out of the triage queue: %s", path, exc)
             return None
+        return item
 
     def update(self, paths: set[str]) -> None:
         """Take in the changed paths: a listener of the store."""

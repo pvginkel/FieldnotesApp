@@ -176,6 +176,12 @@ class Api:
             kwargs["data"] = content
         return Reply(self._client.post(url, **kwargs))
 
+    def put(self, url: str, **kwargs: Any) -> Reply:
+        return Reply(self._client.put(url, **kwargs))
+
+    def delete(self, url: str, **kwargs: Any) -> Reply:
+        return Reply(self._client.delete(url, **kwargs))
+
     def sign_in(self, token: str) -> None:
         """Send an OIDC access token as the operator's session cookie from now on."""
         self._client.set_cookie("access_token", token)

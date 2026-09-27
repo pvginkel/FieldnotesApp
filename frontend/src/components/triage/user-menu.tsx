@@ -2,7 +2,7 @@
 // preferences, which the mockup kept in its own controls.
 
 import { useEffect, useRef, useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, UserRound } from 'lucide-react';
 import { useAuthContext } from '@/contexts/auth-context';
 import type { Prefs, ReportsPlace, Theme } from '@/lib/triage/browser-state';
 
@@ -10,9 +10,6 @@ interface UserMenuProps {
   prefs: Prefs;
   onPref: <K extends keyof Prefs>(key: K, value: Prefs[K]) => void;
 }
-
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase();
 
 export function UserMenu({ prefs, onPref }: UserMenuProps) {
   const { user, logout } = useAuthContext();
@@ -47,7 +44,7 @@ export function UserMenu({ prefs, onPref }: UserMenuProps) {
         onClick={() => setOpen(!open)}
         data-testid="app-shell.topbar.user"
       >
-        <span aria-hidden="true">{initials(name)}</span>
+        <UserRound className="icon" aria-hidden="true" />
         <span className="sr-only" data-testid="app-shell.topbar.user.name">{name}</span>
       </button>
       {open && (

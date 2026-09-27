@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { Time } from './prose';
 
 // The finish card is the submit and little else: the header already has the progress.
 export function FinishCard(props: { ruled: number; submitting: boolean; onPrevious: () => void; onSubmit: () => void; onRestart: () => void }) {
@@ -44,8 +43,4 @@ export function CenterCard({ title, children, testId }: { title: string; childre
       </div>
     </div>
   );
-}
-
-export function EmptyTally({ last }: { last: string | undefined }) {
-  return <div className="tally">The last item was written {last ? <Time iso={last} /> : 'never'}.</div>;
 }

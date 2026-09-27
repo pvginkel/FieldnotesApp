@@ -208,17 +208,19 @@ kbd {
 }
 .topbar .btn-primary:hover:not(:disabled) { background: rgb(255 255 255 / 0.9); }
 .topbar .btn-primary:disabled { opacity: 0.55; }
-/* The keys, as a bare icon, in white: dimmed, it would fall under 3:1 on the header. */
+/* The keys, as a bare icon, muted until hovered: the operator's call over the 3:1 it falls
+   under on the header while dimmed. */
 .help {
   display: grid;
   place-items: center;
   padding: 0;
   border: 0;
   background: none;
-  color: #fff;
+  color: rgb(255 255 255 / 0.7);
   font-size: 20px;
   cursor: pointer;
 }
+.help:hover { color: #fff; }
 .help .icon { vertical-align: 0; }
 .topbar .user { background: rgb(0 0 0 / 0.25); color: #fff; }
 .topbar :focus-visible { outline-color: #fff; }
@@ -519,6 +521,7 @@ kbd {
 .center h1 { margin: 20px 0 4px; font-size: 34px; font-weight: 600; }
 .center .tally { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 .center .btn-big { margin-top: 28px; }
+.center .btn-soft { margin-top: 20px; }
 
 /* ---- Toasts, the keys dialog -------------------------------------------------------- */
 
@@ -574,6 +577,7 @@ dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
 /* The avatar is the user menu's button: the template's dropdown, in the mockup's avatar. */
 .user-menu { position: relative; }
 button.user { padding: 0; border: 0; font-family: inherit; cursor: pointer; }
+.user .icon { font-size: 18px; vertical-align: 0; }
 .menu {
   position: absolute;
   top: calc(100% + 8px);

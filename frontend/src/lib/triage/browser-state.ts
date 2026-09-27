@@ -20,7 +20,6 @@ export interface BrowserState {
   drafts: Record<string, Draft>; // typed but not ruled yet
   skipped: Record<string, string>; // id → when it was last skipped
   seen: string[]; // the order cards were seen in, until the next submit
-  lastWritten: string | null; // the newest item this browser has seen, for the empty page
   prefs: Prefs;
 }
 
@@ -30,14 +29,14 @@ const initial = (): BrowserState => ({
   drafts: {},
   skipped: {},
   seen: [],
-  lastWritten: null,
   prefs: { reportsPlace: 'middle', theme: 'system' },
 });
 
 export function loadBrowserState(): BrowserState {
   const state = initial();
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE) || '{}') as Partial<BrowserState>;
+    const saved = JSON.parse(localStorage.getItem(STORAGE) || '{}') as Partial<BrowserState> & { lastWritten?: unknown };
+    delete saved.lastWritten; // what an earlier build kept for the empty page
     return { ...state, ...saved, prefs: { ...state.prefs, ...saved.prefs } };
   } catch {
     return state;

@@ -1,10 +1,11 @@
 // The one screen: the triage stack, ported from the mockup (FieldnotesAppSpecs/mockups/triage-ui/).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useTriage } from '@/hooks/use-triage';
 import { prosePattern, ProsePatternContext } from '@/lib/triage/prose-pattern';
 import { ownersOf } from '@/lib/triage/queue';
-import { CenterCard, EmptyTally, FinishCard } from './finish-card';
+import { CenterCard, FinishCard } from './finish-card';
 import { KeysDialog } from './keys-dialog';
 import { RulingPane } from './ruling-pane';
 import { Toasts } from './toasts';
@@ -100,7 +101,19 @@ export function TriagePage() {
           />
         );
       case 'empty':
-        return <CenterCard title="Nothing to rule on" testId="triage.empty"><EmptyTally last={triage.lastWritten ?? undefined} /></CenterCard>;
+        return (
+          <CenterCard title="Nothing to rule on" testId="triage.empty">
+            <button
+              type="button"
+              className="btn btn-soft"
+              disabled={triage.query.isFetching}
+              onClick={() => void triage.query.refetch()}
+              data-testid="triage.empty.refresh"
+            >
+              <RefreshCw className="icon" aria-hidden="true" /> Check again
+            </button>
+          </CenterCard>
+        );
       case 'error':
         return (
           <CenterCard title="The queue did not load" testId="triage.error">

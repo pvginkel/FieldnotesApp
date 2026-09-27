@@ -136,10 +136,6 @@ export function useTriage() {
   if (items && (nav === null || items !== navFor)) {
     setNavFor(items);
     setNav(nav ? reconcile(nav, items, browser.skipped) : build(items, browser));
-    const newest = items.map((item) => item.written).sort().pop();
-    if (newest && (!browser.lastWritten || newest > browser.lastWritten)) {
-      setBrowser((b) => ({ ...b, lastWritten: newest }));
-    }
   }
 
   const view: View = !items || !nav
@@ -377,7 +373,6 @@ export function useTriage() {
     draft: current ? draftOf(current) : { verb: null, note: '' },
     message,
     skipped: browser.skipped,
-    lastWritten: browser.lastWritten,
     prefs: browser.prefs,
     toasts,
     noteRef,

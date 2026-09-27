@@ -250,7 +250,7 @@ scope here.
 31. NFR-4 The agents' and the skills' REST endpoints and the MCP server authenticated the way the
     KubeCoder MCP server is: a static bearer token on each boundary. The operator's triage
     endpoints (FR-23 to FR-27) take the template's OIDC session with the `editor` client role
-    instead, and no bearer: a request without a session, or with a bearer token, is refused as
+    instead: a request without a session, or with an agent's bearer token, is refused as
     unauthenticated, and a signed-in user without the role as forbidden, reads and writes alike.
     Webhook secrets verified on every request.
 

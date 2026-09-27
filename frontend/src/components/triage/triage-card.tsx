@@ -36,13 +36,18 @@ export function TriageCard({ item, live, reportsPlace }: TriageCardProps) {
     ) : null,
     evidence: <TextSection title="Evidence" body={item.evidence} />,
     reports: <Reports item={item} />,
-    recommendation: <TextSection title="Recommendation" body={item.recommendation} />,
+    recommendation: item.recommendation ? (
+      <section className="box recommendation-box">
+        <div className="box-head">Recommendation</div>
+        <Prose source={item.recommendation} />
+      </section>
+    ) : null,
     impact: <TextSection title="Impact" body={item.impact} />,
     store: <StoreSection item={item} live={live} changes={changes} />,
   };
   const order = reportsPlace === 'last'
-    ? ['ask', 'evidence', 'recommendation', 'impact', 'reports', 'store']
-    : ['ask', 'evidence', 'reports', 'recommendation', 'impact', 'store'];
+    ? ['ask', 'recommendation', 'impact', 'evidence', 'store', 'reports']
+    : ['ask', 'recommendation', 'impact', 'evidence', 'reports', 'store'];
 
   return (
     <div className="column">

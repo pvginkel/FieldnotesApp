@@ -305,7 +305,8 @@ kbd {
   letter-spacing: -0.01em;
 }
 
-/* A tinted box: the actioner's question in the warning colour, the ask in the info colour. */
+/* A tinted box: the actioner's question in the warning colour, the ask in the info colour, the
+   recommendation in the success colour. */
 .box {
   margin-top: 20px;
   padding: 12px 16px;
@@ -316,6 +317,7 @@ kbd {
 .box-head { margin-bottom: 4px; font-size: 17px; font-weight: 600; color: hsl(var(--tone-text)); }
 .box.returned { --tone: var(--warning); --tone-text: var(--warning-text); }
 .box.ask-box { --tone: var(--info); --tone-text: var(--info-text); }
+.box.recommendation-box { --tone: var(--success); --tone-text: var(--success-text); }
 .returned .was { margin-top: 8px; color: hsl(var(--muted-foreground)); }
 
 .section { margin-top: 28px; }

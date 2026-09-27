@@ -10,15 +10,21 @@ The surface is the ModernAppTemplate backend's (`backend/`, Flask under waitress
 (`backend/app/api/fieldnotes.py`), and the domain behind them is `backend/app/fieldnotes/`. The
 UI's nginx in the same pod proxies `/api/` to it.
 
-Every endpoint except the health checks, `GET /metrics` and the two webhooks requires
-`Authorization: Bearer <token>` (NFR-4). These are `@public` to the template's OIDC hook, which
-gates only the UI's own endpoints on the operator's session: the agents' surface checks its client
-tokens itself. A token resolves to a named client configured as
+Every endpoint except the health checks, `GET /metrics`, the two webhooks and the triage endpoints
+requires `Authorization: Bearer <token>` (NFR-4). These are `@public` to the template's OIDC hook,
+which gates only the UI's own endpoints on the operator's session: the agents' surface checks its
+client tokens itself. A token resolves to a named client configured as
 `FIELDNOTES_CLIENT_TOKEN_<NAME>`, the name being the suffix lowercased (`mcp`, `skills`).
 Resolution compares digests in constant time against every configured client. With no client
 configured, every bearer is refused. The resolved client's name goes into the commit message of any
 write, onto the reactions it writes (`client`), and into the log. The webhooks verify their own
 secrets; see [webhooks.md](webhooks.md).
+
+The triage endpoints (`/api/triage/…`, `backend/app/api/triage.py`) are the triage UI's, and take
+the operator's OIDC session instead (NFR-4): the template's, gated on the `editor` client role for
+every method, a GET included. A request with no session, or with an agent's bearer token, is
+refused with 401, and a signed-in user without the role with 403, both in the template's own
+`{error}` body rather than problem+json.
 
 ## Endpoints
 
@@ -34,6 +40,7 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `POST /api/observations/{id}/board-sync` | | 200 `BoardSyncReply` |
 | `POST /api/match` | `MatchRequest` | 200 `{candidates}` |
 | `POST /api/hooks/github`, `POST /api/hooks/youtrack` | the sender's payload | 200 `{action: "queued" or "ignored"}` |
+| `GET /api/triage/queue` | | 200 `{items, observations}` |
 | `GET /health/healthz`, `GET /health/readyz` | | the template's health checks; readiness carries a `store` entry, `{ok, failed}` |
 | `GET /metrics` | | 200 the Prometheus text exposition |
 
@@ -70,6 +77,16 @@ unknown fields are refused.
   For the reconciler's search for missed duplicates.
 - **Board sync**: reconciles an observation's card with YouTrack. See
   [webhooks.md](webhooks.md#board-sync).
+- **Triage queue** (FR-23): the operator's queue. `items` holds every open item in the store's
+  `triage/` (not `done/`, not `archive/`) whose ruling is absent or not submitted, every field as
+  the item's file holds it. Returned items (a `question`, and not submitted since) come first, then
+  the rest, each group by `written`, oldest first. `observations` maps each item's observation id to
+  its fields as they stand now: the ten fields of an item's `snapshot`, spelled as the snapshot
+  spells them, so an observation unchanged since its item was written equals the snapshot. It is
+  null for an observation the store no longer has (merged away or deleted). The items come from the
+  triage index, which reads `triage/*.json` at startup and after every pull and write. An item file
+  that is not JSON, breaks the store's item rules (the app's own copy of the store's check) or does
+  not parse is logged and left out.
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
   annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard
   reads them. See [Metrics](#metrics).
@@ -87,6 +104,7 @@ time.
 | --- | --- | --- |
 | `fieldnotes_observations` | `status`, `category` | observations in the store (gauge) |
 | `fieldnotes_store_reactions` | `repo`, `emoji` | reactions on the observations in the store; a post is its 📝 (gauge) |
+| `fieldnotes_triage_queue` | | items in the operator's triage queue: open items whose ruling is absent or not submitted (gauge) |
 | `fieldnotes_posts_total` | `client`, `category`, `outcome` | posts: `created` (nothing matched), `matched` (candidates returned, nothing created), `forced` |
 | `fieldnotes_post_candidates_total` | `match_class` | candidates returned to matched posts |
 | `fieldnotes_post_top_score` | | the best candidate's score on a matched post (histogram) |
@@ -165,12 +183,17 @@ and the frontend's Playwright backend boot: its Fieldnotes endpoints answer `not
 
 ## The pinned surface
 
-The contract models in `backend/packages/fieldnotes-contracts` are the surface's definition: the
-endpoints validate with them directly and are left out of the template's OpenAPI document, and
-`backend/tests/fieldnotes/test_surface.py` pins every route, model field, enum value and problem
-slug by equality,
-so a change to the surface is a visible diff. See
-[change-discipline.md](change-discipline.md) for the rule this enforces.
+The contract models in `backend/packages/fieldnotes-contracts` are the agents' surface's definition:
+the endpoints validate with them directly, and `backend/tests/fieldnotes/test_surface.py` pins every
+route, model field, enum value and problem slug by equality, so a change to the surface is a visible
+diff. See [change-discipline.md](change-discipline.md) for the rule this enforces. The agents' routes
+are in the template's OpenAPI document as well, since Spectree in its default mode lists every route
+no other Spectree instance decorated, but untyped: they are not decorated, so the document carries
+neither their bodies nor a role.
+
+The triage endpoints are not part of the pinned surface. They are the UI's, typed in the OpenAPI
+document with the app's own models (`backend/app/fieldnotes/triage.py`) and marked with their
+`editor` gate (`x-required-role`); the UI generates its client from that document.
 
 ## Settings
 

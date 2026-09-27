@@ -1,5 +1,6 @@
-"""The running store: its checkout and queue, the index, the matcher, the observations and the
-metrics, built from the settings, and started in the background (design, "Services").
+"""The running store: its checkout and queue, the index, the triage index, the matcher, the
+observations and the metrics, built from the settings, and started in the background (design,
+"Services").
 
 Cloning the store and building the index can take minutes on a cold cache, and the health checks
 have to answer meanwhile, so `start` runs on its own thread. Until it is done every endpoint that
@@ -26,6 +27,7 @@ from app.fieldnotes.metrics import Metrics
 from app.fieldnotes.models import HttpModels, Models
 from app.fieldnotes.observations import Clock, Observations
 from app.fieldnotes.store import Store
+from app.fieldnotes.triage import TriageIndex
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +66,9 @@ class Runtime:
         self.index = Index(
             settings.store.root, EmbeddingCache(settings.cache_dir, settings.embed_model), models
         )
+        self.triage = TriageIndex(settings.store.root)
         self.matcher = Matcher(self.index, models, settings.match)
-        self.metrics = Metrics(self.index, clock, settings.clients.names)
+        self.metrics = Metrics(self.index, self.triage, clock, settings.clients.names)
         self.observations = Observations(
             self.store, self.index, self.matcher, clock, board, outcomes, self.metrics
         )
@@ -86,7 +89,9 @@ class Runtime:
 
     def _start(self) -> None:
         try:
-            self.store.start(self.index.update)
+            # The triage index first: it reads files alone, so it follows the checkout even while
+            # the models pod the observation index embeds with is down.
+            self.store.start(self.triage.update, self.index.update)
         except Exception:
             logger.exception("startup failed: the store could not be cloned or indexed")
             self.failed = True

@@ -18,6 +18,7 @@ from flask.testing import FlaskClient
 from prometheus_client import REGISTRY
 
 from app import create_app
+from app.app import App
 from app.fieldnotes.config import load_settings
 from app.fieldnotes.runtime import Runtime
 from app.fieldnotes.testing import FakeModels, FakeYouTrack
@@ -175,17 +176,25 @@ class Api:
             kwargs["data"] = content
         return Reply(self._client.post(url, **kwargs))
 
+    def sign_in(self, token: str) -> None:
+        """Send an OIDC access token as the operator's session cookie from now on."""
+        self._client.set_cookie("access_token", token)
+
 
 @pytest.fixture
 def start(environ, models, clock, youtrack, test_settings, test_app_settings):
-    """Start the API; `with start() as api:` yields a client that is ready."""
+    """Start the API; `with start() as api:` yields a client that is ready. `app` serves it from
+    an app of the test's own, such as the OIDC-enabled `oidc_app`."""
 
     @contextlib.contextmanager
-    def started(ready: bool = True, **overrides: str):
+    def started(ready: bool = True, app: App | None = None, **overrides: str):
         settings = load_settings({**environ, **overrides})
         board = youtrack.board(settings.board) if settings.board is not None else None
         runtime = Runtime(settings, models=models, board=board, clock=clock, environ=os.environ)
-        app = create_app(test_settings, app_settings=test_app_settings, skip_background_services=True)
+        if app is None:
+            app = create_app(
+                test_settings, app_settings=test_app_settings, skip_background_services=True
+            )
         app.container.fieldnotes_service().use(runtime)
         runtime.metrics.register(REGISTRY)
         runtime.start()

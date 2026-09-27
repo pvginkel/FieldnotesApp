@@ -31,8 +31,10 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     # module-level singleton the suites register on an app per test: register the children once.
     if not api_bp._got_registered_once:
         from app.api.fieldnotes import fieldnotes_bp
+        from app.api.triage import triage_bp
 
         api_bp.register_blueprint(fieldnotes_bp)
+        api_bp.register_blueprint(triage_bp)
 
 
 def register_error_handlers(app: Flask) -> None:

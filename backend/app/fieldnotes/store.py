@@ -12,9 +12,10 @@ at a time:
 Nothing unpushed survives a job: a write that fails leaves a commit the next job's reset drops, so
 a write the caller saw fail never lands later.
 
-After every move of the checkout the store tells its listener which paths changed since the commit
-the listener last took in, so the index follows the checkout. A listener that fails leaves that
-commit where it was, and the next job reports the same paths again.
+After every move of the checkout the store tells its listeners, in order, which paths changed since
+the commit they last took in, so the indexes follow the checkout. A listener that fails leaves that
+commit where it was, and the next job reports the same paths to every listener again: a listener
+takes in the same paths twice without harm.
 
 "Clone on start" is an init and a fetch, so an empty remote needs no special case: the first write
 makes the root commit of `main`.
@@ -27,7 +28,7 @@ import logging
 import queue
 import subprocess
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,8 +103,8 @@ class Store:
         self.settings = settings
         self.root = settings.root
         self._env = git_env(settings, env)
-        self._listener: Listener | None = None
-        self._seen: str | None = None  # the commit the listener last took in
+        self._listeners: Sequence[Listener] = ()
+        self._seen: str | None = None  # the commit the listeners last took in
         # A job, or None to stop the worker.
         self._queue: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] = queue.Queue()
         self._worker: threading.Thread | None = None
@@ -147,7 +148,7 @@ class Store:
         return {line for line in out.splitlines() if line}
 
     def _sync(self) -> str | None:
-        """Fetch, reset the checkout to the remote, and bring the listener up to it."""
+        """Fetch, reset the checkout to the remote, and bring the listeners up to it."""
         head = self._remote_head()
         if head is not None:
             self.git("reset", "--quiet", "--hard", head)
@@ -157,14 +158,15 @@ class Store:
 
     def _advance(self, head: str | None) -> None:
         changed = self._changed(self._seen, head)
-        if changed and self._listener is not None:
-            self._listener(changed)
+        if changed:
+            for listener in self._listeners:
+                listener(changed)
         self._seen = head
 
     # -- lifecycle -------------------------------------------------------------------------------
 
-    def start(self, listener: Listener) -> None:
-        """Make the checkout match the remote, report every file in it to the listener, and
+    def start(self, *listeners: Listener) -> None:
+        """Make the checkout match the remote, report every file in it to the listeners, and
         start the queue's worker."""
         self.root.mkdir(parents=True, exist_ok=True)
         if not (self.root / ".git").exists():
@@ -172,7 +174,7 @@ class Store:
             self.git("remote", "add", "origin", self.settings.url)
         else:
             self.git("remote", "set-url", "origin", self.settings.url)
-        self._listener = listener
+        self._listeners = listeners
         self._seen = None
         self._sync()
         self._worker = threading.Thread(target=self._work, name="store-queue", daemon=True)

@@ -87,9 +87,9 @@ class Listener:
 def started(tmp_path: Path, remote: Path):
     stores: list[Store] = []
 
-    def start(listener=None) -> Store:
+    def start(*listeners: Listener) -> Store:
         store = Store(settings(tmp_path, remote), os.environ)
-        store.start(listener or Listener())
+        store.start(*(listeners or (Listener(),)))
         stores.append(store)
         return store
 
@@ -181,6 +181,34 @@ def test_a_pull_brings_in_a_skill_push(started, tmp_path, remote):
     assert listener.calls[-1] == {"a.md", "b.md"}
     assert not (store.root / "a.md").exists()
     assert (store.root / "b.md").read_text() == "b\n"
+
+
+class FailingListener(Listener):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail = False
+
+    def __call__(self, paths: set[str]) -> None:
+        super().__call__(paths)
+        if self.fail:
+            raise RuntimeError("the listener failed")
+
+
+def test_every_listener_hears_a_move_again_after_one_failed(started, tmp_path, remote):
+    first, second = Listener(), FailingListener()
+    store = started(first, second)
+    clone = skill_clone(tmp_path, remote)
+    skill_push(clone, {"a.md": "a\n"})
+    second.fail = True
+
+    with pytest.raises(RuntimeError, match="the listener failed"):
+        store.pull().result()
+    second.fail = False
+    skill_push(clone, {"b.md": "b\n"})
+    store.pull().result()
+
+    assert first.calls == [{"a.md"}, {"a.md", "b.md"}]
+    assert second.calls == [{"a.md"}, {"a.md", "b.md"}]
 
 
 def test_a_failed_edit_leaves_nothing_behind(started, remote):

@@ -31,6 +31,7 @@ from prometheus_client.core import GaugeMetricFamily, Metric
 from prometheus_client.registry import Collector
 
 from app.fieldnotes.index import Index
+from app.fieldnotes.triage import TriageIndex
 from fieldnotes_contracts import Category, MatchClass, Status
 
 FOLLOW_UP_WINDOW = timedelta(minutes=30)
@@ -47,8 +48,9 @@ FOLLOW_UPS = ("reacted", "reacted_other", "forced", "reposted", "abandoned")
 
 
 class _StoreCollector(Collector):
-    def __init__(self, index: Index) -> None:
+    def __init__(self, index: Index, triage: TriageIndex) -> None:
         self.index = index
+        self.triage = triage
 
     def collect(self) -> Iterable[Metric]:
         counts = {(status, category): 0 for status in Status for category in Category}
@@ -75,6 +77,12 @@ class _StoreCollector(Collector):
         for (repo, emoji), n in sorted(reactions.items()):
             gauge.add_metric([repo, emoji], n)
         yield gauge
+        yield GaugeMetricFamily(
+            "fieldnotes_triage_queue",
+            "Items in the operator's triage queue: open items whose ruling is absent or not "
+            "submitted.",
+            value=len(self.triage.queue()),
+        )
 
 
 class _Bridge(Collector):
@@ -87,10 +95,16 @@ class _Bridge(Collector):
 
 
 class Metrics:
-    def __init__(self, index: Index, clock: Callable[[], datetime], clients: Sequence[str]) -> None:
+    def __init__(
+        self,
+        index: Index,
+        triage: TriageIndex,
+        clock: Callable[[], datetime],
+        clients: Sequence[str],
+    ) -> None:
         self.clock = clock
         self.registry = CollectorRegistry()
-        self.registry.register(_StoreCollector(index))
+        self.registry.register(_StoreCollector(index, triage))
         self.posts = Counter(
             "fieldnotes_posts",
             "Posts, by outcome: created (nothing matched), matched (candidates returned, nothing "

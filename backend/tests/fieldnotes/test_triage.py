@@ -307,8 +307,8 @@ def test_the_queue_refuses_no_session_and_an_agents_bearer(start, oidc_app, head
 
 
 def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate():
-    """In a process of its own: the document is built by the first app a process creates, and
-    names only the routes its own Spectree instance decorated."""
+    """In a process of its own: the views are decorated by the first app's Spectree instance, and a
+    later app's document leaves out the routes another instance decorated."""
     script = (
         "import json\n"
         "from app import create_app\n"

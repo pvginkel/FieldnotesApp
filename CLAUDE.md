@@ -45,7 +45,9 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
   image. All their suites run in the backend's pytest: `cexec modern-app sh -c 'cd backend && uv
   run pytest'`.
 - **`frontend/`**: the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
-  OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
+  OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker. Its one
+  screen is the triage stack (`src/components/triage/`, the logic in `src/hooks/use-triage.ts`),
+  ported from the operator's mockup (`../FieldnotesAppSpecs/mockups/triage-ui/`).
 
 The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod, next
 to a `webhook-relay` container that is the only internet-facing part.

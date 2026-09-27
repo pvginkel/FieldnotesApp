@@ -2,13 +2,100 @@
  * App-specific theme overrides.
  * App-owned — not overwritten by template updates.
  *
- * Override CSS custom properties defined in index.css to set brand colors.
- * Add app-specific utilities with @utility directives.
- *
- * Example:
- *   @layer base {
- *     :root {
- *       --primary: 200 80% 50%;
- *     }
- *   }
+ * The triage mockup's colours (FieldnotesAppSpecs/mockups/triage-ui/style.css): the template's
+ * tokens with Claude's #d97757 as the primary colour, and the extra tokens the triage screen
+ * uses. Unlayered, so they win over index.css's layered tokens. The theme is the page's
+ * `data-theme`, set from the operator's preference (system, light or dark) before the first
+ * render; the tokens the template has and the mockup did not are set here too, so a preference
+ * that differs from the system does not leave the template's own on the system's side.
  */
+@import "../components/triage/triage.css";
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 224 71% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 71% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 224 71% 4%;
+  --primary: 15 63% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 15% 96%;
+  --secondary-foreground: 220 9% 46%;
+  --muted: 220 15% 96%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 220 15% 96%;
+  --accent-foreground: 220 9% 46%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 15 63% 60%;
+  --primary-strong: 15 55% 46%;
+  --primary-muted: 15 65% 94%;
+  --primary-muted-strong: 15 72% 86%;
+  --primary-muted-foreground: 15 55% 40%;
+  --link: 15 55% 45%;
+  --link-hover: 15 55% 38%;
+  --success: 142 72% 43%;
+  --success-foreground: 142 72% 8%;
+  --warning: 48 79% 42%;
+  --warning-foreground: 48 64% 10%;
+  --info: 200 90% 47%;
+  --info-foreground: 200 69% 10%;
+  /* Text in the status colours, and the orange as a surface under white text, darker where the
+     base colours miss 4.5:1 for text. */
+  --warning-text: 40 90% 29%;
+  --info-text: 201 96% 32%;
+  --success-text: 142 72% 27%;
+  --destructive-text: 0 74% 45%;
+  --primary-edge: 15 55% 36%;
+  --radius: 0.5rem;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --column: 880px;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --background: 224 71% 4%;
+  --foreground: 210 40% 98%;
+  --card: 224 71% 4%;
+  --card-foreground: 210 40% 98%;
+  --popover: 224 71% 4%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 15 63% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 215 28% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 215 28% 17%;
+  --muted-foreground: 218 11% 65%;
+  --accent: 216 34% 17%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 63% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 216 34% 17%;
+  --input: 216 34% 17%;
+  --link: 15 75% 68%;
+  --link-hover: 15 75% 76%;
+  --primary-strong: 15 55% 40%;
+  --primary-muted: 15 30% 16%;
+  --primary-muted-strong: 15 42% 26%;
+  --primary-muted-foreground: 15 75% 72%;
+  --success: 142 69% 52%;
+  --success-foreground: 142 72% 8%;
+  --warning: 49 82% 47%;
+  --warning-foreground: 49 72% 8%;
+  --info: 200 64% 53%;
+  --info-foreground: 200 74% 9%;
+  --warning-text: 49 82% 47%;
+  --info-text: 200 64% 53%;
+  --success-text: 142 69% 52%;
+  --destructive-text: 0 90% 70%;
+  --primary-edge: 15 55% 30%;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.25);
+  color-scheme: dark;
+}

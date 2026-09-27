@@ -1,0 +1,607 @@
+/* The triage screen, ported from the mockup (FieldnotesAppSpecs/mockups/triage-ui/style.css)
+   verbatim but for its colours, which are in src/styles/app-theme.css, and its own controls. The
+   additions for the app are at the end. Unlayered, so it wins over Tailwind's preflight. */
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font: 15px/1.6 ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+a { color: hsl(var(--link)); text-decoration: none; }
+.icon { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; }
+a:hover { text-decoration: underline; }
+
+code, kbd, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+code {
+  font-size: 0.86em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: hsl(var(--muted));
+  overflow-wrap: anywhere;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: hsl(var(--muted));
+  font-size: 13px;
+}
+pre code { padding: 0; background: none; }
+
+kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 0 0.35em;
+  border: 1px solid hsl(var(--border));
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background));
+}
+
+.column { width: 100%; max-width: var(--column); margin: 0 auto; padding: 0 32px; }
+
+/* ---- Buttons ------------------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid hsl(var(--border));
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: hsl(var(--accent)); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+/* White text sits on the deeper orange: on the full #d97757 it has 3.1:1, here 4.8:1. */
+.btn-primary {
+  border-color: hsl(var(--primary-edge));
+  background: hsl(var(--primary-strong));
+  color: hsl(var(--primary-foreground));
+}
+.btn-primary:hover:not(:disabled) { background: hsl(var(--primary-edge)); }
+
+/* The muted primary: the colour at rest, stronger on hover, the deeper orange while pressed.
+   Every button has the key's edge, as kbd does: 2px on the right and at the bottom. */
+.btn-soft, .verb {
+  border-color: hsl(var(--primary-muted-foreground) / 0.3);
+  background: hsl(var(--primary-muted));
+  color: hsl(var(--primary-muted-foreground));
+}
+.btn-soft:hover:not(:disabled), .verb:hover { background: hsl(var(--primary-muted-strong)); }
+.btn-soft:active:not(:disabled), .verb:active, .verb.on {
+  border-color: hsl(var(--primary-edge));
+  background: hsl(var(--primary-strong));
+  color: hsl(var(--primary-foreground));
+}
+.btn-soft kbd, .verb kbd {
+  border-color: hsl(var(--primary-muted-foreground) / 0.3);
+  background: hsl(var(--background) / 0.7);
+  color: hsl(var(--primary-muted-foreground));
+}
+.btn-soft:active:not(:disabled) kbd, .verb:active kbd, .verb.on kbd {
+  border-color: hsl(var(--primary-edge) / 0.6);
+  background: #fff;
+  color: hsl(var(--primary-strong));
+}
+.btn-big { height: 52px; padding: 0 40px; font-size: 18px; }
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: hsl(var(--link));
+  font: inherit;
+  cursor: pointer;
+}
+.link:hover { text-decoration: underline; }
+
+:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
+/* ---- Header ------------------------------------------------------------------------- */
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+/* Large text (bold, over 18.66px), for which the header's 3.1:1 passes. */
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+/* The app's icon on a white tile (fieldnotes-alt.svg, a copy of FieldnotesApp's
+   frontend/public/fieldnotes-alt.svg): the plain one is the header's own orange. */
+.logo { width: 32px; height: 32px; }
+.progress { flex: 1; display: flex; align-items: center; gap: 12px; }
+/* The progress bar: a segment per card, filled once it is ruled. */
+.bar {
+  flex: 1;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+/* Each segment is a button taller than what it draws, so it is easy to hit: ::before is the
+   segment, ::after the dashed line under the card shown. */
+.bar > button {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.bar > button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 7px;
+  height: 8px;
+  border-radius: 2px;
+  background: hsl(var(--muted));
+  transition: background 200ms ease;
+}
+.bar > button.ruled::before { background: hsl(var(--primary)); }
+.bar > button.skipped::before { background: hsl(var(--muted-foreground) / 0.4); }
+.bar > button.here::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 18px;
+  border-bottom: 1px dashed hsl(var(--muted));
+}
+.bar > button.here.ruled::after { border-bottom-color: hsl(var(--primary)); }
+.bar > button.here.skipped::after { border-bottom-color: hsl(var(--muted-foreground) / 0.4); }
+.count { font-size: 13px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+
+/* The header is the one block of colour: white on the primary. */
+.topbar {
+  border-bottom: 0;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.topbar .bar > button::before { background: rgb(255 255 255 / 0.3); }
+.topbar .bar > button:hover::before { background: rgb(255 255 255 / 0.5); }
+.topbar .bar > button.ruled::before { background: #fff; }
+.topbar .bar > button.ruled:hover::before { background: rgb(255 255 255 / 0.85); }
+.topbar .bar > button.skipped::before { background: rgb(0 0 0 / 0.14); }
+.topbar .bar > button.skipped:hover::before { background: rgb(0 0 0 / 0.22); }
+.topbar .bar > button:focus-visible { outline-color: #fff; }
+/* The marker takes its segment's colour: faint under an open card, white under a ruled one. */
+.topbar .bar > button.here::after { border-bottom-color: rgb(255 255 255 / 0.3); }
+.topbar .bar > button.here.ruled::after { border-bottom-color: #fff; }
+.topbar .bar > button.here.skipped::after { border-bottom-color: rgb(0 0 0 / 0.14); }
+#submit-top[hidden] { display: none; }
+.topbar .btn-primary {
+  border-color: hsl(var(--primary-strong));
+  background: #fff;
+  color: hsl(var(--primary-strong));
+  font-weight: 600;
+}
+.topbar .btn-primary:hover:not(:disabled) { background: rgb(255 255 255 / 0.9); }
+.topbar .btn-primary:disabled { opacity: 0.55; }
+/* The keys, as a bare icon, in white: dimmed, it would fall under 3:1 on the header. */
+.help {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+}
+.help .icon { vertical-align: 0; }
+.topbar .user { background: rgb(0 0 0 / 0.25); color: #fff; }
+.topbar :focus-visible { outline-color: #fff; }
+.user {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ---- The card ----------------------------------------------------------------------- */
+
+/* The scrollbar's room is kept on both sides, so the card's column lines up with the pane's
+   above it, scrollbar or not. */
+.stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.main { flex: 1; overflow-y: auto; scrollbar-gutter: stable both-edges; }
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0 10px;
+  background: hsl(var(--background));
+}
+
+.card { padding: 20px 0 40px; }
+
+/* The info bars, the card's top line and each report's head: a tinted strip, set off from
+   the prose. */
+.meta, .report-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 4px 12px;
+  background: hsl(var(--muted) / 0.6);
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.meta {
+  gap: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+}
+.meta .id { margin-right: auto; font-size: 12px; }
+.meta .sep { opacity: 0.5; }
+.changed-chip {
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.7;
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(var(--warning-text));
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.7;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+.badge.hint { background: hsl(var(--info) / 0.14); color: hsl(var(--info-text)); }
+.badge.friction { background: hsl(var(--warning) / 0.16); color: hsl(var(--warning-text)); }
+.badge.idea { background: hsl(var(--success) / 0.14); color: hsl(var(--success-text)); }
+
+.headline {
+  margin: 14px 0 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+/* A tinted box: the actioner's question in the warning colour, the ask in the info colour. */
+.box {
+  margin-top: 20px;
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--tone) / 0.45);
+  border-radius: var(--radius);
+  background: hsl(var(--tone) / 0.08);
+}
+.box-head { margin-bottom: 4px; font-size: 17px; font-weight: 600; color: hsl(var(--tone-text)); }
+.box.returned { --tone: var(--warning); --tone-text: var(--warning-text); }
+.box.ask-box { --tone: var(--info); --tone-text: var(--info-text); }
+.returned .was { margin-top: 8px; color: hsl(var(--muted-foreground)); }
+
+.section { margin-top: 28px; }
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.prose p { margin: 0 0 0.6em; }
+.prose p:last-child { margin-bottom: 0; }
+.prose ul, .prose ol { margin: 0 0 0.6em; padding-left: 1.4em; }
+.prose blockquote {
+  margin: 0 0 0.6em;
+  padding-left: 12px;
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.ask { font-size: 16px; }
+
+/* A report is a box: its head a bar, the text under it. A new one is in the primary colour. */
+.report {
+  margin: 12px 0 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.report-head {
+  gap: 4px 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.report > .prose { padding: 10px 12px; }
+.report.new { border-color: hsl(var(--primary) / 0.45); }
+.report.new .report-head {
+  border-bottom-color: hsl(var(--primary) / 0.3);
+  background: hsl(var(--primary-muted));
+  color: hsl(var(--primary-muted-foreground));
+}
+.report-head .new-tag { font-weight: 600; }
+
+.store {
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--muted) / 0.4);
+}
+.store .changes {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: hsl(var(--warning-text));
+}
+.store dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 16px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.store dt { color: hsl(var(--muted-foreground)); }
+.store dd { margin: 0; }
+.store .gone { color: hsl(var(--warning-text)); }
+
+/* ---- The ruling pane, under the header ----------------------------------------------- */
+
+/* The pane lies over the top of the scrolling area, clear of its scrollbar (--sb, set from
+   the page), and the card scrolls under it, seen through frosted glass, with no divider. The
+   blur starts --below under the note: a card line scrolling up blurs over that band, blurs
+   more behind the note and over the gap between the note and the buttons, and is at full blur
+   behind the buttons. Three backdrop blurs stacked do it, each fading out over its band; a
+   tint of the page's colour fades with them. The blurs fade in over the top 20px, where the
+   tint is solid: a blur there reaches up into the header and would pull its orange in. */
+.pane {
+  --pad: 12px;
+  --gap: 10px;
+  --below: 20px;
+  --note: 38px;
+  position: absolute;
+  top: 0;
+  left: var(--sb, 0px);
+  right: var(--sb, 0px);
+  z-index: 2;
+  padding: var(--pad) 0;
+}
+/* Only as wide as the column: outside it there is nothing to blur, and each blurred pixel costs
+   on every scroll frame. */
+.glass {
+  --side: max(0px, (100% - var(--column)) / 2);
+  position: absolute;
+  inset: 0 var(--side) calc(var(--pad) - var(--below));
+  z-index: -1;
+  pointer-events: none;
+}
+.glass > * { position: absolute; inset: 0; }
+/* Each blur: full down to --full above the glass's end, gone at --none. */
+.glass > i:nth-child(1) { --full: var(--below); --none: 0px; backdrop-filter: blur(1.5px); }
+.glass > i:nth-child(2) { --full: calc(var(--below) + var(--note)); --none: var(--below); backdrop-filter: blur(2px); }
+.glass > i:nth-child(3) { --full: calc(var(--below) + var(--note) + var(--gap)); --none: calc(var(--below) + var(--note)); backdrop-filter: blur(2px) saturate(1.4); }
+.glass > i {
+  --mask: linear-gradient(to bottom,
+    transparent 0,
+    #000 20px,
+    #000 calc(100% - var(--full)),
+    transparent calc(100% - var(--none)));
+  -webkit-mask-image: var(--mask);
+  mask-image: var(--mask);
+}
+.glass > b {
+  background: linear-gradient(to bottom,
+    hsl(var(--background)) 0,
+    hsl(var(--background) / 0.6) 20px,
+    hsl(var(--background) / 0.6) calc(100% - var(--below) - var(--note) - var(--gap)),
+    hsl(var(--background) / 0.45) calc(100% - var(--below) - var(--note)),
+    hsl(var(--background) / 0.3) calc(100% - var(--below)),
+    hsl(var(--background) / 0) 100%);
+}
+.pane-row { display: flex; align-items: center; gap: 8px; margin-bottom: var(--gap); }
+/* The pane's buttons, and previous on the finish card, which stands where the pane's does. */
+.pane-row > .btn, .nav .btn { height: 34px; padding: 0 12px; gap: 8px; }
+.verbs { display: flex; align-items: center; gap: 8px; margin: 0 auto; }
+.verb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px 0 8px;
+  border-style: solid;
+  border-width: 1px 2px 2px 1px;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.verbs.shake { animation: shake 300ms; }
+@keyframes shake {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+#note {
+  display: block;
+  width: 100%;
+  height: 38px;
+  max-height: 160px;
+  padding: 7px 40px 7px 12px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  line-height: 22px;
+  resize: none;
+  overflow-y: hidden;
+}
+#note:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+#note.invalid { border-color: hsl(var(--destructive)); }
+#note::placeholder { color: hsl(var(--muted-foreground)); }
+#note.invalid::placeholder { color: hsl(var(--destructive-text)); }
+
+.note-wrap { position: relative; }
+.note-clear {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid hsl(var(--primary-muted-foreground) / 0.3);
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: hsl(var(--primary-muted));
+  color: hsl(var(--primary-muted-foreground));
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.note-clear[hidden] { display: none; }
+.note-clear:hover { background: hsl(var(--primary-muted-strong)); }
+.note-clear:active {
+  border-color: hsl(var(--primary-edge));
+  background: hsl(var(--primary-strong));
+  color: hsl(var(--primary-foreground));
+}
+
+/* ---- Finish card and empty queue ---------------------------------------------------- */
+
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 56px - 52px);
+  padding: 40px 0 80px;
+  text-align: center;
+}
+.party { margin-bottom: 16px; font-size: 176px; line-height: 1; }
+.center h1 { margin: 20px 0 4px; font-size: 34px; font-weight: 600; }
+.center .tally { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+.center .btn-big { margin-top: 28px; }
+
+/* ---- Toasts, the keys dialog -------------------------------------------------------- */
+
+.toasts {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  max-width: 360px;
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  box-shadow: var(--shadow-lg);
+  font-size: 14px;
+  animation: toast-in 150ms ease-out;
+}
+.toast.error { border-color: hsl(var(--destructive) / 0.6); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.35);
+}
+.overlay[hidden] { display: none; }
+.dialog {
+  min-width: 380px;
+  padding: 20px 24px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  box-shadow: var(--shadow-lg);
+}
+.dialog h2 { margin: 0 0 12px; font-size: 16px; }
+dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
+
+/* ---- Added for the app ---------------------------------------------------------------- */
+
+/* Tailwind's preflight takes the lists' markers off; the prose has them. */
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+
+/* The avatar is the user menu's button: the template's dropdown, in the mockup's avatar. */
+.user-menu { position: relative; }
+button.user { padding: 0; border: 0; font-family: inherit; cursor: pointer; }
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 260px;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  box-shadow: var(--shadow-lg);
+  color: hsl(var(--foreground));
+  font-size: 14px;
+}
+.menu .menu-name { font-weight: 600; }
+.menu label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+.menu select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font: inherit;
+  font-size: 14px;
+}
+.menu .btn { justify-content: center; height: 34px; }
+.menu .btn .icon { font-size: 16px; }

@@ -1,19 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { UserDropdown } from '@/components/layout/user-dropdown';
+import { TriagePage } from '@/components/triage/triage-page';
+import { applyTheme, loadBrowserState } from '@/lib/triage/browser-state';
+
+// The operator's theme before the first render, so the page does not flash the other one.
+applyTheme(loadBrowserState().prefs.theme);
 
 export const Route = createFileRoute('/')({
-  component: IndexPage,
+  component: TriagePage,
 });
-
-// The empty UI: the app's own header (no app shell), and a page the triage stack replaces.
-function IndexPage() {
-  return (
-    <>
-      <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-        <h1 className="text-lg font-semibold">Fieldnotes</h1>
-        <UserDropdown />
-      </header>
-      <main className="flex flex-1 items-center justify-center" data-testid="index.page" />
-    </>
-  );
-}

@@ -182,16 +182,17 @@ cexec iac kubectl -n fieldnotes-prd get pods
 cexec iac kubectl -n fieldnotes-prd get pod -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'
 curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
   http://registry:5000/v2/fieldnotes/manifests/<build> | grep -i docker-content-digest
-curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-api.home/readyz
+curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-api.home/health/readyz
 curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-mcp.home/readyz
+curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes/
 ```
 
-The pod is `3/3 Running`, its image digest is the build's, and both `/readyz` answer `200`. The
+The pod is `5/5 Running`, its image digest is the build's, and all three answer `200`. The
 deployment is `Recreate`, so the service is away for about a minute during the roll: a `502` then
 is the roll, not a finding. The API's log is
-`cexec iac kubectl -n fieldnotes-prd logs deploy/fieldnotes -c api`.
+`cexec iac kubectl -n fieldnotes-prd logs deploy/fieldnotes -c app`.
 
-A slice that changes the chart pushes `pvginkel/HelmCharts` as well, and that push is what rolls
+A slice that changes the chart pushes `pvginkel/FieldnotesDeploy` as well, and that push is what rolls
 the pod: track `IaC/HelmCharts --hash` of that commit instead. A slice that changes only the store's
 skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
 
@@ -204,8 +205,8 @@ the production store or to the board, so each ends with step 5.
 the image or the chart:
 
 ```bash
-cexec python sh -c 'cd /work/FieldnotesApp && set -a && . ./.env && set +a &&
-  uv run --all-packages python eval/mcp_e2e.py --url https://fieldnotes-mcp.home/mcp'
+cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && set -a && . ../.env && set +a &&
+  .venv/bin/python eval/mcp_e2e.py --url https://fieldnotes-mcp.home/mcp'
 ```
 
 The bearer is `FIELDNOTES_MCP_TOKEN` in the gitignored `.env` of this checkout, put there by the

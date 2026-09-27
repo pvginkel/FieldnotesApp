@@ -122,6 +122,102 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "Problem.c1eb724": {
+        "additionalProperties": true,
+        "description": "An RFC 9457 problem document. Extension members are allowed.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "title": "Problem",
+        "type": "object"
+      },
+      "RulingRequest.b288cbf": {
+        "additionalProperties": false,
+        "description": "A ruling, with the item's `written` as the operator's page saw it.",
+        "properties": {
+          "note": {
+            "maxLength": 10000,
+            "title": "Note",
+            "type": "string"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/RulingRequest.b288cbf.Verb"
+          },
+          "written": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Written",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verb",
+          "note",
+          "written"
+        ],
+        "title": "RulingRequest",
+        "type": "object"
+      },
+      "RulingRequest.b288cbf.Verb": {
+        "enum": [
+          "yes",
+          "no",
+          "later"
+        ],
+        "title": "Verb",
+        "type": "string"
+      },
+      "SubmitReply.b288cbf": {
+        "description": "The ids of the items submitted; empty when nothing was ruled.",
+        "items": {
+          "type": "string"
+        },
+        "title": "SubmitReply",
+        "type": "array"
+      },
+      "TakeBackQuery.b288cbf": {
+        "additionalProperties": false,
+        "description": "A take-back's query: the item's `written` as the operator's page saw it.",
+        "properties": {
+          "written": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Written",
+            "type": "string"
+          }
+        },
+        "required": [
+          "written"
+        ],
+        "title": "TakeBackQuery",
+        "type": "object"
+      },
       "TaskEventRequestSchema.6b6ce9f": {
         "description": "Request schema for sending fake task events in testing mode.",
         "properties": {
@@ -399,6 +495,674 @@
         "title": "TestSessionResponseSchema",
         "type": "object"
       },
+      "TriageItem.b288cbf": {
+        "description": "A triage item, every field as the store holds it.",
+        "properties": {
+          "actioned": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageItem.b288cbf.Actioned"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ask": {
+            "title": "Ask",
+            "type": "string"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "impact": {
+            "title": "Impact",
+            "type": "string"
+          },
+          "observation": {
+            "title": "Observation",
+            "type": "string"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageItem.b288cbf.Question"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recommendation": {
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/TriageItem.b288cbf.Report"
+            },
+            "title": "Reports",
+            "type": "array"
+          },
+          "ruling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageItem.b288cbf.Ruling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/TriageItem.b288cbf.Snapshot"
+          },
+          "written": {
+            "title": "Written",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation",
+          "written",
+          "headline",
+          "ask",
+          "evidence",
+          "recommendation",
+          "impact",
+          "snapshot",
+          "reports",
+          "ruling",
+          "question",
+          "actioned"
+        ],
+        "title": "TriageItem",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Actioned": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "done"
+        ],
+        "title": "Actioned",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Question": {
+        "description": "The actioner's, handing the item back to the operator.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "text"
+        ],
+        "title": "Question",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Report": {
+        "description": "A reaction on the observation; `new` when it came after the item's previous version.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "emoji": {
+            "title": "Emoji",
+            "type": "string"
+          },
+          "new": {
+            "title": "New",
+            "type": "boolean"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "at",
+          "emoji",
+          "repo",
+          "session",
+          "client",
+          "text",
+          "new"
+        ],
+        "title": "Report",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Ruling": {
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "submitted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/TriageItem.b288cbf.Verb"
+          }
+        },
+        "required": [
+          "verb",
+          "note",
+          "at",
+          "submitted"
+        ],
+        "title": "Ruling",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Snapshot": {
+        "description": "An observation's fields as an item's snapshot spells them; the queue's live observations\nare spelled the same, so an unchanged one compares equal as strings.",
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "last_seen": {
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "category",
+          "area",
+          "canonical",
+          "repos",
+          "card",
+          "outcome",
+          "reason",
+          "created",
+          "last_seen"
+        ],
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Verb": {
+        "enum": [
+          "yes",
+          "no",
+          "later"
+        ],
+        "title": "Verb",
+        "type": "string"
+      },
+      "TriageQueue.b288cbf": {
+        "description": "The operator's queue: the items, and each item's observation as it stands now, or null\nfor one the store no longer has.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TriageQueue.b288cbf.TriageItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "observations": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TriageQueue.b288cbf.Snapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Observations",
+            "type": "object"
+          }
+        },
+        "required": [
+          "items",
+          "observations"
+        ],
+        "title": "TriageQueue",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Actioned": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "done"
+        ],
+        "title": "Actioned",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Question": {
+        "description": "The actioner's, handing the item back to the operator.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "text"
+        ],
+        "title": "Question",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Report": {
+        "description": "A reaction on the observation; `new` when it came after the item's previous version.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "emoji": {
+            "title": "Emoji",
+            "type": "string"
+          },
+          "new": {
+            "title": "New",
+            "type": "boolean"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "at",
+          "emoji",
+          "repo",
+          "session",
+          "client",
+          "text",
+          "new"
+        ],
+        "title": "Report",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Ruling": {
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "submitted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/TriageQueue.b288cbf.Verb"
+          }
+        },
+        "required": [
+          "verb",
+          "note",
+          "at",
+          "submitted"
+        ],
+        "title": "Ruling",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Snapshot": {
+        "description": "An observation's fields as an item's snapshot spells them; the queue's live observations\nare spelled the same, so an unchanged one compares equal as strings.",
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "last_seen": {
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "category",
+          "area",
+          "canonical",
+          "repos",
+          "card",
+          "outcome",
+          "reason",
+          "created",
+          "last_seen"
+        ],
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.TriageItem": {
+        "description": "A triage item, every field as the store holds it.",
+        "properties": {
+          "actioned": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageQueue.b288cbf.Actioned"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ask": {
+            "title": "Ask",
+            "type": "string"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "impact": {
+            "title": "Impact",
+            "type": "string"
+          },
+          "observation": {
+            "title": "Observation",
+            "type": "string"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageQueue.b288cbf.Question"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recommendation": {
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/TriageQueue.b288cbf.Report"
+            },
+            "title": "Reports",
+            "type": "array"
+          },
+          "ruling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageQueue.b288cbf.Ruling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/TriageQueue.b288cbf.Snapshot"
+          },
+          "written": {
+            "title": "Written",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation",
+          "written",
+          "headline",
+          "ask",
+          "evidence",
+          "recommendation",
+          "impact",
+          "snapshot",
+          "reports",
+          "ruling",
+          "question",
+          "actioned"
+        ],
+        "title": "TriageItem",
+        "type": "object"
+      },
+      "TriageQueue.b288cbf.Verb": {
+        "enum": [
+          "yes",
+          "no",
+          "later"
+        ],
+        "title": "Verb",
+        "type": "string"
+      },
       "UserInfoResponseSchema.a535b8c": {
         "description": "Response schema for current user information.",
         "properties": {
@@ -562,6 +1326,126 @@
           }
         },
         "summary": "Get current authenticated user information.",
+        "tags": []
+      }
+    },
+    "/api/hooks/github": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_hooks_github",
+        "parameters": [],
+        "responses": {},
+        "summary": "FR-9, FR-20: a push to the store's main queues a pull and reindex; the relay gives each receiver four seconds, so nothing is pulled before the answer.",
+        "tags": []
+      }
+    },
+    "/api/hooks/youtrack": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_hooks_youtrack",
+        "parameters": [],
+        "responses": {},
+        "summary": "FR-20, FR-21: an event naming an issue that is some observation's card queues a board sync of it; every other event is ignored without a call to YouTrack. The Webhook Triggers app waits for each answer, so nothing is read or written before it, and it sends the delivery before YouTrack commits the change, so the read waits `settle` seconds.",
+        "tags": []
+      }
+    },
+    "/api/match": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_match",
+        "parameters": [],
+        "responses": {},
+        "summary": "The match pipeline, writing nothing.",
+        "tags": []
+      }
+    },
+    "/api/observations": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_observations",
+        "parameters": [],
+        "responses": {},
+        "summary": "FR-1: candidates (200), and nothing created; or the new observation's id (201).",
+        "tags": []
+      }
+    },
+    "/api/observations/{id}": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_observations_{id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "summary": "FR-5.",
+        "tags": []
+      }
+    },
+    "/api/observations/{id}/board-sync": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_observations_{id}_board-sync",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "summary": "FR-21: apply the observation's card as the board has it now. The reconciler's board scan calls this for every observation with a card (FR-13).",
+        "tags": []
+      }
+    },
+    "/api/observations/{id}/neighbors": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_observations_{id}_neighbors",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "summary": "The observations nearest this one, none dropped by threshold.",
+        "tags": []
+      }
+    },
+    "/api/observations/{id}/reactions": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_observations_{id}_reactions",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "summary": "FR-4.",
         "tags": []
       }
     },
@@ -873,6 +1757,193 @@
           }
         ],
         "summary": "Start a demo or failing task for integration testing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/triage/items/{id}/ruling": {
+      "delete": {
+        "description": "",
+        "operationId": "delete__api_triage_items_{id}_ruling",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "written",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "title": "Written",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageItem.b288cbf"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-25: the draft taken back; the item as it now stands.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "put": {
+        "description": "",
+        "operationId": "put__api_triage_items_{id}_ruling",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RulingRequest.b288cbf"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageItem.b288cbf"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-25: the ruling, over any draft; the item as it now stands.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/triage/queue": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_triage_queue",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageQueue.b288cbf"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-23: the operator's queue, and each item's observation as it stands now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/triage/submit": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_triage_submit",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitReply.b288cbf"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-26: every ruled item submitted; the ids submitted. FR-27: then the actioner started, off the request.",
         "tags": [],
         "x-required-role": "editor"
       }

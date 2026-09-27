@@ -1,4 +1,5 @@
-"""Fakes for what this repo does not own, shared by the suites: the models pod and YouTrack.
+"""Fakes for what this repo does not own, shared by the suites: the models pod, YouTrack and the
+KubeCoder controller.
 
 `FakeModels` is deterministic and stateless. Its embedding is a hashed bag of words, wide enough
 that words do not collide, so the cosine of two texts is `shared / sqrt(n * m)` for texts of `n`
@@ -6,6 +7,9 @@ and `m` distinct words with `shared` in common: a test sets a score by choosing 
 
 `FakeYouTrack` answers `GET /api/issues/{id}` as YouTrack does, over an httpx transport, so the
 real board client and its reading of the JSON run in every test that syncs a card.
+
+`FakeController` answers `POST /timers/{id}/run` as the KubeCoder controller does, over an httpx
+transport, so the real controller client runs in every test that submits.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 from urllib.parse import unquote
@@ -21,6 +25,7 @@ from urllib.parse import unquote
 import httpx
 import numpy as np
 
+from app.fieldnotes.actioner import ActionerSettings, HttpController
 from app.fieldnotes.board import BoardSettings, HttpBoard
 from app.fieldnotes.models import ModelsError
 
@@ -107,3 +112,41 @@ class FakeYouTrack:
     def board(self, settings: BoardSettings) -> HttpBoard:
         client = httpx.Client(transport=httpx.MockTransport(self), base_url=settings.url)
         return HttpBoard(client, settings)
+
+
+class FakeController:
+    """Each run is answered with the next of `answers`, the last one for every run after: `202`
+    starts it, `409` is the in-flight refusal, another status the controller's other problems,
+    and `None` a connection that fails. `on_run` is called inside a run, before its answer."""
+
+    def __init__(self, token: str = "kubecoder-token", timer: str = "f00dcafe") -> None:
+        self.token = token
+        self.timer = timer
+        self.answers: list[int | None] = [202]
+        self.runs: list[str] = []  # the paths run with the token, in order
+        self.on_run: Callable[[], object] | None = None
+
+    def _problem(self, status: int, type_: str, title: str) -> httpx.Response:
+        body = {"type": type_, "title": title, "status": status}
+        return httpx.Response(status, json=body, headers={"Content-Type": "application/problem+json"})
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("Authorization") != f"Bearer {self.token}":
+            return self._problem(401, "unauthenticated", "no valid bearer token")
+        self.runs.append(request.url.path)
+        if self.on_run is not None:
+            self.on_run()
+        status = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if status is None:
+            raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path != f"/timers/{self.timer}/run":
+            return self._problem(404, "not-found", "no such timer")
+        if status == 202:
+            return httpx.Response(202, json={"id": self.timer, "running": {"envId": None}})
+        if status == 409:
+            return self._problem(409, "conflict", f"timer {self.timer!r} has a run in flight")
+        return self._problem(status, "internal", "the controller failed")
+
+    def controller(self, settings: ActionerSettings) -> HttpController:
+        client = httpx.Client(transport=httpx.MockTransport(self), base_url=settings.url)
+        return HttpController(client, settings)

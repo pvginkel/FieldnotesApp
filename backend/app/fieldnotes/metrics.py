@@ -45,6 +45,7 @@ Reporter = tuple[str, str | None]
 
 POST_OUTCOMES = ("created", "matched", "forced")
 FOLLOW_UPS = ("reacted", "reacted_other", "forced", "reposted", "abandoned")
+ACTIONER_STARTS = ("started", "in_flight", "failed")
 
 
 class _StoreCollector(Collector):
@@ -161,6 +162,14 @@ class Metrics:
             ["verb"],
             registry=self.registry,
         )
+        self.actioner_starts = Counter(
+            "fieldnotes_actioner_starts",
+            "Actioner starts through the KubeCoder controller, by result: started, in_flight "
+            "(refused while a run is in flight, and tried again a minute later) or failed (any "
+            "other failure, not retried).",
+            ["result"],
+            registry=self.registry,
+        )
         self.requests = Histogram(
             "fieldnotes_http_request_duration_seconds",
             "HTTP requests, by route template, method and status.",
@@ -186,6 +195,8 @@ class Metrics:
             self.board_syncs.labels(result)
         for verb in Verb:
             self.rulings.labels(verb.value)
+        for result in ACTIONER_STARTS:
+            self.actioner_starts.labels(result)
 
     def exposition(self) -> bytes:
         self._expire()

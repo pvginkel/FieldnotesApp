@@ -1,7 +1,7 @@
 """The API against a bare repo the test creates and the fake models; a settable clock.
 
 The app is the template's, built in testing mode; its Fieldnotes service runs a runtime over the
-test's remote, fake models and fake YouTrack. `Api` wraps Flask's test client in the few calls the
+test's remote, fake models, fake YouTrack and a fake KubeCoder controller. `Api` wraps Flask's test client in the few calls the
 suites were written against.
 """
 
@@ -21,7 +21,7 @@ from app import create_app
 from app.app import App
 from app.fieldnotes.config import load_settings
 from app.fieldnotes.runtime import Runtime
-from app.fieldnotes.testing import FakeModels, FakeYouTrack
+from app.fieldnotes.testing import FakeController, FakeModels, FakeYouTrack
 
 SKILL = ["-c", "user.name=skill", "-c", "user.email=skill@example.invalid"]
 TOKENS = {"mcp": "mcp-token", "skills": "skills-token"}
@@ -113,7 +113,12 @@ def youtrack() -> FakeYouTrack:
 
 
 @pytest.fixture
-def environ(tmp_path, remote, youtrack) -> dict[str, str]:
+def kubecoder() -> FakeController:
+    return FakeController()
+
+
+@pytest.fixture
+def environ(tmp_path, remote, youtrack, kubecoder) -> dict[str, str]:
     """The API's environment. The scorer is the cosine alone, and the thresholds suit the fake's
     word-overlap scores."""
     return {
@@ -130,6 +135,9 @@ def environ(tmp_path, remote, youtrack) -> dict[str, str]:
         "FIELDNOTES_YOUTRACK_TOKEN": youtrack.token,
         "FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN": YOUTRACK_WEBHOOK_TOKEN,
         "FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE": "0",
+        "FIELDNOTES_KUBECODER_URL": "http://kubecoder.example.invalid",
+        "FIELDNOTES_KUBECODER_TOKEN": kubecoder.token,
+        "FIELDNOTES_KUBECODER_ACTIONER_TIMER": kubecoder.timer,
         **{f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token for name, token in TOKENS.items()},
     }
 
@@ -188,7 +196,7 @@ class Api:
 
 
 @pytest.fixture
-def start(environ, models, clock, youtrack, test_settings, test_app_settings):
+def start(environ, models, clock, youtrack, kubecoder, test_settings, test_app_settings):
     """Start the API; `with start() as api:` yields a client that is ready. `app` serves it from
     an app of the test's own, such as the OIDC-enabled `oidc_app`."""
 
@@ -196,7 +204,16 @@ def start(environ, models, clock, youtrack, test_settings, test_app_settings):
     def started(ready: bool = True, app: App | None = None, **overrides: str):
         settings = load_settings({**environ, **overrides})
         board = youtrack.board(settings.board) if settings.board is not None else None
-        runtime = Runtime(settings, models=models, board=board, clock=clock, environ=os.environ)
+        actioner = settings.actioner
+        controller = kubecoder.controller(actioner) if actioner is not None else None
+        runtime = Runtime(
+            settings,
+            models=models,
+            board=board,
+            controller=controller,
+            clock=clock,
+            environ=os.environ,
+        )
         if app is None:
             app = create_app(
                 test_settings, app_settings=test_app_settings, skip_background_services=True

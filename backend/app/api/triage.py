@@ -1,4 +1,4 @@
-"""The triage UI's surface (design, "Services"; FR-23 to FR-26; docs/rest-api.md), under
+"""The triage UI's surface (design, "Services"; FR-23 to FR-27; docs/rest-api.md), under
 /api/triage.
 
 The operator's, through the UI: the template's OIDC session with the `editor` client role (NFR-4).
@@ -39,6 +39,7 @@ from app.fieldnotes.triage import (
 )
 from app.services.container import ServiceContainer
 from app.services.fieldnotes_service import FieldnotesService
+from app.services.task_service import TaskService
 from app.utils.auth import allow_roles
 from app.utils.spectree_config import api
 from fieldnotes_contracts import ID_PATTERN, Problem, ProblemType
@@ -162,7 +163,12 @@ def take_back(
 @inject
 def submit(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+    tasks: TaskService = Provide[ServiceContainer.task_service],
 ) -> SubmitReply:
-    """FR-26: every ruled item submitted; the ids submitted."""
+    """FR-26: every ruled item submitted; the ids submitted. FR-27: then the actioner started,
+    off the request."""
     runtime = _runtime(service)
-    return SubmitReply(runtime.rulings.submit())
+    ids = runtime.rulings.submit()
+    if ids:
+        runtime.actioner.start(tasks)
+    return SubmitReply(ids)

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.fieldnotes.actioner import ActionerSettings
 from app.fieldnotes.config import SettingsError, load_settings
 from app.fieldnotes.ulid import is_ulid, new_ulid
 
@@ -27,6 +28,7 @@ def test_defaults():
     assert settings.github is None
     assert settings.board is None
     assert settings.youtrack_hook is None
+    assert settings.actioner is None
     assert (settings.host, settings.port) == ("0.0.0.0", 8080)
 
 
@@ -70,6 +72,12 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
         ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
         ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),
+        ({"FIELDNOTES_KUBECODER_URL": "http://kc"}, "set together or not at all"),
+        (
+            {"FIELDNOTES_KUBECODER_TOKEN": "t", "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9"},
+            "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN and "
+            "FIELDNOTES_KUBECODER_ACTIONER_TIMER are set together or not at all",
+        ),
         (
             {
                 "FIELDNOTES_YOUTRACK_URL": "https://yt",
@@ -83,6 +91,25 @@ def test_match_settings_are_read():
 def test_a_bad_variable_fails_startup_by_name(overrides, named):
     with pytest.raises(SettingsError, match=named):
         load_settings(BASE | overrides)
+
+
+def test_the_actioner_start_reads_kubecoders_three_and_its_token_is_no_client():
+    """FR-27: the controller, the API's token there and the actioner's timer. The token is the
+    API's own at the controller, not an inbound client's bearer."""
+    settings = load_settings(
+        BASE
+        | {
+            "FIELDNOTES_KUBECODER_URL": "http://kubecoder-controller.example.invalid:8080",
+            "FIELDNOTES_KUBECODER_TOKEN": " kubecoder-token ",
+            "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9",
+        }
+    )
+    assert settings.actioner == ActionerSettings(
+        url="http://kubecoder-controller.example.invalid:8080",
+        token="kubecoder-token",
+        timer="f3c603f9",
+    )
+    assert settings.clients.names == ()
 
 
 def test_ulids_are_well_formed_and_sort_by_time():

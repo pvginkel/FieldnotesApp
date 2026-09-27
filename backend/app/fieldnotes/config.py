@@ -24,13 +24,17 @@
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN` | none | the YouTrack webhook's shared token (secret) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | `X-YouTrack-Token` | the header it arrives in |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | `5` | seconds a delivery waits before its card is read |
+| `FIELDNOTES_KUBECODER_URL` | none | the KubeCoder controller, for starting the actioner |
+| `FIELDNOTES_KUBECODER_TOKEN` | none | the API's client token at the controller (secret) |
+| `FIELDNOTES_KUBECODER_ACTIONER_TIMER` | none | the id of the actioner's timer |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |
 
 Tokens are never in code or config files, only in environment variables materialised from
 secrets. A malformed value fails startup and names its variable. The GitHub webhook's two
-variables are set together or not at all, and so are YouTrack's URL and token; without the
-webhooks' secrets every delivery is refused, and without YouTrack no card can be synced.
+variables are set together or not at all, and so are YouTrack's URL and token, and KubeCoder's
+three. Without the webhooks' secrets every delivery is refused, without YouTrack no card can be
+synced, and without KubeCoder a submit starts no actioner.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.fieldnotes.actioner import ActionerSettings
 from app.fieldnotes.auth import ClientRegistry
 from app.fieldnotes.board import BoardSettings
 from app.fieldnotes.hooks import GithubSettings, YouTrackHookSettings
@@ -88,6 +93,7 @@ class Settings:
     github: GithubSettings | None
     board: BoardSettings | None
     youtrack_hook: YouTrackHookSettings | None
+    actioner: ActionerSettings | None
     host: str
     port: int
     log_level: str
@@ -205,6 +211,20 @@ def _youtrack_hook(environ: Mapping[str, str]) -> YouTrackHookSettings | None:
     return YouTrackHookSettings(token=token, header=header, settle=settle)
 
 
+def _actioner(environ: Mapping[str, str]) -> ActionerSettings | None:
+    url = _optional(environ, "KUBECODER_URL")
+    token = _optional(environ, "KUBECODER_TOKEN")
+    timer = _optional(environ, "KUBECODER_ACTIONER_TIMER")
+    if url is None and token is None and timer is None:
+        return None
+    if url is None or token is None or timer is None:
+        raise SettingsError(
+            f"{PREFIX}KUBECODER_URL, {PREFIX}KUBECODER_TOKEN and {PREFIX}KUBECODER_ACTIONER_TIMER "
+            "are set together or not at all"
+        )
+    return ActionerSettings(url=url, token=token, timer=timer)
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     environ = os.environ if environ is None else environ
     return Settings(
@@ -224,6 +244,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         github=_github(environ),
         board=_board(environ),
         youtrack_hook=_youtrack_hook(environ),
+        actioner=_actioner(environ),
         host=_get(environ, "API_HOST", "0.0.0.0"),
         port=_number(environ, "API_PORT", int, 8080),
         log_level=_get(environ, "LOG_LEVEL", "INFO").upper(),

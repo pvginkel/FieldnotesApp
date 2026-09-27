@@ -9,10 +9,8 @@ export interface Draft {
 }
 
 export type Theme = 'system' | 'light' | 'dark';
-export type ReportsPlace = 'middle' | 'last';
 
 export interface Prefs {
-  reportsPlace: ReportsPlace;
   theme: Theme;
 }
 
@@ -29,7 +27,7 @@ const initial = (): BrowserState => ({
   drafts: {},
   skipped: {},
   seen: [],
-  prefs: { reportsPlace: 'middle', theme: 'system' },
+  prefs: { theme: 'system' },
 });
 
 export function loadBrowserState(): BrowserState {
@@ -37,7 +35,7 @@ export function loadBrowserState(): BrowserState {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE) || '{}') as Partial<BrowserState> & { lastWritten?: unknown };
     delete saved.lastWritten; // what an earlier build kept for the empty page
-    return { ...state, ...saved, prefs: { ...state.prefs, ...saved.prefs } };
+    return { ...state, ...saved, prefs: { theme: saved.prefs?.theme ?? state.prefs.theme } }; // an earlier build kept reportsPlace too
   } catch {
     return state;
   }

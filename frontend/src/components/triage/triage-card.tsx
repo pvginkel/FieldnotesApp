@@ -1,5 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
-import type { ReportsPlace } from '@/lib/triage/browser-state';
+import type { ReactNode } from 'react';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
@@ -7,7 +6,6 @@ import { Emoji, Inline, Prose, Repo, Time } from './prose';
 interface TriageCardProps {
   item: Item;
   live: Snapshot | null | undefined; // the observation as the store has it now; null when gone
-  reportsPlace: ReportsPlace;
 }
 
 const SectionHead = ({ title }: { title: string }) => (
@@ -22,32 +20,10 @@ const TextSection = ({ title, body }: { title: string; body: string }) =>
     </section>
   ) : null;
 
-export function TriageCard({ item, live, reportsPlace }: TriageCardProps) {
+export function TriageCard({ item, live }: TriageCardProps) {
   const snapshot = item.snapshot;
   const repos = snapshot.repos;
   const changes = changesOf(item, live);
-
-  const sections: Record<string, ReactNode> = {
-    ask: item.ask ? (
-      <section className="box ask-box">
-        <div className="box-head">Ask</div>
-        <Prose source={item.ask} className="ask" />
-      </section>
-    ) : null,
-    evidence: <TextSection title="Evidence" body={item.evidence} />,
-    reports: <Reports item={item} />,
-    recommendation: item.recommendation ? (
-      <section className="box recommendation-box">
-        <div className="box-head">Recommendation</div>
-        <Prose source={item.recommendation} />
-      </section>
-    ) : null,
-    impact: <TextSection title="Impact" body={item.impact} />,
-    store: <StoreSection item={item} live={live} changes={changes} />,
-  };
-  const order = reportsPlace === 'last'
-    ? ['ask', 'recommendation', 'impact', 'evidence', 'store', 'reports']
-    : ['ask', 'recommendation', 'impact', 'evidence', 'reports', 'store'];
 
   return (
     <div className="column">
@@ -90,7 +66,27 @@ export function TriageCard({ item, live, reportsPlace }: TriageCardProps) {
           </div>
         )}
 
-        {order.map((key) => <Fragment key={key}>{sections[key]}</Fragment>)}
+        {item.ask && (
+          <section className="box ask-box">
+            <div className="box-head">Ask</div>
+            <Prose source={item.ask} className="ask" />
+          </section>
+        )}
+        {(item.recommendation || item.impact) && (
+          <section className="box recommendation-box">
+            <div className="box-head">Recommendation</div>
+            <Prose source={item.recommendation} />
+            {item.impact && (
+              <>
+                <div className="box-subhead">Impact</div>
+                <Prose source={item.impact} />
+              </>
+            )}
+          </section>
+        )}
+        <TextSection title="Evidence" body={item.evidence} />
+        <Reports item={item} />
+        <StoreSection item={item} live={live} changes={changes} />
       </article>
     </div>
   );

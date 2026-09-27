@@ -89,7 +89,7 @@ export function TriagePage() {
   const content = (() => {
     switch (view) {
       case 'card':
-        return <TriageCard item={current!} live={queue?.observations[current!.observation]} reportsPlace={triage.prefs.reportsPlace} />;
+        return <TriageCard item={current!} live={queue?.observations[current!.observation]} />;
       case 'finish':
         return (
           <FinishCard

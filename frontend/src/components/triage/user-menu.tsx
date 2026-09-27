@@ -1,10 +1,10 @@
-// The template's user dropdown in the mockup's avatar: the name, logout, and the operator's two
-// preferences, which the mockup kept in its own controls.
+// The template's user dropdown in the mockup's avatar: the name, logout, and the operator's theme
+// preference, which the mockup kept in its own controls.
 
 import { useEffect, useRef, useState } from 'react';
 import { LogOut, UserRound } from 'lucide-react';
 import { useAuthContext } from '@/contexts/auth-context';
-import type { Prefs, ReportsPlace, Theme } from '@/lib/triage/browser-state';
+import type { Prefs, Theme } from '@/lib/triage/browser-state';
 
 interface UserMenuProps {
   prefs: Prefs;
@@ -60,17 +60,6 @@ export function UserMenu({ prefs, onPref }: UserMenuProps) {
               <option value="system">system</option>
               <option value="light">light</option>
               <option value="dark">dark</option>
-            </select>
-          </label>
-          <label>
-            Reports
-            <select
-              value={prefs.reportsPlace}
-              onChange={(event) => onPref('reportsPlace', event.target.value as ReportsPlace)}
-              data-testid="triage.prefs.reports"
-            >
-              <option value="middle">in the middle (the document's order)</option>
-              <option value="last">last</option>
             </select>
           </label>
           <button

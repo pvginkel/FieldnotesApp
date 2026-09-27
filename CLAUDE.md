@@ -51,7 +51,9 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
 - **`frontend/`**: the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker. Its one
   screen is the triage stack (`src/components/triage/`, the logic in `src/hooks/use-triage.ts`),
-  ported from the operator's mockup (`../FieldnotesAppSpecs/mockups/triage-ui/`).
+  ported from the operator's mockup (`../FieldnotesAppSpecs/mockups/triage-ui/`). Its specs,
+  `tests/triage/`, lay out the worker backend's store with invented items through
+  `/api/testing/store` (`tests/support/triage-store.ts`).
 
 The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod, next
 to a `webhook-relay` container that is the only internet-facing part.

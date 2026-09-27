@@ -233,7 +233,11 @@ Outside production a backend without `FIELDNOTES_STORE_URL` runs without a store
 boots: its Fieldnotes endpoints answer `not-ready`. The frontend's Playwright backend, in testing
 mode, always serves an empty store of its own, a bare repo in a temporary directory indexed with
 the fake models, so the triage queue it opens on answers empty; any `FIELDNOTES_*` in its
-environment, such as the dev instance's `.env`, is ignored.
+environment, such as the dev instance's `.env`, is ignored. A Playwright test lays that store out
+for itself through `/api/testing/store`, which answers only in testing mode and is not in the
+OpenAPI document: `PUT {"files": {path: text}}` makes `observations/` and `triage/` those files, in
+one commit through the write queue, indexed before the `204`; `GET` answers them as the store holds
+them, for a test to read what the UI wrote.
 
 ## The pinned surface
 

@@ -1,0 +1,183 @@
+# Architecture artifact of producer `fieldnotes-app`: Fieldnotes' logical architecture. The two
+# products, the surfaces they expose and what they consume. Hand-authored: this file is the source
+# of truth and its ids are minted once. The running instances, their hosts and the Specialization
+# edges to the products below are `fieldnotes-deploy`'s (pvginkel/FieldnotesDeploy).
+schemaVersion: "0.1"
+producer: fieldnotes-app
+
+applicationComponents:
+  # One image, two entry points: the Flask backend and `fieldnotes-mcp`. The deployment runs them
+  # as two containers of the same pod, and both are instances of this one product.
+  - id: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    label: Fieldnotes
+    summary: Backend of Fieldnotes, the curated, cross-project observation store for AI agents — the git-backed store, the in-memory match index, the GitHub and YouTrack webhooks and the operator's triage queue behind a REST API, plus the thin MCP server the same image ships as its second entry point.
+    introduced: 2026-09-19
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/FieldnotesApp
+    logo: fieldnotes-app
+    stats:
+      image: registry:5000/fieldnotes
+
+  - id: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
+    label: Fieldnotes UI
+    summary: React + Vite single-page web app for the operator — the triage queue and its rulings, behind the Keycloak sign-in, served as static assets by NGINX.
+    introduced: 2026-09-19
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/FieldnotesApp
+    logo: fieldnotes-app
+    stats:
+      image: registry:5000/fieldnotes-ui
+
+applicationServices:
+  - id: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    label: Fieldnotes API
+    summary: HTTP API under /api — posting, reacting to and reading observations, each post answered with what the store already knows; the operator's triage queue and rulings; and the GitHub and YouTrack webhook receivers.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: svc:fieldnotes-mcp,3a0da841-59fb-4df6-b253-373c0b1a1983
+    label: Fieldnotes MCP API
+    summary: MCP tool surface exposing post, react and get, mapped 1:1 onto the Fieldnotes API.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: svc:fieldnotes-ui-web,e42c9f2b-f515-4daf-9099-fe3162553151
+    label: Fieldnotes Web UI
+    summary: The operator's web UI delivered over HTTP to browsers (static SPA assets served by NGINX).
+    introduced: 2026-09-19
+    lifecycle: active
+
+# One interface per class of consumer, not per route.
+applicationInterfaces:
+  - id: if:fieldnotes-api-agents,6e88bc33-7ed9-49c3-9a3c-ee2882710a08
+    label: Fieldnotes API (bearer clients)
+    summary: Observation surface behind a static bearer token per named client, consumed by the Fieldnotes MCP server and by the store's reconciler and actioner skills.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: if:fieldnotes-api-spa,f98ef165-d86d-4e3a-bddb-53e518e34f70
+    label: Fieldnotes API (SPA)
+    summary: Triage surface (/api/triage) behind the Keycloak session and the editor role, consumed by the Fieldnotes single-page frontend.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: if:fieldnotes-api-webhooks,88fdf9be-e5e0-468d-a6e4-3657b6340200
+    label: Fieldnotes API (webhooks)
+    summary: Webhook receivers (/api/hooks/github, /api/hooks/youtrack) — GitHub's push deliveries for the store repository, forwarded by the webhook relay and verified by signature, and YouTrack's issue events, verified by shared token.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: if:fieldnotes-mcp-http,94e003ea-d181-4b12-afb1-b7bdcbdca890
+    label: MCP (streamable HTTP)
+    summary: Stateless Streamable HTTP endpoint (/mcp) behind a static bearer token, consumed by MCP clients — the coding agents' sessions, which register it as fieldnotes.
+    introduced: 2026-09-19
+    lifecycle: active
+
+  - id: if:fieldnotes-ui-browser,f565615d-4cb5-4392-a0ed-fcd4989174b2
+    label: Fieldnotes Web UI (browser)
+    summary: HTTP surface delivering the SPA to the operator's browser.
+    introduced: 2026-09-19
+    lifecycle: active
+
+relations:
+  # --- The exposed surface ---
+  - id: rel:fieldnotes-realizes-api
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    type: Realization
+
+  - id: rel:fieldnotes-realizes-mcp
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:fieldnotes-mcp,3a0da841-59fb-4df6-b253-373c0b1a1983
+    type: Realization
+
+  - id: rel:fieldnotes-api-agents-interface
+    source: if:fieldnotes-api-agents,6e88bc33-7ed9-49c3-9a3c-ee2882710a08
+    target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    type: Assignment
+
+  - id: rel:fieldnotes-api-spa-interface
+    source: if:fieldnotes-api-spa,f98ef165-d86d-4e3a-bddb-53e518e34f70
+    target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    type: Assignment
+
+  - id: rel:fieldnotes-api-webhooks-interface
+    source: if:fieldnotes-api-webhooks,88fdf9be-e5e0-468d-a6e4-3657b6340200
+    target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    type: Assignment
+
+  - id: rel:fieldnotes-mcp-http-interface
+    source: if:fieldnotes-mcp-http,94e003ea-d181-4b12-afb1-b7bdcbdca890
+    target: svc:fieldnotes-mcp,3a0da841-59fb-4df6-b253-373c0b1a1983
+    type: Assignment
+
+  - id: rel:fieldnotes-ui-realizes-web
+    source: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
+    target: svc:fieldnotes-ui-web,e42c9f2b-f515-4daf-9099-fe3162553151
+    type: Realization
+
+  - id: rel:fieldnotes-ui-browser-interface
+    source: if:fieldnotes-ui-browser,f565615d-4cb5-4392-a0ed-fcd4989174b2
+    target: svc:fieldnotes-ui-web,e42c9f2b-f515-4daf-9099-fe3162553151
+    type: Assignment
+
+  # --- What the frontend consumes ---
+  # The SPA calls the API same-origin; the UI's NGINX proxies /api/ to the backend.
+  - id: rel:fieldnotes-ui-consumes-api
+    source: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
+    target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
+    type: Association
+
+  # The SPA holds an event stream on /api/sse/, which the UI's NGINX proxies to the gateway.
+  - id: rel:fieldnotes-ui-consumes-ssegateway
+    source: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
+    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
+    type: Association
+
+  # --- What the backend consumes: recipes the deployer resolves ---
+  # The operator's sign-in, and the editor role the triage surface is gated on.
+  - id: rel:fieldnotes-consumes-iam
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: cap:iam
+    type: Association
+    boundBy: "env:OIDC_ISSUER_URL"
+
+  # Version and task events to the browsers. The default is the backend's own (app/config.py).
+  - id: rel:fieldnotes-consumes-ssegateway
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
+    type: Association
+    boundBy: "env:SSE_GATEWAY_URL"
+    boundByDefaultValue: "http://localhost:3402"
+
+  # --- What the backend consumes: in-house providers another deploy repo runs ---
+  # Each is located by an environment variable (FIELDNOTES_MODELS_URL, FIELDNOTES_YOUTRACK_URL,
+  # FIELDNOTES_KUBECODER_URL), but a recipe on a service resolves only to a provider of the
+  # consumer's own deployment, so these carry no boundBy. The concrete Serving edges are the
+  # deployer's to draw.
+  # The embeddings of the match pipeline: /embed on the models pod.
+  - id: rel:fieldnotes-consumes-models
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:models-prd-models,2016c62e-7fff-5613-880c-4c91fc043f27
+    type: Association
+
+  # The board: the state of the cards observations are linked to, read over YouTrack's REST API.
+  - id: rel:fieldnotes-consumes-youtrack
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:youtrack-prd-youtrack,57c32c7f-0b5d-5d96-914d-e426bc7ab7c7
+    type: Association
+
+  # A submit in the triage UI starts the actioner's timer through the controller.
+  - id: rel:fieldnotes-consumes-kubecoder-controller
+    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    target: svc:kubecoder-controller-api,6f8c9cdd-96fd-41ee-8f4f-08ba2c9c1fb0
+    type: Association
+
+  # --- External services ---
+  # The store is a git repository on GitHub, fetched and pushed over HTTPS.
+  - id: rel:github-serves-fieldnotes
+    source: svc:github-api,f2b55a4f-e295-499e-b514-c8162948d04c
+    target: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
+    type: Serving

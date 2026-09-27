@@ -10,9 +10,9 @@ reacts to that rather than posting again. That answer is how knowledge reaches t
 moment it is relevant. There is deliberately no search tool: the store is a complaint box, not a
 reference, and what is reported leaves it once it is fixed or documented.
 
-A scheduled reconciler session curates the store, researches selected observations and writes a
-triage document. A human rules on it; an actioner session turns the rulings into tracker issues and
-recorded decisions. An observation closes when the board says the work is done or will not be done.
+A scheduled reconciler session curates the store, researches selected observations and puts what is
+worth a ruling in a triage queue. A human rules on it in the app's triage UI; an actioner session,
+which Submit starts, turns the rulings into tracker issues and recorded decisions. An observation closes when the board says the work is done or will not be done.
 
 **Status: a proof of concept, built and in use.** The design is
 [`docs/design.md`](docs/design.md); the first version is deployed, agents post to it, and a

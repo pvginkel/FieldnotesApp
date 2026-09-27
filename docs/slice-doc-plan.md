@@ -51,7 +51,7 @@ conventions: rewrite the doc instead, per [`change-discipline.md`](change-discip
 **Ground every claim in the shipped source.** A doc sentence that cannot be checked against the
 merged tree does not go in.
 
-**Nothing private goes in.** No excerpt of a real observation, triage document or ruling, and no
+**Nothing private goes in.** No excerpt of a real observation, triage item or ruling, and no
 secret: examples are invented.
 
 ## Gates

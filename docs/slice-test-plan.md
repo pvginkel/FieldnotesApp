@@ -16,7 +16,7 @@ confirms the rollout, and then checks the deployment for what only it can show.
 Two things follow from production being the only instance:
 
 - **What a check writes there is real.** A test observation is matched against by every agent's
-  `post` and shown to the operator, word for word, in the next triage document. Run a deployed
+  `post`, and can reach the operator word for word on a triage item. Run a deployed
   check only when the slice changes what it tests, use the invented `fieldnotes-e2e/*` data, and
   clear it in the same phase (step 5).
 - There is no `devlock`: nothing is occupied for the length of a check. Two slices that push close
@@ -244,8 +244,8 @@ never over production.
 
 In `pvginkel/Fieldnotes`, `git rm` every observation whose `repos` are `fieldnotes-e2e/*`
 (`grep -l fieldnotes-e2e observations/*.md`), commit and push; close the trial issue as Won't Do
-with a comment. The reconciler shows the operator every report it has not shown before, so test
-data left overnight is in the morning's triage document. `observations/` keeps its `.gitkeep`: the
+with a comment. Test data left overnight is in the reconciler's morning queue, and can reach the
+operator on a triage item. `observations/` keeps its `.gitkeep`: the
 store's helpers refuse a root without that directory.
 
 ## 6. Check off `verification.json`

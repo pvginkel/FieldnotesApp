@@ -22,9 +22,9 @@ already do.
 
 ## The "not doing" list is ruled
 
-The design closes off agent-facing search, transcript mining, a triage UI, a vector database, a
-TTL, a fine-tuned reranker, reconciler-authored documentation changes and a `bug` category, and names
-the trigger that would reopen each. A slice does not build one of these, or the groundwork for one,
+The design closes off agent-facing search, transcript mining, a vector database, a TTL, a
+fine-tuned reranker, reconciler-authored documentation changes and a `bug` category, and names the
+trigger that would reopen each. A slice does not build one of these, or the groundwork for one,
 because it looked cheap while passing. When a trigger seems to have fired, say so in the close-out
 report; reopening is the operator's ruling.
 

@@ -6,17 +6,17 @@ among thirty other findings, they post as an *observation* instead. `post` answe
 store already knows, the operator's ruling included, and the agent reacts to that instead of
 re-posting: that post-time answer is the knowledge delivery. There is no search tool, because the
 store is temporary: what is reported gets fixed or documented and then leaves it. A scheduled
-reconciler session curates the store into a triage document, the operator rules on it, and an
-actioner session, which the operator starts by hand, carries the rulings out.
+reconciler session curates the store into triage items, the operator rules on them in the app's
+triage UI, and an actioner session, which Submit starts through a KubeCoder timer, carries the
+rulings out.
 
 **It is a proof of concept, built and live since 2026-09-21**, to find out whether the idea proves
 its value: `fieldnotes-prd` is the one deployment, every agent on the host is told to post to it,
-and a timer runs the reconciler each morning. **A push to `main` builds and rolls production**;
-while the app is rebuilt on the template, a `dev` build pins the `fieldnotes-dev` stage. The design
-is [`docs/design.md`](docs/design.md): the ruled decisions, the numbered requirements (`FR-n`,
-`NFR-n`), the technical design and the validation checks. Read it before writing code, and cite its
-requirement numbers in tests and commits. A decision it leaves open is the operator's to rule, not
-something to settle in code.
+and a timer runs the reconciler each morning. **A push to `main` builds and rolls production.** The
+design is [`docs/design.md`](docs/design.md): the ruled decisions, the numbered requirements
+(`FR-n`, `NFR-n`), the technical design and the validation checks. Read it before writing code,
+and cite its requirement numbers in tests and commits. A decision it leaves open is the operator's
+to rule, not something to settle in code.
 
 The greenfield build followed
 [`../FieldnotesAppSpecs/plan/implementation-plan.md`](../FieldnotesAppSpecs/plan/implementation-plan.md),

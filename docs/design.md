@@ -22,7 +22,8 @@ observation is deleted; what the operator decides not to act on stays, with the 
 answer the next agent gets.
 
 A scheduled reconciler session curates the store, researches selected observations, checks the board
-and writes a triage document. The operator rules; an actioner session turns rulings into YouTrack
+and puts what is worth a ruling in the operator's triage queue. The operator rules in the triage UI;
+an actioner session, which the UI starts when the operator submits, turns rulings into YouTrack
 issues and recorded decisions. An observation closes when the board says the work is done or will not
 be done, and leaves the store once what it says is better learned somewhere else. A decision not to
 act stays, and its reason is part of the answer the next reporter gets: for those the store does the
@@ -47,9 +48,10 @@ Everything below follows from that.
 | Reactions | One tool `react(id, emoji, text?, repo, session?)`; emoji uncurated, allows 👎. | Vote and comment merge cleanly; the emoji carries the claim type, text only when there is new information. |
 | Agent search | None. Only `post`, `react`, `get`. What comes back from a `post` is to be trusted: the statement is the reconciler's, which has read every report across projects, and the `reason` is the operator's. | The store is not a reference. It is temporary: everything in it is on its way to being fixed or documented, and is deleted when it is. A search tool would make agents treat a complaint box as documentation. First ruled on the grounds that observations are unverified; re-ruled after gate 2, when curation and rulings turned out to carry most of what comes back. |
 | Reconciler | A session scheduled by a KubeCoder timer on a skill in the store repo, not a server feature. It owns the observation files and has free rein over them; everything outside the store is a proposal. | Keeps the server dumb; all judgment lives in versioned skills. |
-| Vetting | The reconciler writes only the triage document. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
-| Output | Triage doc in the store (ask, evidence, recommendation, impact → ruling) plus a Telegram message. No cap, no threshold. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. |
-| Rulings | `yes`, `no` + reason, `later` + revisit trigger, `merge into <id>`, written as the operator would say it, with a note line for whatever else the actioner should know. The actioner reads a ruling; it does not parse one. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the triage document is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. |
+| Vetting | The reconciler writes only the triage items. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
+| Output | Triage items in the store, one file per observation listed (ask, evidence, recommendation, impact, every report on it → ruling), plus a Telegram message with the size of the operator's queue and the triage UI's address. No cap, no threshold. An item stays in the queue until it is ruled; the reconciler lists an observation again only when it has something new to say. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. Ruled 2026-09-26 with the triage UI: records instead of documents, so that nothing is ruled in an old document or lost in one; the document's summary and its second half, every new report word for word, went with it, the operator having read the raw reports for the while they asked for. |
+| Rulings | A verb, `yes`, `no` or `later`, and a note written as the operator would say it: the reason for a `no`, the revisit trigger for a `later`, and whatever else the actioner should know, a merge included. The actioner reads a ruling; it does not parse one. When it cannot read one with confidence it asks back on the item, and the operator answers in the queue. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the ruling is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. The verb and one note field were ruled with the triage UI. |
+| Triage UI | One screen in the app: the queue as a stack, one item at a time beside the observation as it stands now; a verb by key and a note, saved as each ruling is made; previous, skip and progress; a finish card whose Submit starts the actioner through a KubeCoder timer. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. Triage only: no browsing observations, no dashboard, nothing about the actioner's runs. | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
 | Retirement | An observation is deleted once what it says is better learned elsewhere: the friction was fixed, or the hint went into documentation agents read anyway. The reconciler decides that on its own, as a rule when the card closes as done; the actioner does it for a ruling that says the work is already delivered. What was ruled and never carded stays for good. | The store is for what an agent cannot learn any other way. A recurrence after a deletion arrives as a fresh post, which is the signal that the fix did not hold. Git history is the record. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
@@ -57,10 +59,10 @@ Everything below follows from that.
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
-| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server and a webhook relay as three containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
+| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
-| Not doing | Agent-facing search, transcript mining (dreaming), triage UI, a vector database, TTL, fine-tuned reranker, reconciler-authored doc changes, a bug category. | Volume is already sufficient; a curated document works; scale does not justify the rest. |
+| Not doing | Agent-facing search, transcript mining (dreaming), a vector database, TTL, fine-tuned reranker, reconciler-authored doc changes, a bug category. | Volume is already sufficient; a curated queue works; scale does not justify the rest. |
 | Source | The field is named `repo`. A path is acceptable where no repository applies. | Repositories are the source nearly always; naming the field after the common case keeps reporters precise. |
 
 ## Functional requirements
@@ -122,43 +124,54 @@ scope here.
     condense, recategorize, rewrite canonical statements, edit, merge or delete reactions and
     comments, add its own, close as duplicate, delete an observation that has done its work (FR-11),
     without asking. Must not change project repositories, documentation or the board; its only
-    outputs are the store and the triage document.
-15. FR-15 Must write `triage/YYYY-MM-DD.md`. Which observations it lists is at its discretion: only
-    what it judges of interest, never everything. Per item: id, ask, evidence (count, distinct repos,
-    first and last seen), every report on it in the agent's own words, recommendation, impact, an
-    empty ruling block (FR-18). Listing an `open` observation makes it `proposed`. Recommended
-    documentation changes are described in text, not drafted. After the items the document shows
-    every report made since the last document, word for word, under the observation that holds it
-    now and beside the statement as the run left it, each report once: the operator reads the raw
-    input, to see how agents use the store and to judge the curation against what was said (ruled
-    2026-09-21, "for a while at least"). A run with reports and nothing to rule on writes the
-    document for that half alone; a run with neither writes none.
-16. FR-16 Must read prior triage docs and rulings before composing, and must send a Telegram message
-    with the triage doc path when it wrote one, and none when it did not.
+    outputs are the store and the triage items.
+15. FR-15 Must write one triage item per observation it lists, `triage/<observation-id>.json`.
+    Which observations it lists is at its discretion: only what it judges of interest, never
+    everything. Per item: the observation id, a headline, ask, evidence (count, distinct repos, first
+    and last seen), recommendation, impact, the observation as it stood, and every report on it in
+    the agent's own words; the three state fields are left empty (FR-18). Listing an `open`
+    observation makes it `proposed`. Recommended documentation changes are described in text, not
+    drafted. An open item stays in the operator's queue until it is ruled, so an observation is
+    listed again only when the run has something new to say about it: its open item is then
+    rewritten in place, the reports the operator has not been shown marked new, and a draft ruling
+    on it dropped. An item that is submitted, or carries the actioner's question, is not rewritten.
+    A run with nothing to rule on writes no item. The document's second half, every new report word
+    for word, was retired with the triage UI (2026-09-26).
+16. FR-16 Must read prior rulings before composing: the stamped items, the open ones, and the
+    triage documents from before the items. Must send a Telegram message with the number of items in
+    the operator's queue and the triage UI's address when it wrote or rewrote an item, and none when
+    it did not.
 17. FR-17 To understand an item it may clone the relevant repository or start a KubeCoder
     environment. Research only; no changes there.
 
 **Ruling and actioner**
 
-18. FR-18 Each triage item ends in a ruling block with two lines that are the operator's, `ruling`
-    and `note`, and one that is the actioner's, `actioned`. A ruling is `yes`, `no: <reason>`,
-    `later: <trigger>` or `merge: <id>`, and may go on in prose. The note is whatever else the
-    actioner should know or do: a card the operator already raised, a fix that already shipped,
-    where an issue belongs, what the observation should say. The block is the operator's channel to
-    the actioner and is read, not parsed: the verb is the lead, the prose is the instruction.
-19. FR-19 The `actioner` skill, run manually in a store checkout, carries out each ruled block that
-    has no `actioned` stamp, through the YouTrack MCP tools and on the observation files, with the
-    judgment the reconciler has over the files (FR-14). Its defaults: `yes` → an issue whose
-    description names the observation id for the reader, the issue id written to the observation's
-    `card`, status `raised`; a card the operator says they raised themselves is linked and no issue
-    is created; work the operator says is already delivered gets no issue and the observation is
-    deleted, on the operator's word or after a read-only check (as FR-17), as the actioner judges.
-    `no` → `closed`, outcome `wont-do`, and the ruling written into `reason` for the agent who meets
-    the observation next (FR-2); a `no` that asks for a card on something else gets both. `later` →
-    the trigger noted on the observation, status back to `open`. `merge` → merged. An issue goes to
-    the intake queue of the project that owns the fix, and to `FN` when no project owns it or it
-    spans repositories. Each block dealt with is stamped `actioned` with the date and a reference; a
-    stamped block is skipped, so reruns are no-ops.
+18. FR-18 Each triage item carries three state fields, each written by one party: the operator's
+    `ruling`, a verb (`yes`, `no` or `later`) and a note, with the time it was made and the time it
+    was submitted; the actioner's `question`; and the actioner's `actioned` stamp. The note is
+    whatever else the actioner should know or do: the reason for a `no`, the trigger for a `later`, a
+    card the operator already raised, a fix that already shipped, where an issue belongs, what the
+    observation should say, a merge. The ruling is the operator's channel to the actioner and is
+    read, not parsed: the verb is the lead, the prose is the instruction. A ruling that is not
+    submitted is a draft, and nobody but the operator acts on it.
+19. FR-19 The `actioner` skill, run unattended by a KubeCoder timer that the triage UI runs when the
+    operator submits, carries out each submitted item that has no `actioned` stamp, through the
+    YouTrack MCP tools and on the observation files, with the judgment the reconciler has over the
+    files (FR-14). Its defaults: `yes` → an issue whose description names the observation id for the
+    reader, the issue id written to the observation's `card`, status `raised`; a card the operator
+    says they raised themselves is linked and no issue is created; work the operator says is already
+    delivered gets no issue and the observation is deleted, on the operator's word or after a
+    read-only check (as FR-17), as the actioner judges. `no` → `closed`, outcome `wont-do`, and the
+    note written into `reason` for the agent who meets the observation next (FR-2); a `no` that asks
+    for a card on something else gets both. `later` → the trigger noted on the observation, status
+    back to `open`. A merge the note asks for → merged. An issue goes to the intake queue of the
+    project that owns the fix, and to `FN` when no project owns it or it spans repositories. When a
+    ruling can be read two ways, or what the actioner finds does not match it, it guesses at nothing
+    that leaves the store: it writes a question on the item, which clears `submitted` and puts the
+    item back in the operator's queue, first; the answer comes back as the ruling submitted again,
+    beside the question. Each item dealt with is stamped `actioned` with the time and what was done
+    and moves to `triage/done/`, so reruns are no-ops. The run looks once more for items submitted
+    while it ran, and ends with one Telegram message: what was done, and what was asked.
 
 **Board sync**
 
@@ -259,11 +272,12 @@ the `mcp` client token outbound.
 | Path | Content |
 | --- | --- |
 | `observations/<ulid>.md` | One observation per file, frontmatter as in FR-8, body: `### reactions` then `### comments`, append-only for the server |
-| `triage/YYYY-MM-DD.md` | Triage docs with rulings; the calibration history |
+| `triage/<observation-id>.json` | An open triage item: the reconciler's texts, the observation as it stood and every report on it, then the operator's ruling and the actioner's question (FR-15, FR-18) |
+| `triage/done/<date>-<observation-id>.json` | A stamped item; with `triage/archive/`, the triage documents from before the items, the calibration history |
 | `skills/install/` | `SKILL.md`: pull `main` into the session's checkout, then load the skill named in the prompt |
 | `skills/reconciler/` | `SKILL.md` plus Python helpers |
 | `skills/actioner/` | `SKILL.md` plus Python helpers |
-| `.kubecoder/` | Makes the store a KubeCoder project, so a timer can run the reconciler in an environment of it |
+| `.kubecoder/` | Makes the store a KubeCoder project, so its timers can run the reconciler and the actioner in an environment of it |
 
 Embedded text is `area + ": " + canonical`. Comments and reactions never change it, so they never
 trigger a re-embed; a reconciler rewrite of `canonical` does.
@@ -325,7 +339,7 @@ changes. Deleting the cache directory forces a full reindex and loses nothing.
 ```mermaid
 stateDiagram-v2
   [*] --> open: post
-  open --> proposed: listed in triage doc
+  open --> proposed: listed for a ruling
   proposed --> raised: ruling yes → issue
   proposed --> closed: ruling no
   proposed --> open: ruling later
@@ -369,18 +383,19 @@ current skill and data even though the checkout is not the API's.
 **Reconciler.** The run: board scan, read prior rulings, walk the queue, read what changed on the
 card of each queued observation that has one (FR-22), use `/neighbors` for missed duplicates,
 research selected items by cloning the repository or in a KubeCoder environment, edit observations,
-set `last_reviewed`, write the triage doc, commit, push, send the Telegram message. Helpers are
-Python where a script is more reliable than prose: the work queue from timestamps, the triage doc
-rendered from an item list. A `--dry-run` mode pushes nothing and sends nothing. The skill takes the
+set `last_reviewed`, write the triage items, commit, push, send the Telegram message. Helpers are
+Python where a script is more reliable than prose: the work queue from timestamps, the triage items
+written from an item list, an open item rewritten or withdrawn. A `--dry-run` mode pushes nothing and sends nothing. The skill takes the
 store root as a parameter, defaulting to its own repo, so it can be run against a generated test
 store.
 
-**Actioner.** Run manually after rulings. A helper lists the ruled blocks that carry no stamp; the
-session reads each one, ruling and note together, and carries it out (FR-19): issues through the
-YouTrack MCP tools, fields on the observation through the reconciler's helpers, a deletion where the
-work is already delivered. It writes the `reason` of a `no` for the agent who will be shown it, not
-as a copy of what the operator wrote to the actioner. Each block is stamped as it is finished, then
-the run commits and pushes. A stamped block is skipped.
+**Actioner.** Run by its timer when the operator submits, with nobody in the session. A helper
+lists the submitted items that carry no stamp; the session reads each one, verb and note together,
+and carries it out (FR-19): issues through the YouTrack MCP tools, fields on the observation through
+the reconciler's helpers, a deletion where the work is already delivered. It writes the `reason` of
+a `no` for the agent who will be shown it, not as a copy of what the operator wrote to the actioner.
+Each item is stamped and moved to `triage/done/` as it is finished, or handed back with a question,
+and the run commits and pushes as it goes. A stamped item is skipped.
 
 ### Security and config
 
@@ -407,8 +422,8 @@ are issues, they'll surface soon enough").
 | MCP end-to-end | Scripted MCP client: `post` a known duplicate, `react` on the returned id, `get` it, `post` with `force` | Duplicate returned with reaction counts, no new file; reaction appended; forced post creates a file |
 | Board sync | Raise an issue by hand and set an observation's `card` to it, move the issue to Done with a `Resolved:` comment, then change the resolution field to Won't Do | Observation `closed` / `done` with pointer; outcome changes to `wont-do` on the second event; with webhooks disabled, closed after the next board scan |
 | Card feedback | Comment a workaround on a raised observation's card, sync it twice, then run the reconciler with `--dry-run` | `card_updated` moves on the first sync and the second writes nothing; the observation is in the queue; the reconciler's edit carries the workaround |
-| Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | A triage doc the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
-| Actioner idempotency | Rule on a triage doc, run the actioner twice | Second run creates nothing and reports zero actions |
+| Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | Triage items the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
+| Actioner idempotency | Submit rulings on items, run the actioner twice | Second run creates nothing and reports zero actions |
 
 The suites behind `kc project test` are hermetic and cover none of the rows that need real models, a
 real board or a cluster; those are scripts in `eval/` or documented manual steps.
@@ -436,4 +451,3 @@ Each has a trigger that would justify it.
   knowledge base agents read.
 - Multilingual models — trigger: Dutch observations appear.
 - A vector database — trigger: none foreseeable at this scale.
-- A triage UI — not planned; the triage document is the interface.

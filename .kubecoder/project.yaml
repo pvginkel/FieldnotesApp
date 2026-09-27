@@ -3,7 +3,12 @@ projects:
     description: >-
       FieldnotesApp monorepo — orchestration tooling (the suite runner), the
       shared Procfile.dev dev stack, and CI.
-    setup: cexec modern-app uv sync --locked
+    # The dev instance's `.env` and scratch store (scripts/dev-instance-setup.sh) are
+    # generated here, so a fresh or reset environment has them: nothing gitignored is
+    # made by hand.
+    setup:
+      - cexec modern-app uv sync --locked
+      - scripts/dev-instance-setup.sh
     # The root's own Python only; backend/ and frontend/ lint themselves. The
     # rule set and the Ruff version are pinned in the root pyproject.toml.
     lint: cexec modern-app uv run ruff check scripts tools

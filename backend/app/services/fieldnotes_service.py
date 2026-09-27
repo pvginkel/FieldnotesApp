@@ -3,10 +3,13 @@ the app's background services, stopped on shutdown, and reported to the health c
 app's `/metrics`.
 
 Outside production a missing store (`FIELDNOTES_STORE_URL` unset) leaves the runtime out, so the
-dev stack boots without one; the Fieldnotes endpoints then answer `503 not-ready`. The frontend's
-Playwright backend, in testing mode, serves an empty store of its own instead, over a bare repo in
-a temporary directory and the fake models: the triage page is the app's home, and every test that
-opens it reads the queue. In production a missing or malformed variable fails startup.
+dev stack boots without one; the Fieldnotes endpoints then answer `503 not-ready`. In production a
+missing or malformed variable fails startup.
+
+The frontend's Playwright backend, in testing mode, serves an empty store of its own, over a bare
+repo in a temporary directory and the fake models: the triage page is the app's home, and every
+test that opens it reads the queue. It does so whatever the environment names, since `flask run`
+also loads the dev instance's `.env`, and a test must not run against the dev store.
 """
 
 from __future__ import annotations
@@ -47,20 +50,18 @@ class FieldnotesService:
         lifecycle_coordinator: LifecycleCoordinatorProtocol,
     ) -> None:
         self.runtime: Runtime | None = None
-        self._empty_store = False  # the Playwright backend's, built on start
+        self._empty_store = config.is_testing  # the Playwright backend's, built on start
         self._scratch: Path | None = None  # its temporary directory
-        try:
-            settings = load_settings()
-        except SettingsError as exc:
-            if config.is_production:
-                raise
-            if config.is_testing:
-                self._empty_store = True
-            else:
+        if not self._empty_store:
+            try:
+                settings = load_settings()
+            except SettingsError as exc:
+                if config.is_production:
+                    raise
                 logger.warning("no Fieldnotes store: %s; its endpoints answer 503", exc)
-        else:
-            on_failure = _exit_for_restart if config.is_production else None
-            self.runtime = Runtime(settings, on_failure=on_failure)
+            else:
+                on_failure = _exit_for_restart if config.is_production else None
+                self.runtime = Runtime(settings, on_failure=on_failure)
         health_service.register_readyz("store", self._readyz)
         lifecycle_coordinator.register_lifecycle_notification(self._on_lifecycle_event)
 
@@ -83,7 +84,7 @@ class FieldnotesService:
             ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)],
             check=True,
         )
-        logger.info("no Fieldnotes store: serving an empty one at %s", remote)
+        logger.info("testing: serving an empty Fieldnotes store at %s", remote)
         settings = load_settings(
             {
                 "FIELDNOTES_STORE_URL": str(remote),

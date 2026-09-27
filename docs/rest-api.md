@@ -231,8 +231,9 @@ answers 200. The GitHub webhook queues its pull even before startup is done.
 
 Outside production a backend without `FIELDNOTES_STORE_URL` runs without a store, so the dev stack
 boots: its Fieldnotes endpoints answer `not-ready`. The frontend's Playwright backend, in testing
-mode, serves an empty store of its own instead, a bare repo in a temporary directory indexed with
-the fake models, so the triage queue it opens on answers empty.
+mode, always serves an empty store of its own, a bare repo in a temporary directory indexed with
+the fake models, so the triage queue it opens on answers empty; any `FIELDNOTES_*` in its
+environment, such as the dev instance's `.env`, is ignored.
 
 ## The pinned surface
 

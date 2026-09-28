@@ -1,34 +1,86 @@
-# KubeCoder environment manifest for the FieldnotesApp monorepo.
-#
-# One sidecar rather than `python` + `frontend`: the Playwright harness boots the
-# Flask backend and the SSE gateway per worker
-# (frontend/tests/support/process/servers.ts), so a single command needs both
-# toolsets in the same container.
-#
-# No imageBuilder: both Dockerfiles are built by Jenkins with
-# helmCharts.kaniko(...), and nothing builds an image from inside this
-# environment.
+# The environment for Fieldnotes, the cross-project observation store for
+# agents: the application, and the repos its work touches.
+# Schema: https://kubecoder.home/help/reference/config-yaml/
 
 repos:
-  # The AI workflow's spec repository, shared across every environment that
-  # works on FieldnotesApp.
+  # Its spec repo: the design note FieldnotesApp is built from, the mined
+  # dataset, and its slices. Shared: one clone per project, mounted into every
+  # environment of it, because parallel sessions read and append to the one
+  # working tree.
   - url: https://github.com/pvginkel/FieldnotesAppSpecs
     shared: true
+  # Where Fieldnotes deploys: the `fieldnotes` chart and its prd values, which
+  # CI pins the images into, and the `models` chart (the Text Embeddings
+  # Inference pod). Argo CD syncs both.
+  - url: https://github.com/pvginkel/FieldnotesDeploy
+  - url: https://github.com/pvginkel/ModelsDeploy
+  # The Fieldnotes store: observations, triage docs and the install, reconciler
+  # and actioner skills. scripts/dev-instance-setup.sh seeds the dev instance's
+  # scratch store from this checkout.
+  - url: https://github.com/pvginkel/Fieldnotes
 
 capabilities:
   github: rw
 
 tools:
+  # FieldnotesApp's backend and frontend: Node, pnpm and uv in one sidecar,
+  # because the Playwright harness boots the Flask backend and the SSE gateway
+  # per worker, so one command needs both toolsets.
   - use: modern-app
+  # The store's `kc project lint` (ruff), which it runs from here.
+  - use: python
+  # FieldnotesDeploy's and ModelsDeploy's Helm and Terraform gates.
+  - use: iac
+  # Their architecture gates: gen-architecture and arch-validate.
+  - use: aac-tools
+
+# Proves FieldnotesApp's Dockerfiles with `kaniko --no-push` before a push hands
+# them to Jenkins.
+imageBuilder: true
+
+env:
+  # FieldnotesApp's Grafana dashboard: `grafana/dashboard.py --upload` puts it
+  # there. In-cluster, because grafana.home has no HTTPS of its own: the proxy
+  # answers it with architecture.webathome.org's certificate.
+  - name: GRAFANA_URL
+    value: http://grafana.grafana-prd.svc.cluster.local
+
+secrets:
+  GRAFANA_TOKEN: grafana-api-key
 
 ports:
-  - name: frontend
+  # The dev stack (`scripts/dev.py`): the Vite dev server, which proxies /api
+  # to the backend on :3401 and the SSE gateway on :3402. Serves
+  # https://fieldnotes.<env-id>.home, the BASEURL scripts/dev-instance-setup.sh
+  # writes, for the operator to test the triage UI.
+  - name: fieldnotes
     port: 3400
     type: http
     sslOffload: true
-  - name: backend
-    port: 3401
-    type: http
-  - name: sse-gateway
-    port: 3402
-    type: http
+
+preamble:
+  instructions: |
+    Fieldnotes' environment: the application (/work/FieldnotesApp), with its
+    design, dataset and slices in /work/FieldnotesAppSpecs. Its work also
+    touches /work/Fieldnotes (the store: observations and skills),
+    /work/FieldnotesDeploy (the `fieldnotes` chart) and /work/ModelsDeploy
+    (the `models` chart).
+
+    Four toolchain sidecars:
+
+      cexec modern-app  Node, pnpm and uv: FieldnotesApp's backend and
+                        frontend.
+      cexec python      Python with uv and ruff: the store's lint.
+      cexec iac         Terraform and Helm: the deploy repos' gates.
+      cexec aac-tools   gen-architecture and arch-validate: the deploy
+                        repos' architecture gates.
+
+    `kaniko --no-push` proves a Dockerfile; never push a `dev-*` or `prd-*`
+    tag from here, those are Jenkins'.
+
+    Each repo carries its own CLAUDE.md; read the one for the repo you are
+    working in. `kc project` verbs are cwd-bound, so run them from that
+    repo's root.
+
+    /work/FieldnotesAppSpecs is a SHARED working tree: stage files by name
+    there, never `git add -A`.

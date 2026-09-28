@@ -1,10 +1,13 @@
 {
-  // The repository root, plus the shared spec repository the AI workflow uses.
+  // The repository root, plus the sibling repos the environment checks out.
   // backend/ and frontend/ are not listed separately: the root folder already
   // covers them, and adding them would show every file twice in the explorer.
   "folders": [
     { "path": "." },
-    { "path": "../FieldnotesAppSpecs" }
+    { "path": "../FieldnotesAppSpecs" },
+    { "path": "../Fieldnotes" },
+    { "path": "../FieldnotesDeploy" },
+    { "path": "../ModelsDeploy" }
   ],
   // Only the repo's own dev runner needs a task. Starting a Claude session and
   // every `kc project` verb are commands the KubeCoder VS Code extension already

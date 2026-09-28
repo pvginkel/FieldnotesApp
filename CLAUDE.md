@@ -71,9 +71,9 @@ Other repos the work touches:
   Inference pod, which no application owns). Both left `pvginkel/HelmCharts` on 2026-09-26.
   **`pvginkel/DockerImages`** holds `webhook-relay`.
 
-The environment is composed by AIWorkflow's `.kubecoder/config.yaml`, which checks this repo out as a
-sibling. The toolchain is the `modern-app` sidecar (Node, pnpm, uv), so an ad-hoc command is
-`cexec modern-app …`. The `kc project` verbs are cwd-bound: run them from this repo's root.
+The environment is composed by this repo's `.kubecoder/config.yaml`, which checks the spec repo, the
+store, FieldnotesDeploy and ModelsDeploy out as siblings. The toolchain is the `modern-app` sidecar
+(Node, pnpm, uv), so an ad-hoc command is `cexec modern-app …`. The `kc project` verbs are cwd-bound: run them from this repo's root.
 
 ## Template ownership
 

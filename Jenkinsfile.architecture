@@ -4,13 +4,11 @@
 // The artifact, docs/architecture/*.yaml, is hand-authored, so the pipeline only validates and
 // archives it: there is no generator, no dataset fetch and no Vault credential. The agent needs
 // outbound HTTPS to architecture.webathome.org for validation.
-//
-// arch-validate.py is stdlib-only (runs on python:slim), so no pip install is needed.
 
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
 podTemplate(inheritFrom: 'jenkins-agent', containers: [
-    containerTemplates.python('python')
+    containerTemplates.aac_tools('aac-tools')
 ]) {
     node(POD_LABEL) {
         stage('Cloning repo') {
@@ -18,8 +16,8 @@ podTemplate(inheritFrom: 'jenkins-agent', containers: [
         }
 
         stage('Validate architecture') {
-            container('python') {
-                sh './scripts/arch-validate.py docs/architecture/*.yaml'
+            container('aac-tools') {
+                sh 'arch-validate docs/architecture/*.yaml'
             }
             archiveArtifacts artifacts: 'docs/architecture/*.yaml', fingerprint: true
         }

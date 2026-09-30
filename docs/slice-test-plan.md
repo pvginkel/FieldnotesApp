@@ -195,6 +195,7 @@ the check in the background, before the push:
 SECONDS=0
 mkdir -p tmp/roll && rm -f tmp/roll/*
 cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes -o name | cut -d/ -f2 > tmp/roll/old
+[ "$(wc -l < tmp/roll/old)" -eq 1 ] || { echo "tmp/roll/old names $(wc -l < tmp/roll/old) pods, not one: no check"; exit 1; }
 probe() { while :; do echo "$(date -u +%T.%3N) $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1") $1"; sleep 0.5; done >> tmp/roll/probes; }
 probe https://fieldnotes-api.home/health/readyz & probe https://fieldnotes-mcp.home/readyz & probe https://fieldnotes/ &
 until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes --no-headers --request-timeout=10s > tmp/roll/now &&
@@ -205,8 +206,9 @@ grep -qwFf tmp/roll/old tmp/roll/now && echo "the old pod outlived the check"
 awk '{ print $3, $2 }' tmp/roll/probes | sort | uniq -c
 ```
 
-`tmp/roll/old` names the one pod that runs before the push; two mean a roll is already under way,
-so wait for it to end and start again. The check probes each hostname every half second, with the
+`tmp/roll/old` names the one pod that runs before the push, and the check stops at once unless it
+names exactly one: none means the listing failed, two a roll already under way, so wait for it to
+end and start again. The check probes each hostname every half second, with the
 readiness reads rather than a `post`, since what a check writes to prd is real. It lists the pods
 every 5 s, and ends on its own once the pod in `tmp/roll/old` is gone, its termination included, or
 after 30 minutes. It prints how often each hostname gave each status. Every answer is `200`; any

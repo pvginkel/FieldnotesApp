@@ -366,7 +366,8 @@ suspicion. Pull-and-reindex jobs from the GitHub webhook run in the same queue.
 3. Classify each observation: `likely` at or above the high threshold, `related` at or above the low
    one, dropped below it. Then drop any that trails the best one by more than a configured gap, so
    one strong match does not carry weak ones along.
-4. Return the top `k` that remain, with cosine, score, class and reaction counts.
+4. Return the top `k` that remain, with cosine, score, class and reaction counts, and the store
+   commit the index had taken in, so a skill that pushed can tell whether its push was scored.
 
 **Why a threshold, and on what.** A list that is always three long teaches the reporter to ignore
 it, so the cut is a threshold, and the expected answer to a novel post is zero candidates. The

@@ -163,6 +163,12 @@ class Store:
                 listener(changed)
         self._seen = head
 
+    @property
+    def indexed(self) -> str | None:
+        """The commit the listeners last took in in full: every read the index answers reflects
+        at least this commit."""
+        return self._seen
+
     # -- lifecycle -------------------------------------------------------------------------------
 
     def start(self, *listeners: Listener) -> None:

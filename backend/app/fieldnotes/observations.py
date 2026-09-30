@@ -178,8 +178,9 @@ class Observations:
 
     def match(self, request: MatchRequest) -> MatchReply:
         text = embedded_text(request.area, request.text) if request.area else request.text
+        indexed = self.store.indexed  # read first: the match sees this commit or a later one
         matches = self.matcher.match(text, request.k)
-        return MatchReply(candidates=[candidate(match) for match in matches])
+        return MatchReply(candidates=[candidate(match) for match in matches], indexed_commit=indexed)
 
     def neighbors(self, id_: str, k: int) -> NeighborsReply:
         entry = self.index.get(id_)

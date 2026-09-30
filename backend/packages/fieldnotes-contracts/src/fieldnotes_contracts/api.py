@@ -127,7 +127,11 @@ class MatchRequest(WireModel):
 
 
 class MatchReply(WireModel):
+    """The candidates, and the store commit the index had taken in when the match ran: a caller
+    that pushed a change can tell whether it was scored (null while the store has no commit)."""
+
     candidates: list[Candidate]
+    indexed_commit: str | None
 
 
 class NeighborsReply(WireModel):

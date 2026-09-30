@@ -64,6 +64,9 @@ class Remote:
             return []
         return git(self.path, "ls-tree", "--name-only", "main", f"{directory}/").splitlines()
 
+    def head(self) -> str:
+        return git(self.path, "rev-parse", "main").strip()
+
     def log(self) -> list[str]:
         if not git(self.path, "branch", "--list", "main"):
             return []

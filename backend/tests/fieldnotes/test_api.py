@@ -269,6 +269,26 @@ def test_match_writes_nothing_and_joins_the_area(start, auth, remote, models):
     assert len(remote.log()) == 1
 
 
+def test_match_names_the_commit_it_scored_until_the_pull_takes_a_push_in(
+    start, auth, remote, pull
+):
+    # The reconciler's `recall` compares it with its own HEAD: a push the API has not pulled yet
+    # was not scored, and the reply says so.
+    def match(api):
+        return api.post("/api/match", json={"text": DUPLICATE}, headers=auth("skills")).json()
+
+    with start() as api:
+        post(api, auth)
+        posted = remote.head()
+        before = match(api)["indexed_commit"]
+        pushed = remote.push({"observations/README.md": "a skill's push\n"})
+        unpulled = match(api)["indexed_commit"]
+        pull(api)
+        pulled = match(api)["indexed_commit"]
+
+    assert (before, unpulled, pulled) == (posted, posted, pushed)
+
+
 def test_neighbors_leave_the_observation_itself_out(start, auth):
     with start() as api:
         first = post(api, auth).json()["id"]

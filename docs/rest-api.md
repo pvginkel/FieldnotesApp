@@ -38,7 +38,7 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `GET /api/observations/{id}` | | 200 the full observation |
 | `GET /api/observations/{id}/neighbors?k=5` | `k` 1–12, default 5 | 200 `{id, neighbors: [candidate]}` |
 | `POST /api/observations/{id}/board-sync` | | 200 `BoardSyncReply` |
-| `POST /api/match` | `MatchRequest` | 200 `{candidates}` |
+| `POST /api/match` | `MatchRequest` | 200 `{candidates, indexed_commit}` |
 | `POST /api/hooks/github`, `POST /api/hooks/youtrack` | the sender's payload | 200 `{action: "queued" or "ignored"}` |
 | `GET /api/triage/queue` | | 200 `{items, observations}` |
 | `PUT /api/triage/items/{id}/ruling` | `RulingRequest` | 200 the item as it now stands |
@@ -76,7 +76,10 @@ unknown fields are refused.
   after the reaction.
 - **Get** (FR-5): the full observation from the index: every frontmatter field plus `reactions` and
   `comments`.
-- **Match**: the post's pipeline, writing nothing.
+- **Match**: the post's pipeline, writing nothing. `indexed_commit` is the store commit the index
+  had taken in when the match ran (null while the store has no commit): the match reflects that
+  commit or a later one. A skill that pushed compares it with its own `HEAD` to tell whether its
+  push was scored yet; the index takes a push in when the GitHub webhook's pull runs.
 - **Neighbors**: the observations nearest this one by the pipeline's score, with no threshold or gap
   cut;
   `match_class` is null for a neighbour below both thresholds; the observation itself is left out.

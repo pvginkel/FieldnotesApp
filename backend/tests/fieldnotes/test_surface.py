@@ -95,7 +95,7 @@ MODELS = {
         "area": "str | None = None",
         "k": "int = 3",
     },
-    "MatchReply": {"candidates": "list[Candidate]"},
+    "MatchReply": {"candidates": "list[Candidate]", "indexed_commit": "str | None"},
     "NeighborsReply": {"id": "str", "neighbors": "list[Candidate]"},
     "BoardSyncReply": {
         "id": "str",

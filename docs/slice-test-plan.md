@@ -182,28 +182,33 @@ honouring any repo named in `plan.md`'s `## Push holds`.
 
 A push of this repo builds and deploys. The build writes its image pins into
 `pvginkel/FieldnotesDeploy` as a commit on that repo's `main`, and Argo CD syncs the `fieldnotes-prd`
-Application from there. Follow the build to the end:
+Application from there. Follow the build through to the roll:
 
 ```bash
-track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
+timeout 1200 track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 ```
 
-It needs `JENKINS_TOKEN`, which this environment projects. Run it under `timeout`: the build takes
-a few minutes. The second job, `AaC/FieldnotesApp` (`Jenkinsfile.architecture`), validates and
-archives `docs/architecture/*.yaml`; follow it the same way when the slice touched the artifact.
-Then confirm Argo CD took the pin commit:
+It needs `JENKINS_TOKEN`, which this environment projects, and the environment's FieldnotesDeploy
+clone (`../FieldnotesDeploy`), which it fetches to follow the pin commit. Once the build is green it
+reads the pin line from the build's console and waits until `fieldnotes-prd` has rolled that
+commit: the build takes a few minutes, the roll about one more, and the roll deadline is ten minutes,
+hence the `timeout`. Its exit status says where it stopped:
 
-```bash
-git -C ../FieldnotesDeploy fetch -q && git -C ../FieldnotesDeploy log -1 --format='%H %s' origin/main
-cexec iac kubectl -n argocd-prd get application fieldnotes-prd \
-  -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
-```
+| Exit | Meaning | What to do |
+|------|---------|------------|
+| `0` | The build is green and `fieldnotes-prd` rolled the pin commit. | Go on to the pod checks below. |
+| `1` | The build failed; nothing was followed into Argo CD. | `--diagnose` printed the console tail; the full log's path is in the summary. A finding. |
+| `3` | An operational problem: Jenkins or Kubernetes auth, a build that never appeared, a failed fetch. | Fix the cause and run it again; the build is not re-run. |
+| `4` | The build is green, but the environment has no clone of the deploy repo it pushed to. | The summary gives the `git clone` line. This environment declares FieldnotesDeploy, so this is an environment fault, not a slice finding. |
+| `5` | The roll failed: the sync failed, an error condition, or the Application settled `Degraded` or `Missing`. | A finding; the diagnosis written beside the logs names the failing resources. |
+| `6` | The Application had not rolled the commit ten minutes after Argo CD saw it. | A finding; the diagnosis is on disk as for `5`. |
+| `7` | Argo CD will not roll the commit on its own: it never saw the pin commit (a lost webhook), or the sync is not automated. | A finding. Argo CD does not poll this Application (its reconciliation timeout is off), so waiting longer does not help. |
 
-The Application's revision is `origin/main`'s head (the pin commit), `Synced`, `Healthy`. Argo CD
-does not poll this Application (its reconciliation timeout is off), so a revision that has not
-moved a few minutes after the pin commit is a finding, not a wait.
+The second job, `AaC/FieldnotesApp` (`Jenkinsfile.architecture`), validates and archives
+`docs/architecture/*.yaml`; follow it the same way when the slice touched the artifact (it deploys
+nothing, so it ends at the build).
 
-**A `Synced`, `Healthy` Application is not proof of a good deploy on its own.** Look at the pod,
+**A rolled, `Healthy` Application is not proof of a good deploy on its own.** Look at the pod,
 read-only, through the `iac` tool container:
 
 ```bash
@@ -224,8 +229,16 @@ is the roll, not a finding. The API's log is
 A slice that changes the chart pushes `pvginkel/FieldnotesDeploy` as well. The build's pin commits
 land on that repo's `main` too, so fetch and rebase the chart commit onto `origin/main` before
 pushing it; a rejected push means a pin commit landed first, so rebase again, never force. The chart push rolls the pod
-on its own: confirm it the same way, the Application's revision being the chart commit (or a later
-pin commit). Push the chart first when the new image needs what the chart adds, the image first
+on its own, and no build follows it, so confirm the roll by hand: the Application's revision is the
+chart commit (or a later pin commit), `Synced`, `Healthy`:
+
+```bash
+git -C ../FieldnotesDeploy fetch -q && git -C ../FieldnotesDeploy log -1 --format='%H %s' origin/main
+cexec iac kubectl -n argocd-prd get application fieldnotes-prd \
+  -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
+```
+
+Then the pod checks above. Push the chart first when the new image needs what the chart adds, the image first
 when the chart needs the new image, and either when neither does. A slice that changes only the
 store's skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
 

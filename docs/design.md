@@ -59,7 +59,7 @@ Everything below follows from that.
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
-| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. No scheduler in the API. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. |
+| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
 | Not doing | Agent-facing search, transcript mining (dreaming), a vector database, TTL, fine-tuned reranker, reconciler-authored doc changes, a bug category. | Volume is already sufficient; a curated queue works; scale does not justify the rest. |
@@ -101,7 +101,12 @@ scope here.
    comments in order; the creating post is the first reaction entry, so every report has the same
    provenance shape.
 9. FR-9 Every server write is a commit on `main`, pushed. Skills edit files directly and push. A
-   GitHub push delivery makes the server pull and reindex.
+   GitHub push delivery makes the server pull and reindex, and each of its pods also pulls on its
+   own about once a minute, so a push is in every pod's indexes within about a minute whichever pod
+   its delivery reached. A write never waits on the observation index to follow the tip: it lands
+   while the models pod is down, and the index takes the new tip in once the models pod answers.
+   Matching is not a write: a `post` without `force` still needs the models pod to embed its text
+   (FR-1).
 10. FR-10 Statuses: `open`, `proposed`, `raised`, `closed`. `outcome` is `done` or `wont-do`.
     `last_updated` changes on any write to the file, by anyone.
 11. FR-11 Condensing, merging and splitting are reconciler maintenance, not states. A closed
@@ -207,11 +212,12 @@ scope here.
     and logged; it never fails the whole queue. Skips and unsaved notes are the browser's, and the
     API knows nothing of either.
 24. FR-24 The operator's writes, a ruling, its take-back and a submit (FR-25, FR-26), must each be
-    one commit on `main` through the API's write queue, pushed before the reply (FR-9): a success
-    means the write is on the remote. A write that fails is the reply (`store-unreachable`), and
-    nothing else reports it. The UI does not wait on a write: it applies a ruling and moves on at
-    once, and shows a failed reply. An item the API writes passes the store's rules, and its diff
-    is the `ruling` alone.
+    one commit on `main` through the write queue of the pod that takes it, pushed before the reply
+    (FR-9): a success means the write is on the remote, whether or not the observation index has
+    taken it in. A write that fails, a failed fetch included, is the reply (`store-unreachable`):
+    nothing of it is on the remote, and nothing else reports it. The UI does not wait on a write: it
+    applies a ruling and moves on at once, and shows a failed reply. An item the API writes passes
+    the store's rules, and its diff is the `ruling` alone.
 25. FR-25 A ruling sets an item's `ruling` to a verb (`yes`, `no` or `later`), a note stripped of
     surrounding whitespace, the time it was made (`at`) and no `submitted`, over any earlier draft.
     A `no` or a `later` without a note is refused: the note is what the actioner and the next
@@ -235,13 +241,15 @@ scope here.
     the request, so the reply does not wait on it: the API runs the actioner's timer through the
     KubeCoder controller, with a client token of its own. When the controller refuses because a run
     is in flight, the API tries again a minute later, for as long as submitted items without an
-    `actioned` stamp are waiting, and stops once none is. At most one start waits at a time, and a
-    submit made meanwhile is covered by it. Any other failure is logged and counted, not retried. A
-    restarted API resumes no waiting start: the items wait for the next submit or the timer's
-    **Run now** in KubeCoder. The API polls nothing for display and the UI hears nothing of the
-    actioner: a failed run is KubeCoder's own Telegram message, and **Run now** is its retry.
-    Without the controller's address, the token and the timer's id the API still starts and submit
-    still writes; the start is skipped and logged.
+    `actioned` stamp are waiting, and stops once none is. At most one start waits at a time in a
+    pod, and a submit made meanwhile through that pod is covered by it; while a rollout overlaps two
+    pods each may hold one, and the controller's refusal while a run is in flight still keeps it to
+    one run. Any other failure is logged and counted, not retried. A pod that starts resumes no
+    waiting start, and a retired pod's waiting start goes with it: the items wait for the next
+    submit or the timer's **Run now** in KubeCoder. The API polls nothing for display and the UI
+    hears nothing of the actioner: a failed run is KubeCoder's own Telegram message, and **Run now**
+    is its retry. Without the controller's address, the token and the timer's id the API still
+    starts and submit still writes; the start is skipped and logged.
 
 **Non-functional**
 
@@ -257,8 +265,9 @@ scope here.
 
 ## Technical design
 
-One pod with logic, one model pod, one git repo on GitHub, three skills. The REST API is the only
-component that decides anything; everything else is off the shelf or thin.
+One pod with logic (two while a rollout overlaps them), one model pod, one git repo on GitHub, three
+skills. The REST API is the only component that decides anything; everything else is off the shelf
+or thin.
 
 ```mermaid
 flowchart LR
@@ -293,7 +302,7 @@ workspace:
 
 | Path | Content |
 | --- | --- |
-| `backend/app/fieldnotes/` | The domain: the store and its write queue (a worker thread), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the metrics, and the `Runtime` that builds them from the settings. |
+| `backend/app/fieldnotes/` | The domain: the store (the pod's own checkout, its write queue on one worker thread, and the timed pull), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the metrics, and the `Runtime` that builds them from the settings. |
 | `backend/app/api/fieldnotes.py` | The agents' REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
 | `backend/app/api/triage.py` | The triage UI's REST surface, a blueprint at `/api/triage`. Its endpoints are gated on the operator's OIDC session with the `editor` client role and typed in the template's OpenAPI document. |
 | `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
@@ -316,7 +325,7 @@ surface by equality.
 | Service | What it is | Placement |
 | --- | --- | --- |
 | `models` | One pod: NGINX in front of a TEI CPU container per model, routing by path; today one, the embedder at `/embed`. A volume caches the downloaded models, so the pod starts without egress after the first run. | A chart of its own in the homelab's chart repo, pinned by node affinity and toleration to the high-performance node. |
-| `fieldnotes` | One pod: the backend `app` (the API, on 3401), the `ui` (on 3400, which proxies `/api`), the template's `sse-gateway`, `mcp` and, where the store takes webhooks, `webhook-relay`. A volume holds the store checkout and the embedding cache. Services select the pod: the UI for the operator, the MCP server for agents, the relay as the one public hostname. `Recreate` strategy, since the checkout has a single writer. | The chart in `pvginkel/FieldnotesDeploy`, one values file per stage; secrets from OpenBao through External Secrets, or generated by it. |
+| `fieldnotes` | One pod: the backend `app` (the API, on 3401), the `ui` (on 3400, which proxies `/api`), the template's `sse-gateway`, `mcp` and, where the store takes webhooks, `webhook-relay`. Each pod clones its store checkout at start onto pod-local scratch space, which goes with the pod; the embedding cache is on a CephFS (RWX) volume every pod mounts. Services select the pods: the UI for the operator, the MCP server for agents, the relay as the one public hostname. `RollingUpdate` strategy, one replica with `maxSurge: 1` and `maxUnavailable: 0`: the new pod starts beside the old one, which is retired only once the new one is ready, so the hostnames answer throughout a rollout. The termination grace is above everything the `app` container's preStop drain may take. | The chart in `pvginkel/FieldnotesDeploy`, one values file per stage; the cache's volume a static PV in its Terraform; secrets from OpenBao through External Secrets, or generated by it. |
 
 API endpoints, under `/api`: `POST /observations`, `POST /observations/{id}/reactions`,
 `GET /observations/{id}`, `POST /observations/{id}/board-sync`, `POST /match`,
@@ -348,10 +357,27 @@ trigger a re-embed; a reconciler rewrite of `canonical` does.
 
 ### Writing to the store
 
-All writes go through one queue, so the checkout has one writer. A write fetches and rebases onto
-`origin/main`, changes the file, commits and pushes. A rejected push means a skill pushed in between:
-the write rebases and pushes again, which is how two writers share a remote, not a retry on
-suspicion. Pull-and-reindex jobs from the GitHub webhook run in the same queue.
+Each pod clones a checkout of its own at start, and all of that pod's writes go through one queue, so
+each checkout has one writer. The store has several: the skills, and both pods while a rollout
+overlaps them. They share the remote as git writers do. A write fetches `origin/main` and resets the
+checkout onto it, changes the file, commits and pushes. A rejected push means another writer pushed
+in between: the write fetches again and makes its change on the new tip, which is how writers share
+a remote, not a retry on suspicion. A fetch that fails fails the write (`store-unreachable`, FR-24).
+
+The same queue runs the pulls: the pull-and-reindex a GitHub delivery queues, and a pull each pod
+makes on a timer, about once a minute. A delivery reaches one pod only, and so does a YouTrack event,
+so the timed pull is what brings a pod to the tip within about a minute of a push it heard nothing
+of, with no write through it. Until then a pod answers from the tip it last took in, behind the other
+pod's writes during an overlap.
+
+A write does not wait on what reads the checkout. Two listeners follow the tip, the triage index and
+the observation index, each from the commit it last took in: every job, a write or a pull, hands each
+one what changed since its own commit. A listener that fails, the observation index when the models
+pod does not answer, is logged and stays at its commit, and the next job hands it all of that again.
+The write goes ahead, and its reply says whether it is on the remote and nothing else. Meanwhile the
+observation index lags: a match or a `get` sees an observation as it stood at that commit. The
+triage index reads files only and stays current. Only at start must every listener take in the whole
+checkout: a pod that cannot index it never becomes ready, and exits to be restarted.
 
 ### Match pipeline
 
@@ -394,10 +420,18 @@ commit and the push.
 
 ### Index maintenance
 
-On start and after every pull that changed `observations/`: for each observation hash the embedded
-text; look up `<model>/<sha256>` in the cache directory on the volume; embed what is missing and
-write it; rebuild the matrix and the BM25 index. One routine covers cold start, skill edits and model
-changes. Deleting the cache directory forces a full reindex and loses nothing.
+On start, and on every job that finds `observations/` changed since the commit the index last took
+in: for each observation hash the embedded text; look up `<model>/<sha256>` in the cache directory on
+the volume the pods share; embed what is missing and write it aside, then rename it into place;
+rebuild the matrix and the BM25 index. One routine covers cold start, skill edits and model changes.
+Deleting the cache directory forces a full reindex and loses nothing. Two pods embedding one text
+write the same bytes under one key, and the rename makes each write whole, so no pod reads a short or
+mixed vector.
+
+When the models pod does not answer, the index stays at the commit it last took in, and the next
+write or pull tries again; once the models pod answers, the index catches up with no one acting.
+`/match` names that commit, so a skill that pushed sees its push is not scored yet. At start the same
+failure fails the start.
 
 ### Observation lifecycle
 
@@ -426,7 +460,9 @@ the signature and forwards the raw delivery, signature headers included, to `/ap
 verifies it again over the exact bytes received. The relay allows each receiver four seconds, so the
 handler never pulls inline: a `push` to the store's `main` queues a pull-and-reindex and answers at
 once; `ping`, every other event and every other repository are answered `200` and ignored. The
-server's own pushes come back as deliveries and cost one no-op fetch.
+server's own pushes come back as deliveries and cost a fetch. The relay forwards to its own pod, so
+a delivery reaches one pod: during a rollout's overlap the other takes the push in with its timed
+pull (Writing to the store).
 
 **YouTrack.** The board posts issue and comment events to `/api/hooks/youtrack` with a shared token,
 in-cluster, with no relay. The handler takes the issue id from the event and looks up the

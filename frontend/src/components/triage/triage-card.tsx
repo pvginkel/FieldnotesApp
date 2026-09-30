@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Tooltip } from '@/components/primitives/tooltip';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
@@ -33,16 +33,16 @@ export function TriageCard({ item, live }: TriageCardProps) {
       <article className="card" data-testid="triage.card" data-observation={item.observation}>
         <div className="meta">
           <div className="id-anchor">
-            <Tooltip content={store} placement="bottom">
+            <HoverPopover content={store}>
               <span className="id mono" data-testid="triage.card.id">{item.observation}</span>
-            </Tooltip>
+            </HoverPopover>
           </div>
           {changes.length > 0 && (
-            <Tooltip content={store} placement="bottom">
+            <HoverPopover content={store}>
               <span className="changed-chip" data-testid="triage.card.changed">
                 changed since: {changes.join('; ')}
               </span>
-            </Tooltip>
+            </HoverPopover>
           )}
           <span className={`badge ${snapshot.category}`}>{snapshot.category}</span>
           <span>{snapshot.status}</span><span className="sep">·</span>
@@ -91,6 +91,43 @@ export function TriageCard({ item, live }: TriageCardProps) {
         <Reports item={item} />
       </article>
     </div>
+  );
+}
+
+/** A popup under its label, left-aligned with it, open while the pointer is on either: a short
+ * delay to open, and a grace period to close, so the pointer can move into it to follow a link. */
+function HoverPopover({ content, children }: { content: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const later = (next: boolean, delay: number) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(next), delay);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen} modal={false}>
+      <Popover.Anchor asChild>
+        <span onMouseEnter={() => later(true, 200)} onMouseLeave={() => later(false, 120)}>
+          {children}
+        </span>
+      </Popover.Anchor>
+      <Popover.Portal>
+        <Popover.Content
+          className="store-popover"
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onMouseEnter={() => window.clearTimeout(timer.current)}
+          onMouseLeave={() => later(false, 120)}
+        >
+          {content}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

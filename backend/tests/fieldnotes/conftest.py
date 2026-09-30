@@ -9,6 +9,7 @@ import contextlib
 import os
 import subprocess
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -216,11 +217,20 @@ def start(
     environ, models, clock, youtrack, kubecoder, test_settings, test_app_settings
 ):
     """Start the API; `with start() as api:` yields a client that is ready. `app` serves it from
-    an app of the test's own, such as the OIDC-enabled `oidc_app`."""
+    an app of the test's own, such as the OIDC-enabled `oidc_app`; `pull_interval` replaces the
+    store's; the other arguments override variables of the environment."""
 
     @contextlib.contextmanager
-    def started(ready: bool = True, app: App | None = None, **overrides: str):
+    def started(
+        ready: bool = True,
+        app: App | None = None,
+        pull_interval: float | None = None,
+        **overrides: str,
+    ):
         settings = load_settings({**environ, **overrides})
+        if pull_interval is not None:
+            store = replace(settings.store, pull_interval=pull_interval)
+            settings = replace(settings, store=store)
         board = youtrack.board(settings.board) if settings.board is not None else None
         actioner = settings.actioner
         controller = kubecoder.controller(actioner) if actioner is not None else None

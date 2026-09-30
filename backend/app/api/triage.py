@@ -26,7 +26,6 @@ from app.fieldnotes.errors import (
     store_unreachable,
     validation_problem,
 )
-from app.fieldnotes.models import ModelsError
 from app.fieldnotes.runtime import Runtime
 from app.fieldnotes.store import GitError
 from app.fieldnotes.triage import (
@@ -42,7 +41,7 @@ from app.services.fieldnotes_service import FieldnotesService
 from app.services.task_service import TaskService
 from app.utils.auth import allow_roles
 from app.utils.spectree_config import api
-from fieldnotes_contracts import ID_PATTERN, Problem, ProblemType
+from fieldnotes_contracts import ID_PATTERN, Problem
 
 logger = logging.getLogger(__name__)
 
@@ -88,21 +87,6 @@ def _problem(exc: ProblemException) -> Response:
 def _store_unreachable(exc: GitError) -> Response:
     logger.warning("store: %s", exc)
     return problem_response(store_unreachable())
-
-
-@triage_bp.errorhandler(ModelsError)
-def _index_unreachable(exc: ModelsError) -> Response:
-    """A write brings the observation index up to the store's tip before its edit, and the index
-    embeds a changed observation with the models pod: while the pod is down, the write fails."""
-    logger.warning("models pod: %s", exc)
-    return problem_response(
-        ProblemException(
-            502,
-            ProblemType.store_unreachable,
-            "the store's tip could not be indexed: the models pod did not answer",
-            detail="nothing was written; retry in a minute",
-        )
-    )
 
 
 @triage_bp.errorhandler(Exception)

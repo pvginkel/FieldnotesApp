@@ -1,21 +1,23 @@
-"""The store checkout and its single write queue (FR-9; design, "Writing to the store").
+"""The store checkout and its write queue (FR-9; design, "Writing to the store").
 
-The API's checkout of the store repo has one writer: the queue's worker. Every job runs in it, one
+Each pod's checkout of the store repo has one writer: the queue's worker. Every job runs in it, one
 at a time:
 
 - A **write** fetches, resets the checkout to the remote's `main`, applies its edit to the files,
-  commits and pushes. A rejected push means a skill pushed in between: the write starts over on the
-  new tip, fetching, resetting and applying its edit again, which rebases it without a conflict to
-  resolve. A write whose edit changes nothing commits nothing.
-- A **pull**, queued by the GitHub webhook, fetches and resets.
+  commits and pushes. A rejected push means another writer pushed in between, a skill or the other
+  pod: the write starts over on the new tip, fetching, resetting and applying its edit again, which
+  rebases it without a conflict to resolve. A write whose edit changes nothing commits nothing.
+- A **pull** fetches and resets. The GitHub webhook queues one, and the worker makes one of its own
+  whenever it has had no job for `pull_interval`, since a delivery reaches one pod only.
 
 Nothing unpushed survives a job: a write that fails leaves a commit the next job's reset drops, so
-a write the caller saw fail never lands later.
+a write the caller saw fail never lands later. A failed fetch fails the job.
 
-After every move of the checkout the store tells its listeners, in order, which paths changed since
-the commit they last took in, so the indexes follow the checkout. A listener that fails leaves that
-commit where it was, and the next job reports the same paths to every listener again: a listener
-takes in the same paths twice without harm.
+After every move of the checkout the store hands each listener, in order, the paths changed since
+the commit that listener last took in, so the indexes follow the checkout each on its own. A
+listener that fails is logged and stays at its commit, and the job goes on: every later job hands
+it those paths again, with whatever changed since, until it takes them in. A listener takes in the
+same paths twice without harm. Only at start does a listener's failure fail the store.
 
 "Clone on start" is an init and a fetch, so an empty remote needs no special case: the first write
 makes the root commit of `main`.
@@ -28,7 +30,7 @@ import logging
 import queue
 import subprocess
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,9 +42,12 @@ logger = logging.getLogger(__name__)
 # queue, and every write behind it, for good.
 GIT_TIMEOUT = 60.0
 
-# How many times a write starts over on a rejected push before it gives up. Each rejection is a
-# skill's push landing between this write's fetch and its push, seconds apart.
+# How many times a write starts over on a rejected push before it gives up. Each rejection is
+# another writer's push landing between this write's fetch and its push, seconds apart.
 PUSH_ATTEMPTS = 5
+
+# How long the worker waits for a job before it pulls on its own (FR-9: about once a minute).
+PULL_INTERVAL = 60.0
 
 Listener = Callable[[set[str]], None]
 
@@ -59,6 +64,7 @@ class StoreSettings:
     token: str | None  # a GitHub token for the remote, sent as an HTTP header
     author_name: str
     author_email: str
+    pull_interval: float = PULL_INTERVAL
 
 
 @dataclass(frozen=True)
@@ -103,8 +109,8 @@ class Store:
         self.settings = settings
         self.root = settings.root
         self._env = git_env(settings, env)
-        self._listeners: Sequence[Listener] = ()
-        self._seen: str | None = None  # the commit the listeners last took in
+        # Each listener, in the order it hears a move, and the commit it last took in.
+        self._seen: dict[Listener, str | None] = {}
         # A job, or None to stop the worker.
         self._queue: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] = (
             queue.Queue()
@@ -153,42 +159,50 @@ class Store:
             _, out = self.git("diff", "--name-only", "--no-renames", old, new)
         return {line for line in out.splitlines() if line}
 
-    def _sync(self) -> str | None:
+    def _sync(self, *, strict: bool = False) -> str | None:
         """Fetch, reset the checkout to the remote, and bring the listeners up to it."""
         head = self._remote_head()
         if head is not None:
             self.git("reset", "--quiet", "--hard", head)
         self.git("clean", "--quiet", "-fd")
-        self._advance(head)
+        self._advance(head, strict=strict)
         return head
 
-    def _advance(self, head: str | None) -> None:
-        changed = self._changed(self._seen, head)
-        if changed:
-            for listener in self._listeners:
-                listener(changed)
-        self._seen = head
+    def _advance(self, head: str | None, *, strict: bool = False) -> None:
+        """Hand each listener what changed since its own commit. A listener that fails stays at
+        its commit, and fails the job only when `strict`."""
+        for listener, seen in self._seen.items():
+            changed = self._changed(seen, head)
+            if changed:
+                try:
+                    listener(changed)
+                except Exception:
+                    if strict:
+                        raise
+                    logger.exception(
+                        "a listener could not take in %s; it stays at %s", head, seen
+                    )
+                    continue
+            self._seen[listener] = head
 
-    @property
-    def indexed(self) -> str | None:
-        """The commit the listeners last took in in full: every read the index answers reflects
-        at least this commit."""
-        return self._seen
+    def seen(self, listener: Listener) -> str | None:
+        """The commit the listener last took in in full: every read it answers reflects at least
+        this commit."""
+        return self._seen[listener]
 
     # -- lifecycle -------------------------------------------------------------------------------
 
     def start(self, *listeners: Listener) -> None:
         """Make the checkout match the remote, report every file in it to the listeners, and
-        start the queue's worker."""
+        start the queue's worker. A listener that fails fails the start."""
         self.root.mkdir(parents=True, exist_ok=True)
         if not (self.root / ".git").exists():
             self.git("init", "--quiet", "--initial-branch", self.settings.branch)
             self.git("remote", "add", "origin", self.settings.url)
         else:
             self.git("remote", "set-url", "origin", self.settings.url)
-        self._listeners = listeners
-        self._seen = None
-        self._sync()
+        self._seen = dict.fromkeys(listeners)
+        self._sync(strict=True)
         self._worker = threading.Thread(
             target=self._work, name="store-queue", daemon=True
         )
@@ -203,7 +217,14 @@ class Store:
         self._worker = None
 
     def _work(self) -> None:
-        while (item := self._queue.get()) is not None:
+        while True:
+            try:
+                item = self._queue.get(timeout=self.settings.pull_interval)
+            except queue.Empty:
+                self._timed_pull()
+                continue
+            if item is None:
+                break
             job, future = item
             if not future.set_running_or_notify_cancel():
                 continue
@@ -242,6 +263,12 @@ class Store:
 
     def _pull(self) -> None:
         self._sync()
+
+    def _timed_pull(self) -> None:
+        try:
+            self._sync()
+        except Exception:  # the worker goes on; the next job fetches again
+            logger.exception("timed pull failed")
 
     def _write(self, edit: Edit) -> Any:
         for _ in range(PUSH_ATTEMPTS):

@@ -1,8 +1,10 @@
-"""The store checkout and its write queue (FR-9), against a bare repo the test creates, with a
-second clone playing a skill that pushes in between."""
+"""The store checkout and its write queue (FR-9; design, "Writing to the store"), against a bare
+repo the test creates, with a second clone playing a skill, or the other pod, that pushes in
+between."""
 
 import os
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -62,6 +64,10 @@ def remote_file(remote: Path, path: str) -> str:
     return git(remote, "show", f"main:{path}")
 
 
+def remote_head(remote: Path) -> str:
+    return git(remote, "rev-parse", "main").strip()
+
+
 def remote_log(remote: Path) -> list[str]:
     return git(remote, "log", "--format=%s", "main").splitlines()
 
@@ -87,8 +93,9 @@ class Listener:
 def started(tmp_path: Path, remote: Path):
     stores: list[Store] = []
 
-    def start(*listeners: Listener) -> Store:
-        store = Store(settings(tmp_path, remote), os.environ)
+    def start(*listeners: Listener, **changes) -> Store:
+        """Changes to the settings by name, such as `pull_interval`."""
+        store = Store(replace(settings(tmp_path, remote), **changes), os.environ)
         store.start(*(listeners or (Listener(),)))
         stores.append(store)
         return store
@@ -194,21 +201,114 @@ class FailingListener(Listener):
             raise RuntimeError("the listener failed")
 
 
-def test_every_listener_hears_a_move_again_after_one_failed(started, tmp_path, remote):
+def test_a_listener_that_fails_stays_behind_until_a_later_job_catches_it_up(
+    started, tmp_path, remote, caplog
+):
+    """The pull goes on and the other listener follows it; the failed one is handed everything
+    since its own commit by the next job."""
     first, second = Listener(), FailingListener()
     store = started(first, second)
     clone = skill_clone(tmp_path, remote)
     skill_push(clone, {"a.md": "a\n"})
+    moved = remote_head(remote)
     second.fail = True
 
-    with pytest.raises(RuntimeError, match="the listener failed"):
-        store.pull().result()
+    failed = store.pull().exception()
+    behind = (store.seen(first), store.seen(second))
     second.fail = False
     skill_push(clone, {"b.md": "b\n"})
     store.pull().result()
 
-    assert first.calls == [{"a.md"}, {"a.md", "b.md"}]
+    assert failed is None
+    assert behind == (moved, None)
+    assert "a listener could not take in" in caplog.text
+    assert first.calls == [{"a.md"}, {"b.md"}]
     assert second.calls == [{"a.md"}, {"a.md", "b.md"}]
+    assert store.seen(first) == store.seen(second) == remote_head(remote)
+
+
+def test_a_write_lands_while_a_listener_cannot_follow_the_tip(
+    started, tmp_path, remote
+):
+    listener = FailingListener()
+    store = started(listener)
+    clone = skill_clone(tmp_path, remote)
+    skill_push(clone, {"a.md": "a\n"})
+    listener.fail = True
+
+    result = store.write(write_file("b.md", "b\n", "write b"))
+
+    assert result == "b.md"
+    assert remote_log(remote) == ["write b", "skill: a.md"]
+    assert store.seen(listener) is None
+    assert listener.calls == [{"a.md"}, {"a.md", "b.md"}]
+
+
+def test_a_write_whose_push_landed_succeeds_though_a_listener_then_fails(
+    started, remote
+):
+    listener = FailingListener()
+    store = started(listener)
+
+    def edit(root: Path):
+        listener.fail = True  # after the write's fetch, before its push
+        return write_file("a.md", "a\n", "write a")(root)
+
+    assert store.write(edit) == "a.md"
+    assert remote_log(remote) == ["write a"]
+    assert store.seen(listener) is None
+    assert listener.calls == [{"a.md"}]
+
+
+def test_a_listener_that_fails_at_start_fails_the_start(tmp_path, remote):
+    clone = skill_clone(tmp_path, remote)
+    skill_push(clone, {"a.md": "a\n"})
+    listener = FailingListener()
+    listener.fail = True
+    store = Store(settings(tmp_path, remote), os.environ)
+
+    with pytest.raises(RuntimeError, match="the listener failed"):
+        store.start(Listener(), listener)
+
+
+def test_a_failed_fetch_fails_the_write_before_its_edit(started, tmp_path, remote):
+    store = started()
+    store.write(write_file("a.md", "a\n"))
+    edits: list[Path] = []
+
+    def edit(root: Path):
+        edits.append(root)
+        return write_file("b.md", "b\n", "never")(root)
+
+    gone = remote.rename(tmp_path / "gone.git")
+    with pytest.raises(GitError, match="git fetch"):
+        store.write(edit)
+    gone.rename(remote)
+
+    assert edits == []
+    assert remote_log(remote) == ["write"]
+
+
+def test_the_worker_pulls_on_its_own_and_catches_a_lagging_listener_up(
+    started, tmp_path, remote, eventually
+):
+    """FR-9: with no job queued, a push reaches the listeners within the pull interval, and a
+    listener that failed catches up on a later timed pull."""
+    following, lagging = Listener(), FailingListener()
+    store = started(following, lagging, pull_interval=0.05)
+    lagging.fail = True
+    clone = skill_clone(tmp_path, remote)
+    skill_push(clone, {"a.md": "a\n"})
+    pushed = remote_head(remote)
+
+    eventually(lambda: store.seen(following) == pushed, "the timed pull")
+    behind = store.seen(lagging)
+    lagging.fail = False
+    eventually(lambda: store.seen(lagging) == pushed, "the lagging listener's catch-up")
+
+    assert behind is None
+    assert following.calls == [{"a.md"}]
+    assert lagging.calls[-1] == {"a.md"}
 
 
 def test_a_failed_edit_leaves_nothing_behind(started, remote):

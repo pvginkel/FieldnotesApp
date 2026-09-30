@@ -191,9 +191,8 @@ class Observations:
         text = (
             embedded_text(request.area, request.text) if request.area else request.text
         )
-        indexed = (
-            self.store.indexed
-        )  # read first: the match sees this commit or a later one
+        # Read first: the match sees this commit or a later one.
+        indexed = self.store.seen(self.index.update)
         matches = self.matcher.match(text, request.k)
         return MatchReply(
             candidates=[candidate(match) for match in matches], indexed_commit=indexed

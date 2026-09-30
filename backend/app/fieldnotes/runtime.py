@@ -108,8 +108,6 @@ class Runtime:
 
     def _start(self) -> None:
         try:
-            # The triage index first: it reads files alone, so it follows the checkout even while
-            # the models pod the observation index embeds with is down.
             self.store.start(self.triage.update, self.index.update)
         except Exception:
             logger.exception("startup failed: the store could not be cloned or indexed")

@@ -280,8 +280,10 @@ def test_the_queue_follows_pulls_and_writes(start, remote, pull):
 
 
 def test_a_pull_reaches_the_queue_while_the_models_pod_is_down(
-    start, auth, remote, models
+    start, auth, remote, models, pull
 ):
+    """The pull succeeds and the queue's items are current; the observation beside an item lags
+    until the models pod answers, and the next pull catches the observation index up."""
     with start() as api:
         id_ = post(api, auth)
         path = observation_path(id_)
@@ -294,10 +296,39 @@ def test_a_pull_reaches_the_queue_while_the_models_pod_is_down(
         models.fail = True
 
         failed = api.runtime.store.pull().exception()
-        reply = queue(api)
+        lagging = queue(api)
+        models.fail = False
+        pull(api)
+        caught_up = queue(api)
 
-    assert failed is not None
-    assert ids(reply) == [id_]
+    assert failed is None
+    assert ids(lagging) == [id_]
+    assert lagging["observations"][id_]["canonical"] == TEXT
+    assert caught_up["observations"][id_]["canonical"] == "a statement rewritten"
+
+
+def test_a_push_no_webhook_announced_reaches_the_queue_on_the_timed_pull(
+    start, auth, remote, eventually
+):
+    """FR-9: a push whose delivery reached the other pod, or none, is in this pod's indexes
+    within the pull interval, with no write through it."""
+    with start(pull_interval=0.05) as api:
+        id_ = post(api, auth)
+        path = observation_path(id_)
+        rewritten = Document(remote.file(path)).with_fields(
+            canonical="a statement rewritten"
+        )
+        remote.push(
+            {path: rewritten.text, item_path(id_): spelled(item(id_))}, "reconcile"
+        )
+
+        def pulled() -> bool:
+            reply = queue(api)
+            return ids(reply) == [id_] and reply["observations"][id_]["canonical"] == (
+                "a statement rewritten"
+            )
+
+        eventually(pulled, "the timed pull")
 
 
 def test_the_queue_is_not_ready_until_the_store_is(start):
@@ -658,11 +689,25 @@ def test_a_write_the_store_refuses_is_the_reply(start, remote, write):
 
 
 @pytest.mark.parametrize("write", WRITES.values(), ids=list(WRITES))
-def test_a_write_the_index_cannot_follow_is_store_unreachable(
-    start, auth, remote, models, write
+def test_a_write_whose_fetch_fails_is_store_unreachable(start, remote, write):
+    """FR-24: a failed fetch is the reply, and nothing is written."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    with start() as api:
+        before = remote.log()
+        gone = remote.path.rename(remote.tmp_path / "gone.git")
+        response = write(api)
+        gone.rename(remote.path)
+
+    refused(response, 502, "store-unreachable")
+    assert remote.log() == before
+
+
+@pytest.mark.parametrize("write", WRITES.values(), ids=list(WRITES))
+def test_a_write_lands_while_the_index_cannot_follow_the_tip(
+    start, auth, remote, models, pull, write
 ):
-    """A write brings the observation index up to the tip before its edit, and the index embeds a
-    rewritten observation with the models pod: while the pod is down, the write fails (FR-24)."""
+    """FR-24 (FN-17): the models pod is down after a push that rewrote an observation. The write
+    lands and answers success; the observation index stays behind until the models pod answers."""
     with start() as api:
         id_ = post(api, auth)
         path = observation_path(id_)
@@ -673,9 +718,15 @@ def test_a_write_the_index_cannot_follow_is_store_unreachable(
         models.fail = True
         before = remote.log()
         response = write(api)
+        lagging = api.get(f"/api/observations/{id_}", headers=auth()).json()
+        models.fail = False
+        pull(api)
+        caught_up = api.get(f"/api/observations/{id_}", headers=auth()).json()
 
-    refused(response, 502, "store-unreachable")
-    assert remote.log() == before
+    assert response.status_code == 200, response.text
+    assert remote.log()[1:] == before
+    assert lagging["canonical"] == TEXT
+    assert caught_up["canonical"] == "a statement rewritten"
 
 
 # -- the writes' gate (NFR-4) --------------------------------------------------------------------

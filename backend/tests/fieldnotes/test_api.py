@@ -1,17 +1,33 @@
 """The REST endpoints (design, "Services"): post (FR-1..FR-3), react (FR-4), get (FR-5), match,
 neighbors, the health checks, bearer auth (NFR-4) and the problem+json errors."""
 
+from datetime import UTC, datetime
+
 import pytest
 
-from app.fieldnotes.document import Document
+from app.fieldnotes.document import Document, new_document
 from app.fieldnotes.index import observation_path
+from fieldnotes_contracts import Reaction
 
 DUPLICATE = "uv sync installs no workspace members"
+REWRITTEN = "uv sync leaves the workspace members out"
 
 
 def post(api, auth, text=DUPLICATE, area="uv", **fields):
     body = {"area": area, "category": "hint", "text": text, "repo": "pvginkel/Example"}
     return api.post("/api/observations", json=body | fields, headers=auth())
+
+
+def indexed_commit(api, auth):
+    reply = api.post("/api/match", json={"text": DUPLICATE}, headers=auth("skills"))
+    return reply.json()["indexed_commit"]
+
+
+def rewrite(remote, id_, canonical=REWRITTEN):
+    """A reconciler's push rewriting the observation's statement; the new commit."""
+    path = observation_path(id_)
+    rewritten = Document(remote.file(path)).with_fields(canonical=canonical)
+    return remote.push({path: rewritten.text}, "reconciler: rewrite")
 
 
 def test_health_answers_without_a_token(start):
@@ -35,6 +51,28 @@ def test_a_failed_start_keeps_the_store_unready(start, auth):
         }
         problem = post(api, auth).json()
         assert (problem["status"], problem["type"]) == (503, "not-ready")
+
+
+def test_a_start_that_cannot_index_the_checkout_fails(start, remote, models):
+    """A write never waits on the observation index, but the start does: with the models pod
+    down and a text missing from the cache the store never becomes ready, and in production the
+    process then exits to be restarted."""
+    id_ = "01K5H8ZQ3V6D9W2X4Y7B1C0E5F"
+    at = datetime(2026, 9, 19, 10, 0, 0, tzinfo=UTC)
+    reaction = Reaction(
+        at=at, emoji="📝", repo="pvginkel/Example", client="mcp", text=DUPLICATE
+    )
+    document = new_document(
+        id_=id_, area="uv", category="hint", text=DUPLICATE, reaction=reaction
+    )
+    remote.push({observation_path(id_): document.text}, "a skill's post")
+    models.fail = True
+
+    with start(ready=False) as api:
+        api.runtime.wait_started(20)
+        store = api.get("/health/readyz").json()["store"]
+
+    assert store == {"ok": False, "failed": True}
 
 
 @pytest.mark.parametrize(
@@ -304,21 +342,36 @@ def test_match_names_the_commit_it_scored_until_the_pull_takes_a_push_in(
 ):
     # The reconciler's `recall` compares it with its own HEAD: a push the API has not pulled yet
     # was not scored, and the reply says so.
-    def match(api):
-        return api.post(
-            "/api/match", json={"text": DUPLICATE}, headers=auth("skills")
-        ).json()
-
     with start() as api:
         post(api, auth)
         posted = remote.head()
-        before = match(api)["indexed_commit"]
+        before = indexed_commit(api, auth)
         pushed = remote.push({"observations/README.md": "a skill's push\n"})
-        unpulled = match(api)["indexed_commit"]
+        unpulled = indexed_commit(api, auth)
         pull(api)
-        pulled = match(api)["indexed_commit"]
+        pulled = indexed_commit(api, auth)
 
     assert (before, unpulled, pulled) == (posted, posted, pushed)
+
+
+def test_match_names_the_commit_the_index_took_in_while_it_lags(
+    start, auth, remote, models, pull
+):
+    """A pull the observation index could not follow leaves `indexed_commit` at the commit
+    before it, though the checkout and the triage index moved on, so the reconciler's stale check
+    reports stale; the next pull once the models pod answers moves it on."""
+    with start() as api:
+        id_ = post(api, auth).json()["id"]
+        posted = remote.head()
+        pushed = rewrite(remote, id_)
+        models.fail = True
+        pull(api)
+        models.fail = False
+        lagging = indexed_commit(api, auth)
+        pull(api)
+        caught_up = indexed_commit(api, auth)
+
+    assert (lagging, caught_up) == (posted, pushed)
 
 
 def test_neighbors_leave_the_observation_itself_out(start, auth):
@@ -336,12 +389,59 @@ def test_neighbors_leave_the_observation_itself_out(start, auth):
     assert response.json()["neighbors"][0]["match_class"] is None
 
 
-def test_an_unreachable_models_pod_is_a_502(start, auth, models):
+def test_an_unreachable_models_pod_is_a_502_and_writes_nothing(
+    start, auth, remote, models
+):
+    """FR-9: matching is not a write, and a post without `force` matches first."""
     with start() as api:
+        post(api, auth, text="grafana dashboards show the browser timezone")
+        before = remote.log()
         models.fail = True
         response = post(api, auth)
     assert response.status_code == 502
     assert response.json()["type"] == "models-unreachable"
+    assert remote.log() == before
+
+
+def test_a_post_with_nothing_to_match_lands_while_the_models_pod_is_down(
+    start, auth, remote, models, pull
+):
+    """FR-9: an empty store needs no embedding to match, and the write lands though the index
+    cannot take the new observation in; the next pull once the models pod answers does."""
+    with start() as api:
+        models.fail = True
+        response = post(api, auth)
+        id_ = response.json()["id"]
+        lagging = api.get(f"/api/observations/{id_}", headers=auth()).status_code
+        models.fail = False
+        pull(api)
+        caught_up = api.get(f"/api/observations/{id_}", headers=auth()).status_code
+
+    assert response.status_code == 201, response.text
+    assert remote.log() == [f"post {id_} (mcp): uv"]
+    assert (lagging, caught_up) == (404, 200)
+
+
+def test_a_reaction_lands_while_the_index_cannot_follow_the_tip(
+    start, auth, remote, models
+):
+    """FR-4 (FN-17): the models pod is down after a push that rewrote the observation; the
+    reaction lands on the rewritten file and answers success."""
+    with start() as api:
+        id_ = post(api, auth).json()["id"]
+        rewrite(remote, id_)
+        models.fail = True
+        response = api.post(
+            f"/api/observations/{id_}/reactions",
+            json={"emoji": "👎", "text": "Still there.", "repo": "pvginkel/Other"},
+            headers=auth("skills"),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"id": id_, "reactions": ["📝 (1)", "👎 (1)"]}
+    assert remote.log()[0] == f"react {id_} 👎 (skills)"
+    stored = Document(remote.file(observation_path(id_))).observation
+    assert stored.canonical == REWRITTEN
 
 
 def test_a_refused_push_is_a_502_and_writes_nothing(start, auth, remote):

@@ -180,9 +180,46 @@ Pushing is this phase's job. The driver ff-merges locally and never pushes a cod
 before the doc phase that every repo in `state.json`'s `bases` reached `origin`. Push each one,
 honouring any repo named in `plan.md`'s `## Push holds`.
 
+**Every roll is watched from before its push until the old pod is gone.** `fieldnotes-prd` rolls by
+starting the new pod beside the old one (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`), and
+retires the old pod only once the new one is ready. The old pod goes on serving for 15 s after its
+termination starts, then `app` drains and exits; its termination grace is 90 s, so it is gone
+within 90 s. The API, MCP and UI hostnames answer throughout, and the roll check proves it. This
+environment reads prd but cannot roll it (its kubeconfig is read-only outside `development`), so
+the check rides the roll a push causes: this repo's push, whose build pins a new image, and a chart
+push that changes the pod template (`chart/templates/app-deployment.yaml`, or a value or helper it
+reads). A chart push that leaves the pod template alone rolls nothing and has no roll check. Start
+the check in the background, before the push:
+
+```bash
+SECONDS=0
+mkdir -p tmp/roll && rm -f tmp/roll/*
+cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes -o name | cut -d/ -f2 > tmp/roll/old
+probe() { while :; do echo "$(date -u +%T.%3N) $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1") $1"; sleep 0.5; done >> tmp/roll/probes; }
+probe https://fieldnotes-api.home/health/readyz & probe https://fieldnotes-mcp.home/readyz & probe https://fieldnotes/ &
+until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes --no-headers --request-timeout=10s > tmp/roll/now &&
+    sed "s/^/$(date -u +%T) /" tmp/roll/now >> tmp/roll/pods && ! grep -qwFf tmp/roll/old tmp/roll/now; }; do sleep 5; done
+kill $(jobs -p)
+grep -vwFf tmp/roll/old tmp/roll/now | cut -d' ' -f1 > tmp/roll/new
+grep -qwFf tmp/roll/old tmp/roll/now && echo "the old pod outlived the check"
+awk '{ print $3, $2 }' tmp/roll/probes | sort | uniq -c
+```
+
+`tmp/roll/old` names the one pod that runs before the push; two mean a roll is already under way,
+so wait for it to end and start again. The check probes each hostname every half second, with the
+readiness reads rather than a `post`, since what a check writes to prd is real. It lists the pods
+every 5 s, and ends on its own once the pod in `tmp/roll/old` is gone, its termination included, or
+after 30 minutes. It prints how often each hostname gave each status. Every answer is `200`; any
+other status is a finding: a `502` is nothing behind the ingress, a `503` traffic that reached a pod
+while it was not ready, a draining one included, and a `000` no answer at all. `tmp/roll/probes`
+has each answer's time (UTC), and `tmp/roll/pods` the pods' states every 5 s to set beside it. "the
+old pod outlived the check" means the roll did not finish within 30 minutes, which is a finding
+too. The pod the roll produced is named in `tmp/roll/new`, which the pod checks below read. One
+roll at a time: a push waits until the check of the one before it has ended.
+
 A push of this repo builds and deploys. The build writes its image pins into
 `pvginkel/FieldnotesDeploy` as a commit on that repo's `main`, and Argo CD syncs the `fieldnotes-prd`
-Application from there. Follow the build through to the roll:
+Application from there. With the roll check running, follow the build through to the roll:
 
 ```bash
 timeout 1200 track_build.py FieldnotesApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
@@ -196,7 +233,7 @@ hence the `timeout`. Its exit status says where it stopped:
 
 | Exit | Meaning | What to do |
 |------|---------|------------|
-| `0` | The build is green and `fieldnotes-prd` rolled the pin commit. | Go on to the pod checks below. |
+| `0` | The build is green and `fieldnotes-prd` rolled the pin commit. | Wait for the roll check to end, then go on to the pod checks below. The Application is `Healthy` once the old pod's termination has started, not once the pod is gone. |
 | `1` | The build failed; nothing was followed into Argo CD. | `--diagnose` printed the console tail; the full log's path is in the summary. A finding. |
 | `3` | An operational problem: Jenkins or Kubernetes auth, a build that never appeared, a failed fetch. | Fix the cause and run it again; the build is not re-run. |
 | `4` | The build is green, but the environment has no clone of the deploy repo it pushed to. | The summary gives the `git clone` line. This environment declares FieldnotesDeploy, so this is an environment fault, not a slice finding. |
@@ -208,12 +245,13 @@ The second job, `AaC/FieldnotesApp` (`Jenkinsfile.architecture`), validates and 
 `docs/architecture/*.yaml`; follow it the same way when the slice touched the artifact (it deploys
 nothing, so it ends at the build).
 
-**A rolled, `Healthy` Application is not proof of a good deploy on its own.** Look at the pod,
-read-only, through the `iac` tool container:
+**A rolled, `Healthy` Application is not proof of a good deploy on its own.** Once the roll check
+has ended, look at the pod the roll produced, read-only, through the `iac` tool container:
 
 ```bash
-cexec iac kubectl -n fieldnotes-prd get pods
-cexec iac kubectl -n fieldnotes-prd get pod -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'
+cexec iac kubectl -n fieldnotes-prd get pod $(cat tmp/roll/new)
+cexec iac kubectl -n fieldnotes-prd get pod $(cat tmp/roll/new) \
+  -o jsonpath='{.status.containerStatuses[?(@.name=="app")].imageID}{"\n"}'
 curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
   http://registry:5000/v2/fieldnotes/manifests/<build> | grep -i docker-content-digest
 curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-api.home/health/readyz
@@ -221,16 +259,15 @@ curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes-mcp.home/readyz
 curl -s -o /dev/null -w '%{http_code}\n' https://fieldnotes/
 ```
 
-The pod is `5/5 Running`, its image digest is the build's, and all three answer `200`. The
-deployment is `Recreate`, so the service is away for about a minute during the roll: a `502` then
-is the roll, not a finding. The API's log is
-`cexec iac kubectl -n fieldnotes-prd logs deploy/fieldnotes -c app`.
+The pod is `5/5 Running`, its `app` image digest is the build's, and all three answer `200`. The
+API's log is that pod's: `cexec iac kubectl -n fieldnotes-prd logs $(cat tmp/roll/new) -c app`.
 
 A slice that changes the chart pushes `pvginkel/FieldnotesDeploy` as well. The build's pin commits
 land on that repo's `main` too, so fetch and rebase the chart commit onto `origin/main` before
-pushing it; a rejected push means a pin commit landed first, so rebase again, never force. The chart push rolls the pod
-on its own, and no build follows it, so confirm the roll by hand: the Application's revision is the
-chart commit (or a later pin commit), `Synced`, `Healthy`:
+pushing it; a rejected push means a pin commit landed first, so rebase again, never force. A chart
+push that changes the pod template rolls the pod on its own, and no build follows it, so start the
+roll check before it and confirm the roll by hand: the Application's revision is the chart commit
+(or a later pin commit), `Synced`, `Healthy`, and the roll check has ended:
 
 ```bash
 git -C ../FieldnotesDeploy fetch -q && git -C ../FieldnotesDeploy log -1 --format='%H %s' origin/main
@@ -238,8 +275,10 @@ cexec iac kubectl -n argocd-prd get application fieldnotes-prd \
   -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
 ```
 
-Then the pod checks above. Push the chart first when the new image needs what the chart adds, the image first
-when the chart needs the new image, and either when neither does. A slice that changes only the
+Then the pod checks above; the image digest is the one already pinned, and a push that rolled
+nothing has no new pod, so its check is the three hostnames. Push the chart first when the new image
+needs what the chart adds, the image first when the chart needs the new image, and either when
+neither does. A slice that changes only the
 store's skills (`pvginkel/Fieldnotes`) deploys nothing; the next reconciler run is what uses it.
 
 ## 4. The deployed checks

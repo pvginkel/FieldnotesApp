@@ -7,10 +7,18 @@ overlap, the models pod, and the pipeline that turns a query into ranked candida
 
 The index holds every observation of the checkout, parsed, with the vector of its embedded text
 (`area: canonical`, see [observation-file.md](observation-file.md)) and its terms in a BM25 index.
-On start it reads every file; after that, after every pull or write, it re-reads only the paths that
-changed since the commit it last took in. An update fetches all it needs first and then applies at
-once, so a match never sees half an update. If embedding fails during an update, nothing is applied
-and the next pull or write reports the same paths again.
+On start it reads every file. After that every job of the pod's store queue, a write or a pull (the
+GitHub webhook's, or the one the queue makes on its own; see [webhooks.md](webhooks.md)), hands it
+the paths that changed since the commit it last took in, and it re-reads only those. An update
+fetches all it needs first and then applies at once, so a match never sees half an update.
+
+If embedding fails during an update, the models pod not answering, nothing is applied: the failure
+is logged, the index stays at its commit, and the job goes on, so a write still lands. Every later
+job hands it those paths again, with whatever changed since, and once the models pod answers the
+index catches up with no one acting. Meanwhile a `get`, a match and the triage queue's
+`observations` see each observation as it stood at that commit, a `get` or a reaction finds no
+observation posted or pushed since, and `/match`'s `indexed_commit` names that commit. At start the
+same failure fails the start (see [rest-api.md](rest-api.md#startup)).
 
 ## The embedding cache
 
@@ -18,7 +26,9 @@ A directory at `FIELDNOTES_CACHE_DIR`, one file per vector at
 `<cache>/<FIELDNOTES_EMBED_MODEL>/<sha256 of the embedded text>`, holding the float32 vector's raw
 bytes, written aside and renamed into place. What the cache lacks is embedded and written. It is
 content-addressed by model and text, so a reaction costs no embedding, a rewritten canonical costs
-one, and deleting the cache costs a full re-embed and nothing else. The server alone writes it.
+one, and deleting the cache costs a full re-embed and nothing else. Only the API writes it, and
+pods may share one directory, as production's do: two that embed one text write the same bytes
+under one name, and the rename makes each write whole.
 
 ## The lexical overlap
 

@@ -77,9 +77,12 @@ unknown fields are refused.
 - **Get** (FR-5): the full observation from the index: every frontmatter field plus `reactions` and
   `comments`.
 - **Match**: the post's pipeline, writing nothing. `indexed_commit` is the store commit the index
-  had taken in when the match ran (null while the store has no commit): the match reflects that
-  commit or a later one. A skill that pushed compares it with its own `HEAD` to tell whether its
-  push was scored yet; the index takes a push in when the GitHub webhook's pull runs.
+  had taken in when the match ran (null until it has taken one in): the match reflects that commit
+  or a later one. A skill that pushed compares it with its own `HEAD` to tell whether its push was
+  scored yet. A pod's index takes a push in with the GitHub webhook's pull when the delivery reached
+  that pod, and otherwise with the pod's next write or timed pull, within about a minute (see
+  [webhooks.md](webhooks.md)); and only once the models pod answers (see
+  [match-pipeline.md](match-pipeline.md#the-index)).
 - **Neighbors**: the observations nearest this one by the pipeline's score, with no threshold or gap
   cut;
   `match_class` is null for a neighbour below both thresholds; the observation itself is left out.
@@ -90,9 +93,11 @@ unknown fields are refused.
   `triage/` (not `done/`, not `archive/`) whose ruling is absent or not submitted, every field as
   the item's file holds it. Returned items (a `question`, and not submitted since) come first, then
   the rest, each group by `written`, oldest first. `observations` maps each item's observation id to
-  its fields as they stand now: the ten fields of an item's `snapshot`, spelled as the snapshot
-  spells them, so an observation unchanged since its item was written equals the snapshot. It is
-  null for an observation the store no longer has (merged away or deleted). The items come from the
+  its fields as the observation index holds them, which is as they stand now unless the index lags
+  (see [match-pipeline.md](match-pipeline.md#the-index)): the ten fields of an item's `snapshot`,
+  spelled as the snapshot spells them, so an observation unchanged since its item was written equals
+  the snapshot. It is null for an observation the index does not hold (merged away or deleted, or
+  not taken in yet). The items come from the
   triage index, which reads `triage/*.json` at startup and after every pull and write. An item file
   that is not JSON, breaks the store's item rules (the app's own copy of the store's check) or does
   not parse is logged and left out.
@@ -172,11 +177,14 @@ written), `status`, `outcome`, `pointer`, `card_updated`.
 
 ## Writes
 
-Every write goes through one queue, is a commit on the store's `main`, and is pushed before the
-reply, so a 2xx means it is on the remote. Commit messages: `post <id> (<client>): <area>`,
+Every write goes through the write queue of the pod that takes it, is a commit on the store's
+`main`, and is pushed before the reply, so a 2xx means it is on the remote, whether or not the
+observation index has taken it in: a write does not wait on the models pod (see
+[match-pipeline.md](match-pipeline.md#the-index)). Commit messages: `post <id> (<client>): <area>`,
 `react <id> <emoji> (<client>)`, `board-sync <id> <card>`, and the operator's `rule <id> <verb>
 (operator)`, `unrule <id> (operator)`, `submit <n> (operator)`. A write fetches and resets to the
-remote first; a push rejected because a skill pushed in between makes the write start over on the
+remote first, and a fetch that fails fails the write; a push rejected because another writer pushed
+in between (a skill, or the other pod while a rollout runs two) makes the write start over on the
 new tip and apply its edit again; a write that fails leaves nothing behind that a later push could
 carry. A write that changes nothing commits nothing. The operator's writes write an item back as
 it was read, two-space indented, UTF-8 unescaped, with a trailing newline, and change nothing but
@@ -198,11 +206,13 @@ token included, or a controller that cannot be reached is logged at ERROR and no
 KubeCoder's **Run now** on the timer is the retry. Each call is counted in
 `fieldnotes_actioner_starts_total`.
 
-At most one start is pending, from the submit that asked for it until the run starts, a call fails
-or nothing waits; a submit meanwhile starts nothing, since the pending start covers it. The pending
-start lives in the process alone: shutdown cancels a retry that waits, and a restarted API resumes
-none, so the items wait for the next submit or **Run now**. Without the three settings a submit
-still writes, and the start is skipped with a warning in the log.
+At most one start is pending in a pod, from the submit that asked for it until the run starts, a
+call fails or nothing waits; a submit through that pod meanwhile starts nothing, since the pending
+start covers it. While a rollout runs two pods each may hold one, and the controller's refusal while
+a run is in flight still makes it one run. The pending start lives in the process alone: shutdown
+cancels a retry that waits, a retired pod's included, and a pod that starts resumes none, so the
+items wait for the next submit or **Run now**. Without the three settings a submit still writes,
+and the start is skipped with a warning in the log.
 
 ## Errors
 
@@ -217,8 +227,8 @@ Every non-2xx response is RFC 9457 `application/problem+json`: `type` (a slug fr
 | `conflict` | 409 | the observation's file no longer parses (the detail names the fault); a board sync of an observation with no card; a card YouTrack does not have; a ruling or take-back on a triage item that is submitted, rewritten since the page loaded, or not valid |
 | `validation-error` | 422 | a request that does not validate, a malformed id; a `no` or `later` ruling without a note |
 | `not-ready` | 503 | the store is still being cloned or the index built |
-| `models-unreachable` | 502 | the models pod did not answer |
-| `store-unreachable` | 502 | the store's remote could not be reached or refused the push, or, for a triage write, the models pod could not index the store's tip; nothing was written |
+| `models-unreachable` | 502 | the models pod did not answer the embedding a match needs: a post without `force`, match and neighbors |
+| `store-unreachable` | 502 | the store's remote could not be reached, a write's fetch included, or refused the push; nothing was written |
 | `board-unreachable` | 502, 503 | 502: YouTrack could not be reached or refused the read; 503: no board is configured |
 | `internal` | 500 | anything unmapped, in fixed words, with the traceback in the log |
 

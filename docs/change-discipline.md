@@ -55,9 +55,9 @@ parameter.
 ## The store is git, and git is the record
 
 One markdown file per observation; every server write is a commit on `main`; the embedding cache is a
-content-addressed directory on the API's volume that the server alone writes. There is no database,
-and no state that matters lives only in the API's memory or on its volume: the index is rebuilt from
-the repository, and deleting the cache must cost a reindex and nothing else. The file format (FR-8) is a storage layout that
+content-addressed directory, on a volume the API's pods share, that only the API writes. There is
+no database, and no state that matters lives only in the API's memory or on its disks: the index is
+rebuilt from the repository, and deleting the cache must cost a reindex and nothing else. The file format (FR-8) is a storage layout that
 skills and people edit by hand, so it changes as deliberately as a surface does.
 
 Merged-away files are removed and history is the record. The same holds for this repo.

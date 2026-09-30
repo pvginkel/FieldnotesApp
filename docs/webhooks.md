@@ -18,12 +18,15 @@ nothing is pulled before the answer, because the relay gives each receiver four 
 every other event, branch and repository answer 200 `{"action": "ignored"}`.
 
 A bad or missing signature is a 401, and nothing is pulled. The secret and the repo are set together
-or not at all; without them every delivery is refused. The API's own pushes come back as deliveries
-and cost one fetch that finds nothing new.
+or not at all; without them every delivery is refused. The relay forwards to the API in its own pod,
+so a delivery reaches one pod. The API's own pushes come back as deliveries and cost a fetch.
 
-The pull runs in the same queue as the writes described in [rest-api.md](rest-api.md) and brings the
-index up to the new commit; see [match-pipeline.md](match-pipeline.md) for how the index re-reads
-only what changed, re-embedding only a changed canonical.
+The pull runs in the same queue as the pod's writes (see [rest-api.md](rest-api.md#writes)) and
+brings the indexes up to the new commit; see [match-pipeline.md](match-pipeline.md) for how the
+index re-reads only what changed, re-embedding only a changed canonical, and how it catches up after
+the models pod did not answer. The queue also pulls on its own once it has had no job for 60
+seconds, so a pod takes in within about a minute a push whose delivery reached another pod, or never
+came.
 
 ## YouTrack: `POST /api/hooks/youtrack`
 
@@ -46,8 +49,8 @@ YouTrack sends a delivery before it commits the change the delivery is about, so
 is the card as it was one event earlier: seen live on 2026-09-21, where the sync a comment's delivery
 queued read the card within 600 ms and did not find the comment, and the next event's sync recorded
 it. A delivery that arrives while an earlier one for the same observation is still waiting restarts
-the wait, so a burst of events costs one read. The wait is not spent in the write queue. A change the
-wait still misses is picked up by the reconciler's board scan.
+the wait, so a burst of events that reaches one pod costs one read. The wait is not spent in the
+write queue. A change the wait still misses is picked up by the reconciler's board scan.
 
 A payload with no string `id`, or that is not JSON, is ignored. A token that does not verify is a
 401; without the token configured every delivery is refused; before the index is built the answer

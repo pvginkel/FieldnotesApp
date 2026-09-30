@@ -37,11 +37,11 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
   `scripts/dev-instance-setup.sh`, the root's `setup`: an environment sets itself up from an empty
   checkout, so nothing gitignored is made by hand.
 - **`backend/`**: the Flask backend, a uv workspace, and the only component with logic. The
-  Fieldnotes domain is `app/fieldnotes/` (the git checkout and its write queue, the file model, the
-  in-memory index and its embedding cache, the match pipeline, the GitHub and YouTrack webhooks,
-  the triage index, the operator's rulings and the actioner start), its surfaces under `/api`
-  `app/api/fieldnotes.py`, the agents', and `app/api/triage.py`, the triage UI's, and its wiring
-  `app/services/fieldnotes_service.py`.
+  Fieldnotes domain is `app/fieldnotes/` (each pod's git checkout, its write queue and timed pull,
+  the file model, the in-memory index and its embedding cache, the match pipeline, the GitHub and
+  YouTrack webhooks, the triage index, the operator's rulings and the actioner start), its surfaces
+  under `/api` `app/api/fieldnotes.py`, the agents', and `app/api/triage.py`, the triage UI's, and
+  its wiring `app/services/fieldnotes_service.py`.
   The workspace members: **`packages/fieldnotes-contracts/`**, the pydantic wire models the API and
   the MCP server share; **`mcp-server/`**, `fieldnotes-mcp`, the thin MCP server with exactly three
   tools, `post`, `react` and `get`, mapped 1:1 onto the API, shipped as the image's second entry
@@ -55,8 +55,9 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
   `tests/triage/`, lay out the worker backend's store with invented items through
   `/api/testing/store` (`tests/support/triage-store.ts`).
 
-The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod, next
-to a `webhook-relay` container that is the only internet-facing part.
+The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod (two
+while a rollout overlaps them), next to a `webhook-relay` container that is the only
+internet-facing part.
 
 Other repos the work touches:
 

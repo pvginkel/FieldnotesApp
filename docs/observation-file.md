@@ -116,5 +116,6 @@ Only `area + ": " + canonical` is embedded and matched. Reactions, comments and 
 never embedded, so they never change what matches; a rewritten canonical does. See
 [match-pipeline.md](match-pipeline.md) for how that text is used.
 
-Skills edit these files directly and push; the API takes their edits in through the
-[GitHub webhook](webhooks.md), or at the latest with its next write, which always fetches first.
+Skills edit these files directly and push; the API takes their edits in within about a minute:
+through the [GitHub webhook](webhooks.md), with its next write, which always fetches first, or with
+the pull it makes on its own after a minute with no job.

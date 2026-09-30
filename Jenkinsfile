@@ -2,6 +2,15 @@ import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
+// Both of the job's properties, declared here rather than in its UI configuration. A `properties`
+// step replaces the whole set, so a bare disableConcurrentBuilds() would drop the push trigger.
+// The lock is what cicd.writeVersionPins() below asks of its caller: two builds pushing pins at
+// once lose the race on the second push.
+properties([
+    disableConcurrentBuilds(abortPrevious: true),
+    pipelineTriggers([githubPush()])
+])
+
 podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
     containerTemplates.k8s('k8s')
 ]) {

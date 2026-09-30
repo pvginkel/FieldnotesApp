@@ -137,10 +137,9 @@ export function TriagePage() {
         skipped={triage.skipped}
         ruledCount={triage.ruledCount}
         showSubmit={view === 'card'}
-        submitting={triage.submitting}
         prefs={triage.prefs}
         onGoto={triage.go}
-        onSubmit={() => void triage.submit()}
+        onFinish={() => triage.go(triage.order.length)}
         onKeys={() => setKeysOpen(true)}
         onPref={triage.setPref}
       />

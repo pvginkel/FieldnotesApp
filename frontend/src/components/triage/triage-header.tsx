@@ -10,10 +10,9 @@ interface TriageHeaderProps {
   skipped: Record<string, string>;
   ruledCount: number;
   showSubmit: boolean;
-  submitting: boolean;
   prefs: Prefs;
   onGoto: (idx: number) => void;
-  onSubmit: () => void;
+  onFinish: () => void;
   onKeys: () => void;
   onPref: <K extends keyof Prefs>(key: K, value: Prefs[K]) => void;
 }
@@ -47,15 +46,15 @@ export function TriageHeader(props: TriageHeaderProps) {
           </div>
         )}
       </div>
-      {/* The finish card has its own Submit, and the empty page has nothing to submit: the
-          header's is hidden on both. */}
+      {/* Goes to the finish card, whose Submit is the one that sends: the header's is hidden
+          there, and on the empty page, which has nothing to submit. */}
       <button
         className="btn btn-primary"
         id="submit-top"
         type="button"
         hidden={!props.showSubmit}
-        disabled={props.ruledCount === 0 || props.submitting}
-        onClick={props.onSubmit}
+        disabled={props.ruledCount === 0}
+        onClick={props.onFinish}
         data-testid="triage.header.submit"
       >
         Submit

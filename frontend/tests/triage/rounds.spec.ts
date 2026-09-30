@@ -63,7 +63,7 @@ test.describe('the finish card', () => {
     expect(await store.ruling(ids[2])).toBeNull();
   });
 
-  test("the header's Submit sends from a card", async ({ store, triage }) => {
+  test("the header's Submit goes to the finish card from a card, and sends nothing", async ({ store, triage }) => {
     const { observations, items, ids } = stack(2);
     await store.layOut({ observations, items });
     await triage.open();
@@ -73,9 +73,14 @@ test.describe('the finish card', () => {
     await triage.expectCard(ids[1]);
     await triage.headerSubmit.click();
 
+    await expect(triage.finish).toContainText('Ready to submit');
+    await expect(triage.finishSubmit).toHaveText('Submit 1');
+    await expect(triage.headerSubmit).toBeHidden();
+    await expect.poll(() => store.ruling(ids[0])).toMatchObject({ verb: 'yes', submitted: null });
+
+    await triage.finishSubmit.click();
     await expect(triage.toasts).toContainText('1 ruling submitted.');
     await triage.expectCard(ids[1]);
-    await triage.expectSegments(['open']);
     await expect.poll(async () => (await store.ruling(ids[0]))?.submitted).toBeTruthy();
   });
 });

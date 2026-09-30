@@ -120,7 +120,7 @@ test.describe('a returned item', () => {
 });
 
 test.describe('an observation changed since', () => {
-  test('the card flags what changed, and the store section says it too', async ({ store, triage }) => {
+  test('the card flags what changed, and the store details on hover over its id say it too', async ({ store, triage }) => {
     const was = observation({ canonical: 'Widget builds start cold.' });
     const it = item(was);
     const now = observation({
@@ -131,8 +131,7 @@ test.describe('an observation changed since', () => {
       last_seen: minutesAgo(5),
       reactions: [...was.reactions, { at: minutesAgo(5), emoji: '👍', repo: 'acme/gadgets', session: null, client: 'mcp', text: null }],
     });
-    // A long card, so the store section starts out of view.
-    await store.layOut({ observations: [now], items: [{ ...it, evidence: Array(40).fill('A line of evidence.').join('\n\n') }] });
+    await store.layOut({ observations: [now], items: [it] });
     await triage.open();
 
     const chip = triage.card.getByTestId('triage.card.changed');
@@ -141,14 +140,20 @@ test.describe('an observation changed since', () => {
     await expect(chip).toContainText('reported again');
     await expect(chip).toContainText('statement rewritten');
 
-    const section = triage.card.getByTestId('triage.card.store');
-    await expect(section.locator('.changes')).toContainText('Changed since: carded FN-1');
-    await expect(section).toContainText('Widget builds start cold on every runner.');
-    await expect(section.getByRole('link', { name: 'FN-1' })).toHaveAttribute('href', /\/issue\/FN-1$/);
+    await expect(triage.store).toHaveCount(0);
+    await triage.cardId.hover();
+    await expect(triage.store.locator('.changes')).toContainText('Changed since: carded FN-1');
+    await expect(triage.store).toContainText('Widget builds start cold on every runner.');
+    await expect(triage.store.getByRole('link', { name: 'FN-1' })).toHaveAttribute('href', /\/issue\/FN-1$/);
 
-    await expect(section).not.toBeInViewport();
-    await chip.click();
-    await expect(section).toBeInViewport();
+    // The tooltip stays while the pointer moves into it, so its links can be followed.
+    await triage.store.hover();
+    await expect(triage.store).toBeVisible();
+    await triage.headline.hover();
+    await expect(triage.store).toHaveCount(0);
+
+    await chip.hover();
+    await expect(triage.store).toContainText('Widget builds start cold on every runner.');
   });
 
   test('an observation gone from the store is flagged as merged away or retired', async ({ store, triage }) => {
@@ -159,7 +164,8 @@ test.describe('an observation changed since', () => {
     await expect(triage.card.getByTestId('triage.card.changed')).toContainText(
       'merged away or retired since the item was written',
     );
-    await expect(triage.card).toContainText('The observation is no longer in the store');
+    await triage.cardId.hover();
+    await expect(triage.store).toContainText('The observation is no longer in the store');
   });
 });
 

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Tooltip } from '@/components/primitives/tooltip';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
@@ -24,22 +25,24 @@ export function TriageCard({ item, live }: TriageCardProps) {
   const snapshot = item.snapshot;
   const repos = snapshot.repos;
   const changes = changesOf(item, live);
+  // What the store says now shows on hover over the observation's id, and over the changed flag.
+  const store = <StoreDetails item={item} live={live} changes={changes} />;
 
   return (
     <div className="column">
       <article className="card" data-testid="triage.card" data-observation={item.observation}>
         <div className="meta">
-          <span className="id mono">{item.observation}</span>
+          <div className="id-anchor">
+            <Tooltip content={store} placement="bottom">
+              <span className="id mono" data-testid="triage.card.id">{item.observation}</span>
+            </Tooltip>
+          </div>
           {changes.length > 0 && (
-            <button
-              type="button"
-              className="link changed-chip"
-              title="What the store says now"
-              onClick={() => document.getElementById('store')?.scrollIntoView({ behavior: 'smooth' })}
-              data-testid="triage.card.changed"
-            >
-              changed since: {changes.join('; ')}
-            </button>
+            <Tooltip content={store} placement="bottom">
+              <span className="changed-chip" data-testid="triage.card.changed">
+                changed since: {changes.join('; ')}
+              </span>
+            </Tooltip>
           )}
           <span className={`badge ${snapshot.category}`}>{snapshot.category}</span>
           <span>{snapshot.status}</span><span className="sep">·</span>
@@ -86,7 +89,6 @@ export function TriageCard({ item, live }: TriageCardProps) {
         )}
         <TextSection title="Evidence" body={item.evidence} />
         <Reports item={item} />
-        <StoreSection item={item} live={live} changes={changes} />
       </article>
     </div>
   );
@@ -118,47 +120,43 @@ function Reports({ item }: { item: Item }) {
   );
 }
 
-function StoreSection({ item, live, changes }: { item: Item; live: Snapshot | null | undefined; changes: string[] }) {
+function StoreDetails({ item, live, changes }: { item: Item; live: Snapshot | null | undefined; changes: string[] }) {
   if (!live) {
     return (
-      <section className="section" id="store">
-        <SectionHead title="The store says" />
-        <div className="store">
-          <div className="gone">
-            The observation is no longer in the store: merged into another or retired since this
-            item was written.
-          </div>
+      <div className="store" data-testid="triage.card.store">
+        <div className="store-head">The store says</div>
+        <div className="gone">
+          The observation is no longer in the store: merged into another or retired since this
+          item was written.
         </div>
-      </section>
+      </div>
     );
   }
   const row = (label: string, value: ReactNode) =>
     value ? <><dt>{label}</dt><dd>{value}</dd></> : null;
   return (
-    <section className="section" id="store" data-testid="triage.card.store">
-      <SectionHead title="The store says" />
-      <div className="store">
-        {changes.length > 0 && <div className="changes">Changed since: {changes.join('; ')}</div>}
-        <Prose source={live.canonical} className="canonical" />
-        <dl>
-          {row('status', live.status)}
-          {row('category', live.category)}
-          {row('area', live.area)}
-          {row('repos', live.repos.map((name, i) => <span key={name}>{i > 0 && ', '}<Repo name={name} /></span>))}
-          {row('card', live.card
-            ? <a href={`${YOUTRACK}${live.card}`} target="_blank" rel="noreferrer">{live.card}</a>
-            : <span className="count">none</span>)}
-          {row('outcome', live.outcome)}
-          {row('reason', live.reason ? <Inline text={live.reason} /> : null)}
-          {row('first seen', <Time iso={live.created} />)}
-          {row('last seen', <Time iso={live.last_seen} />)}
-          {row('file', (
-            <a href={`${GITHUB}${item.observation}.md`} target="_blank" rel="noreferrer">
-              observations/{item.observation}.md
-            </a>
-          ))}
-        </dl>
-      </div>
-    </section>
+    <div className="store" data-testid="triage.card.store">
+      <div className="store-head">The store says</div>
+      {changes.length > 0 && <div className="changes">Changed since: {changes.join('; ')}</div>}
+      <Prose source={live.canonical} className="canonical" />
+      <dl>
+        {row('status', live.status)}
+        {row('category', live.category)}
+        {row('area', live.area)}
+        {row('repos', live.repos.map((name, i) => <span key={name}>{i > 0 && ', '}<Repo name={name} /></span>))}
+        {row('card', live.card
+          ? <a href={`${YOUTRACK}${live.card}`} target="_blank" rel="noreferrer">{live.card}</a>
+          : <span className="count">none</span>)}
+        {row('outcome', live.outcome)}
+        {row('reason', live.reason ? <Inline text={live.reason} /> : null)}
+        {row('first seen', <Time iso={live.created} />)}
+        {row('last seen', <Time iso={live.last_seen} />)}
+        {row('file', (
+          <a href={`${GITHUB}${item.observation}.md`} target="_blank" rel="noreferrer">
+            observations/{item.observation}.md
+          </a>
+        ))}
+      </dl>
+    </div>
   );
 }

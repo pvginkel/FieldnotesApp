@@ -5,6 +5,8 @@ import type { Verb } from '../triage-store';
 export class TriagePage {
   readonly card: Locator;
   readonly headline: Locator;
+  readonly cardId: Locator;
+  readonly store: Locator;
   readonly pane: Locator;
   readonly note: Locator;
   readonly noteClear: Locator;
@@ -27,6 +29,9 @@ export class TriagePage {
   ) {
     this.card = page.getByTestId('triage.card');
     this.headline = this.card.locator('.headline');
+    this.cardId = page.getByTestId('triage.card.id');
+    // What the store says now: a tooltip over the card's id, rendered outside the card.
+    this.store = page.getByTestId('triage.card.store');
     this.pane = page.getByTestId('triage.pane');
     this.note = page.getByTestId('triage.note');
     this.noteClear = page.getByTestId('triage.note.clear');

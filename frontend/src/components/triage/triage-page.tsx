@@ -21,8 +21,8 @@ export function TriagePage() {
   const queue = triage.queue;
   const pattern = useMemo(() => prosePattern(queue ? ownersOf(queue) : []), [queue]);
 
-  // The card starts below the pane, which lies over the scrolling area, and a jump inside the
-  // card (the changed flag to the store section) lands below it rather than behind it.
+  // The card starts below the pane, which lies over the scrolling area, and whatever scrolls into
+  // view inside the card lands below it rather than behind it.
   useLayoutEffect(() => {
     const pane = paneRef.current;
     const main = mainRef.current;

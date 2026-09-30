@@ -48,7 +48,11 @@ class BearerAuthMiddleware:
         return presented is not None and hmac.compare_digest(presented, self._token)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"] in self._public or self._authorized(scope):
+        if (
+            scope["type"] != "http"
+            or scope["path"] in self._public
+            or self._authorized(scope)
+        ):
             await self._app(scope, receive, send)
             return
         await send(

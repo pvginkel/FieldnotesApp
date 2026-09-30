@@ -78,7 +78,9 @@ class Answers:
 
     def mates(self, i: int) -> set[int]:
         cluster = self.clusters[i]
-        return {j for j in range(i) if cluster is not None and self.clusters[j] == cluster}
+        return {
+            j for j in range(i) if cluster is not None and self.clusters[j] == cluster
+        }
 
     @cached_property
     def duplicates(self) -> dict[int, float]:
@@ -118,13 +120,18 @@ class Answers:
 
     def found(self, threshold: float) -> set[int]:
         return {
-            i for i, score in self.duplicates.items() if score >= threshold and np.isfinite(score)
+            i
+            for i, score in self.duplicates.items()
+            if score >= threshold and np.isfinite(score)
         }
 
     def returned(self, threshold: float) -> list[tuple[int, int]]:
         """Every (post, returned row) at the threshold."""
         return [
-            (i, j) for i, top in enumerate(self.top) for j in top if self.scores[i, j] >= threshold
+            (i, j)
+            for i, top in enumerate(self.top)
+            for j in top
+            if self.scores[i, j] >= threshold
         ]
 
 
@@ -136,7 +143,11 @@ def pair_aucs(
     for pair in pairs:
         i, j = sorted((order[pair.a], order[pair.b]), reverse=True)
         by_label[pair.label].append(float(scores[i, j]))
-    same, related, unrelated = by_label["same"], by_label["related"], by_label["unrelated"]
+    same, related, unrelated = (
+        by_label["same"],
+        by_label["related"],
+        by_label["unrelated"],
+    )
     return auc(same, related), auc(same, unrelated), auc(same, related + unrelated)
 
 
@@ -145,7 +156,9 @@ def _timing(work: Path, model: str) -> dict[str, Any]:
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def bench(dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | None = None) -> str:
+def bench(
+    dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | None = None
+) -> str:
     rows = load_rows(dataset)
     order = {row.id: n for n, row in enumerate(rows)}
     membership = load_clusters(dataset)
@@ -175,7 +188,13 @@ def bench(dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | No
     if any(timings):
         lines += ["## Models", ""]
         lines += table(
-            ["model", "parameters (M)", "dimensions", "one text p50 (ms)", "all texts (s)"],
+            [
+                "model",
+                "parameters (M)",
+                "dimensions",
+                "one text p50 (ms)",
+                "all texts (s)",
+            ],
             [
                 [
                     model,
@@ -231,7 +250,9 @@ def bench(dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | No
         for i, j in answers.returned(answers.threshold(FALSE_ALARM_TARGETS[-1])):
             pair = frozenset((rows[i].id, rows[j].id))
             if j not in answers.mates(i) and pair not in labeled:
-                entry = wanted.setdefault(pair, {"a": rows[j].id, "b": rows[i].id, "scorers": []})
+                entry = wanted.setdefault(
+                    pair, {"a": rows[j].id, "b": rows[i].id, "scorers": []}
+                )
                 entry["scorers"].append(f"{model} {name}".strip())
     lines += table(
         [
@@ -249,7 +270,9 @@ def bench(dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | No
     )
 
     if unlabeled is not None:
-        unlabeled.write_text("".join(json.dumps(entry) + "\n" for entry in wanted.values()))
+        unlabeled.write_text(
+            "".join(json.dumps(entry) + "\n" for entry in wanted.values())
+        )
         lines += [
             f"{len(wanted)} returned pairs at {FALSE_ALARM_TARGETS[-1]:.0%} carry no label and "
             f"are no cluster-mates: `{unlabeled.name}`.",
@@ -259,13 +282,21 @@ def bench(dataset: Path, work: Path, models: Sequence[str], unlabeled: Path | No
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Compare scorers for post on the dataset.")
-    parser.add_argument("--dataset", type=Path, required=True, help="the dataset directory")
-    parser.add_argument("--work", type=Path, required=True, help="holds cache/<model>/ vectors")
+    parser = argparse.ArgumentParser(
+        description="Compare scorers for post on the dataset."
+    )
+    parser.add_argument(
+        "--dataset", type=Path, required=True, help="the dataset directory"
+    )
+    parser.add_argument(
+        "--work", type=Path, required=True, help="holds cache/<model>/ vectors"
+    )
     parser.add_argument(
         "--unlabeled", type=Path, help="write the returned pairs that carry no label"
     )
-    parser.add_argument("models", nargs="*", metavar="MODEL", help="embedding models, cached")
+    parser.add_argument(
+        "models", nargs="*", metavar="MODEL", help="embedding models, cached"
+    )
     args = parser.parse_args(argv)
     print(bench(args.dataset, args.work, args.models, args.unlabeled))
     return 0

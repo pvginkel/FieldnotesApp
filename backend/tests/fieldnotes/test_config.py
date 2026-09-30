@@ -59,7 +59,12 @@ def test_match_settings_are_read():
         }
     )
     match = settings.match
-    assert (match.likely, match.related, match.gap, match.lexical_weight) == (1.2, 0.9, 0.1, 0.5)
+    assert (match.likely, match.related, match.gap, match.lexical_weight) == (
+        1.2,
+        0.9,
+        0.1,
+        0.5,
+    )
 
 
 @pytest.mark.parametrize(
@@ -69,12 +74,21 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_API_PORT": "http"}, "FIELDNOTES_API_PORT is not a number"),
         ({"FIELDNOTES_MATCH_LEXICAL_WEIGHT": "-1"}, "FIELDNOTES_MATCH_LEXICAL_WEIGHT"),
         ({"FIELDNOTES_MATCH_LIKELY": "1.3"}, "likely <= 1.25"),
-        ({"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"}, "related <="),
-        ({"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"}, "set together or not at all"),
+        (
+            {"FIELDNOTES_MATCH_RELATED": "0.9", "FIELDNOTES_MATCH_LIKELY": "0.8"},
+            "related <=",
+        ),
+        (
+            {"FIELDNOTES_GITHUB_REPO": "pvginkel/Fieldnotes"},
+            "set together or not at all",
+        ),
         ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),
         ({"FIELDNOTES_KUBECODER_URL": "http://kc"}, "set together or not at all"),
         (
-            {"FIELDNOTES_KUBECODER_TOKEN": "t", "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9"},
+            {
+                "FIELDNOTES_KUBECODER_TOKEN": "t",
+                "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9",
+            },
             "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN and "
             "FIELDNOTES_KUBECODER_ACTIONER_TIMER are set together or not at all",
         ),

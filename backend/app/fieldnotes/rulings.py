@@ -44,7 +44,10 @@ def _no_item(id_: str) -> ProblemException:
 
 def _conflict(id_: str, title: str, detail: str) -> ProblemException:
     return ProblemException(
-        409, ProblemType.conflict, f"the triage item for observation {id_} {title}", detail=detail
+        409,
+        ProblemType.conflict,
+        f"the triage item for observation {id_} {title}",
+        detail=detail,
     )
 
 
@@ -75,7 +78,11 @@ def _open(root: Path, id_: str, written: str) -> dict[str, Any]:
 
 
 def _set_ruling(
-    root: Path, id_: str, data: dict[str, Any], ruling: dict[str, Any] | None, message: str
+    root: Path,
+    id_: str,
+    data: dict[str, Any],
+    ruling: dict[str, Any] | None,
+    message: str,
 ) -> Edited:
     unchanged = data["ruling"] == ruling
     data["ruling"] = ruling
@@ -140,5 +147,7 @@ class Rulings:
             return ids, Commit(paths, f"submit {len(ids)} (operator)")
 
         ids: list[str] = self.store.write(edit)
-        logger.info("submit %d (operator): %s", len(ids), ", ".join(ids) or "nothing ruled")
+        logger.info(
+            "submit %d (operator): %s", len(ids), ", ".join(ids) or "nothing ruled"
+        )
         return ids

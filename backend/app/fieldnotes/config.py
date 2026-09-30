@@ -115,7 +115,9 @@ def _required(environ: Mapping[str, str], name: str) -> str:
     return value
 
 
-def _number[T: (int, float)](environ: Mapping[str, str], name: str, kind: type[T], default: T) -> T:
+def _number[T: (int, float)](
+    environ: Mapping[str, str], name: str, kind: type[T], default: T
+) -> T:
     value = _optional(environ, name)
     if value is None:
         return default
@@ -130,7 +132,9 @@ def _match(environ: Mapping[str, str]) -> MatchSettings:
         likely=_number(environ, "MATCH_LIKELY", float, DEFAULT_LIKELY),
         related=_number(environ, "MATCH_RELATED", float, DEFAULT_RELATED),
         gap=_number(environ, "MATCH_GAP", float, DEFAULT_GAP),
-        lexical_weight=_number(environ, "MATCH_LEXICAL_WEIGHT", float, DEFAULT_LEXICAL_WEIGHT),
+        lexical_weight=_number(
+            environ, "MATCH_LEXICAL_WEIGHT", float, DEFAULT_LEXICAL_WEIGHT
+        ),
     )
     if match.lexical_weight < 0 or match.gap < 0:
         raise SettingsError(
@@ -195,7 +199,9 @@ def _board(environ: Mapping[str, str]) -> BoardSettings | None:
     return BoardSettings(
         url=url,
         token=token,
-        resolution_field=_get(environ, "YOUTRACK_RESOLUTION_FIELD", DEFAULT_RESOLUTION_FIELD),
+        resolution_field=_get(
+            environ, "YOUTRACK_RESOLUTION_FIELD", DEFAULT_RESOLUTION_FIELD
+        ),
         outcomes=_outcomes(environ),
     )
 
@@ -205,7 +211,9 @@ def _youtrack_hook(environ: Mapping[str, str]) -> YouTrackHookSettings | None:
     if token is None:
         return None
     header = _get(environ, "YOUTRACK_WEBHOOK_HEADER", DEFAULT_YOUTRACK_WEBHOOK_HEADER)
-    settle = _number(environ, "YOUTRACK_WEBHOOK_SETTLE", float, DEFAULT_YOUTRACK_WEBHOOK_SETTLE)
+    settle = _number(
+        environ, "YOUTRACK_WEBHOOK_SETTLE", float, DEFAULT_YOUTRACK_WEBHOOK_SETTLE
+    )
     if settle < 0:
         raise SettingsError(f"{PREFIX}YOUTRACK_WEBHOOK_SETTLE is negative: {settle}")
     return YouTrackHookSettings(token=token, header=header, settle=settle)
@@ -234,7 +242,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             branch=_get(environ, "STORE_BRANCH", "main"),
             token=_optional(environ, "STORE_TOKEN"),
             author_name=_get(environ, "GIT_AUTHOR_NAME", "Fieldnotes API"),
-            author_email=_get(environ, "GIT_AUTHOR_EMAIL", "fieldnotes-api@noreply.localhost"),
+            author_email=_get(
+                environ, "GIT_AUTHOR_EMAIL", "fieldnotes-api@noreply.localhost"
+            ),
         ),
         cache_dir=Path(_get(environ, "CACHE_DIR", "/data/cache")),
         models_url=_get(environ, "MODELS_URL", DEFAULT_MODELS_URL),

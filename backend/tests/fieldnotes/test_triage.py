@@ -22,7 +22,10 @@ NOW = datetime(2026, 9, 24, 8, 0, 0, tzinfo=UTC)
 AT = "2026-09-24T08:00:00Z"
 TEXT = "uv sync installs no workspace members"
 REPO = "pvginkel/Example"
-QUESTION = {"at": "2026-09-22T07:00:00Z", "text": "Which repository holds the setup verb?"}
+QUESTION = {
+    "at": "2026-09-22T07:00:00Z",
+    "text": "Which repository holds the setup verb?",
+}
 
 
 def snapshot(**fields):
@@ -79,7 +82,9 @@ def spelled(value) -> str:
 
 def seed(remote, *items, **files):
     """Push the items to `triage/<id>.json`, and any other files by path."""
-    remote.push({item_path(i["observation"]): spelled(i) for i in items} | files, "reconcile")
+    remote.push(
+        {item_path(i["observation"]): spelled(i) for i in items} | files, "reconcile"
+    )
 
 
 def ids(reply):
@@ -129,14 +134,29 @@ def refused(response, status, type_):
     assert response.json()["type"] == type_
 
 
-def test_the_queue_is_every_item_not_submitted_returned_first_then_by_written(start, remote):
+def test_the_queue_is_every_item_not_submitted_returned_first_then_by_written(
+    start, remote
+):
     seed(
         remote,
         item(IDS[0], "2026-09-22T09:00:00Z"),
-        item(IDS[1], "2026-09-20T09:00:00Z", ruling=ruling("later", "after the next release")),
-        item(IDS[2], "2026-09-19T09:00:00Z", ruling=ruling(submitted="2026-09-21T09:00:00Z")),
+        item(
+            IDS[1],
+            "2026-09-20T09:00:00Z",
+            ruling=ruling("later", "after the next release"),
+        ),
+        item(
+            IDS[2],
+            "2026-09-19T09:00:00Z",
+            ruling=ruling(submitted="2026-09-21T09:00:00Z"),
+        ),
         item(IDS[3], "2026-09-23T09:00:00Z", ruling=ruling(), question=QUESTION),
-        item(IDS[4], "2026-09-21T09:00:00Z", ruling=ruling("no", "not ours"), question=QUESTION),
+        item(
+            IDS[4],
+            "2026-09-21T09:00:00Z",
+            ruling=ruling("no", "not ours"),
+            question=QUESTION,
+        ),
         item(
             IDS[5],
             ruling=ruling(submitted="2026-09-22T08:00:00Z"),
@@ -158,7 +178,9 @@ def test_the_queue_is_every_item_not_submitted_returned_first_then_by_written(st
 
 
 def test_an_item_comes_as_the_store_holds_it(start, remote):
-    returned = item(IDS[0], ruling=ruling("no", "not ours: KubeCoder's"), question=QUESTION)
+    returned = item(
+        IDS[0], ruling=ruling("no", "not ours: KubeCoder's"), question=QUESTION
+    )
     seed(remote, returned)
     with start() as api:
         response = api.get("/api/triage/queue")
@@ -169,7 +191,9 @@ def test_an_item_comes_as_the_store_holds_it(start, remote):
     assert list(served) == list(ITEM_KEYS)
 
 
-def test_the_observations_are_as_the_store_has_them_now(start, auth, remote, clock, pull):
+def test_the_observations_are_as_the_store_has_them_now(
+    start, auth, remote, clock, pull
+):
     with start() as api:
         same = post(api, auth)
         changed = post(api, auth, "the relay drops deliveries")
@@ -241,7 +265,9 @@ def test_the_queue_follows_pulls_and_writes(start, remote, pull):
         withdrawn = ids(queue(api))
 
         def write(root: Path):
-            (root / item_path(IDS[0])).write_text(spelled(item(IDS[0], ruling=ruling())))
+            (root / item_path(IDS[0])).write_text(
+                spelled(item(IDS[0], ruling=ruling()))
+            )
             return None, Commit((item_path(IDS[0]),), "rule")
 
         api.runtime.store.write(write)
@@ -253,12 +279,18 @@ def test_the_queue_follows_pulls_and_writes(start, remote, pull):
     assert written["ruling"] == ruling()
 
 
-def test_a_pull_reaches_the_queue_while_the_models_pod_is_down(start, auth, remote, models):
+def test_a_pull_reaches_the_queue_while_the_models_pod_is_down(
+    start, auth, remote, models
+):
     with start() as api:
         id_ = post(api, auth)
         path = observation_path(id_)
-        rewritten = Document(remote.file(path)).with_fields(canonical="a statement rewritten")
-        remote.push({path: rewritten.text, item_path(id_): spelled(item(id_))}, "reconcile")
+        rewritten = Document(remote.file(path)).with_fields(
+            canonical="a statement rewritten"
+        )
+        remote.push(
+            {path: rewritten.text, item_path(id_): spelled(item(id_))}, "reconcile"
+        )
         models.fail = True
 
         failed = api.runtime.store.pull().exception()
@@ -281,7 +313,9 @@ def test_the_queue_is_not_ready_until_the_store_is(start):
 # -- the operator's gate (NFR-4) -----------------------------------------------------------------
 
 
-def test_the_queue_admits_the_editor_session(start, remote, oidc_app, generate_test_jwt):
+def test_the_queue_admits_the_editor_session(
+    start, remote, oidc_app, generate_test_jwt
+):
     seed(remote, item(IDS[0]))
     with start(app=oidc_app) as api:
         api.sign_in(generate_test_jwt(roles=["editor"]))
@@ -290,7 +324,9 @@ def test_the_queue_admits_the_editor_session(start, remote, oidc_app, generate_t
     assert ids(reply) == [IDS[0]]
 
 
-def test_the_queue_refuses_a_user_without_the_editor_role(start, oidc_app, generate_test_jwt):
+def test_the_queue_refuses_a_user_without_the_editor_role(
+    start, oidc_app, generate_test_jwt
+):
     with start(app=oidc_app) as api:
         api.sign_in(generate_test_jwt(roles=["viewer"]))
         response = api.get("/api/triage/queue")
@@ -340,7 +376,9 @@ def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate
         "take back": paths["/api/triage/items/{id}/ruling"]["delete"],
         "submit": paths["/api/triage/submit"]["post"],
     }
-    replies = {name: schema(o["responses"]["200"]["content"]) for name, o in operations.items()}
+    replies = {
+        name: schema(o["responses"]["200"]["content"]) for name, o in operations.items()
+    }
 
     assert {o["x-required-role"] for o in operations.values()} == {"editor"}
     assert set(replies["queue"]["properties"]) == {"items", "observations"}
@@ -349,7 +387,9 @@ def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate
     assert replies["submit"]["type"] == "array"
     request = schema(operations["rule"]["requestBody"]["content"])
     assert set(request["properties"]) == {"verb", "note", "written"}
-    query = [p["name"] for p in operations["take back"]["parameters"] if p["in"] == "query"]
+    query = [
+        p["name"] for p in operations["take back"]["parameters"] if p["in"] == "query"
+    ]
     assert query == ["written"]
 
 
@@ -394,7 +434,9 @@ def test_a_ruling_is_one_commit_of_the_ruling_alone(start, remote, clock):
     assert queued == expected
 
 
-def test_a_ruling_replaces_a_draft_and_a_returned_item_keeps_its_question(start, remote, clock):
+def test_a_ruling_replaces_a_draft_and_a_returned_item_keeps_its_question(
+    start, remote, clock
+):
     seed(remote, item(IDS[0], ruling=ruling("no", "not ours"), question=QUESTION))
     clock.now = NOW
     with start() as api:
@@ -450,7 +492,9 @@ def test_a_take_back_without_written_is_refused(start, remote):
 
 
 WRITES = {
-    "rule": lambda api, id_, written=WRITTEN: rule(api, id_, "later", "next week", written),
+    "rule": lambda api, id_, written=WRITTEN: rule(
+        api, id_, "later", "next week", written
+    ),
     "take back": lambda api, id_, written=WRITTEN: take_back(api, id_, written),
 }
 
@@ -459,7 +503,12 @@ WRITES = {
 @pytest.mark.parametrize(
     ("seeded", "written", "status", "type_"),
     [
-        (item(IDS[0], ruling=ruling(submitted="2026-09-21T09:00:00Z")), WRITTEN, 409, "conflict"),
+        (
+            item(IDS[0], ruling=ruling(submitted="2026-09-21T09:00:00Z")),
+            WRITTEN,
+            409,
+            "conflict",
+        ),
         (item(IDS[1]), WRITTEN, 404, "not-found"),
         (item(IDS[0], ruling=ruling()), "2026-09-19T09:00:00Z", 409, "conflict"),
     ],
@@ -545,7 +594,12 @@ def test_submit_marks_every_ruled_item_submitted_in_one_commit(start, remote, cl
         item(IDS[2], ruling=later),
         item(IDS[3], ruling=ruling(submitted="2026-09-21T09:00:00Z")),
         # Returned, and ruled before its question: not ruled again yet.
-        item(IDS[4], "2026-09-19T09:00:00Z", ruling=ruling("no", "not ours"), question=QUESTION),
+        item(
+            IDS[4],
+            "2026-09-19T09:00:00Z",
+            ruling=ruling("no", "not ours"),
+            question=QUESTION,
+        ),
         # Returned, and ruled again after its question.
         item(IDS[5], ruling=again, question=QUESTION),
     ]
@@ -604,13 +658,17 @@ def test_a_write_the_store_refuses_is_the_reply(start, remote, write):
 
 
 @pytest.mark.parametrize("write", WRITES.values(), ids=list(WRITES))
-def test_a_write_the_index_cannot_follow_is_store_unreachable(start, auth, remote, models, write):
+def test_a_write_the_index_cannot_follow_is_store_unreachable(
+    start, auth, remote, models, write
+):
     """A write brings the observation index up to the tip before its edit, and the index embeds a
     rewritten observation with the models pod: while the pod is down, the write fails (FR-24)."""
     with start() as api:
         id_ = post(api, auth)
         path = observation_path(id_)
-        rewritten = Document(remote.file(path)).with_fields(canonical="a statement rewritten")
+        rewritten = Document(remote.file(path)).with_fields(
+            canonical="a statement rewritten"
+        )
         seed(remote, item(IDS[0], ruling=ruling()), **{path: rewritten.text})
         models.fail = True
         before = remote.log()

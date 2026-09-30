@@ -108,12 +108,17 @@ class Clock:
 
 
 def returned_at(
-    scored: Sequence[Mapping[str, Any]], related: float, gap: float, k: int = POST_CANDIDATES
+    scored: Sequence[Mapping[str, Any]],
+    related: float,
+    gap: float,
+    k: int = POST_CANDIDATES,
 ) -> list[str]:
     """The ids `post` returns for these scored observations under a low threshold and a gap: the
     rule of the API's `Matcher.match`, kept here to replay other settings from the log. `scored`
     is in the pipeline's order, which breaks ties in score."""
-    kept = sorted((s for s in scored if s["score"] >= related), key=lambda s: -s["score"])
+    kept = sorted(
+        (s for s in scored if s["score"] >= related), key=lambda s: -s["score"]
+    )
     if kept:
         best = kept[0]["score"]
         kept = [s for s in kept if best - s["score"] <= gap]
@@ -125,7 +130,9 @@ def post_times(rows: Sequence[Row]) -> list[datetime]:
     times: list[datetime] = []
     seen: Counter[str] = Counter()
     for row in rows:
-        day = datetime.combine(date.fromisoformat(row.date), datetime.min.time(), tzinfo=UTC)
+        day = datetime.combine(
+            date.fromisoformat(row.date), datetime.min.time(), tzinfo=UTC
+        )
         times.append(day + DAY_START + seen[row.date] * POST_SPACING)
         seen[row.date] += 1
     return times
@@ -154,10 +161,14 @@ class Replay:
     def index(self) -> Index:
         return self.runtime.index
 
-    def _request(self, path: str, body: dict[str, Any], expect: set[int]) -> TestResponse:
+    def _request(
+        self, path: str, body: dict[str, Any], expect: set[int]
+    ) -> TestResponse:
         response = self.api.post(f"/api{path}", json=body, headers=HEADERS)
         if response.status_code not in expect:
-            raise ReplayError(f"POST {path}: {response.status_code} {response.text[:500]}")
+            raise ReplayError(
+                f"POST {path}: {response.status_code} {response.text[:500]}"
+            )
         return response
 
     def post(self, n: int, row: Row, at: datetime) -> dict[str, Any]:
@@ -170,7 +181,9 @@ class Replay:
         }
         # The store before the post: a post that creates changes every term's weight.
         before = list(self.index.ids)
-        overlaps = dict(zip(before, self.index.overlaps(row.embedded).tolist(), strict=True))
+        overlaps = dict(
+            zip(before, self.index.overlaps(row.embedded).tolist(), strict=True)
+        )
 
         body = {
             "area": row.area,
@@ -216,11 +229,18 @@ class Replay:
             record["action"] = "create"
         elif outcome == "hit":
             target = next(id_ for id_ in returned if id_ in mates)
-            react = {"emoji": EMOJI, "text": row.text, "repo": row.repo, "session": row.id}
+            react = {
+                "emoji": EMOJI,
+                "text": row.text,
+                "repo": row.repo,
+                "session": row.id,
+            }
             self._request(f"/observations/{target}/reactions", react, {200})
             record["action"], record["target"] = "react", target
         else:
-            created = self._request("/observations", body | {"force": True}, {201}).get_json()["id"]
+            created = self._request(
+                "/observations", body | {"force": True}, {201}
+            ).get_json()["id"]
             record["action"] = "force"
         if created is not None:
             self.creators[created] = row.id
@@ -244,12 +264,16 @@ class Replay:
             raise ReplayError(f"{row.id}: the post embedded no query")
         match = self.settings.match
         cosines = {id_: float(self.index.get(id_).vector @ vector) for id_ in before}  # type: ignore[union-attr]
-        scores = {id_: cosines[id_] + match.lexical_weight * overlaps[id_] for id_ in before}
+        scores = {
+            id_: cosines[id_] + match.lexical_weight * overlaps[id_] for id_ in before
+        }
         # Stable, over the index's own order: ties break as they do in the API.
         by_score = sorted(before, key=lambda id_: -scores[id_])
         by_cosine = sorted(before, key=lambda id_: -cosines[id_])
 
-        recorded = by_score[:RECORDED] + [id_ for id_ in by_score[RECORDED:] if id_ in mates]
+        recorded = by_score[:RECORDED] + [
+            id_ for id_ in by_score[RECORDED:] if id_ in mates
+        ]
         scored = [
             {
                 "id": id_,
@@ -264,8 +288,12 @@ class Replay:
         expected = returned_at(scored, match.related, match.gap)
         # The API rounds nothing before it cuts, but it adds in float32: a score within a hair of
         # the threshold may fall either side.
-        if expected != returned and not self._hairline(scored, match.related, match.gap):
-            raise ReplayError(f"{row.id}: the scores recorded do not give back what post returned")
+        if expected != returned and not self._hairline(
+            scored, match.related, match.gap
+        ):
+            raise ReplayError(
+                f"{row.id}: the scores recorded do not give back what post returned"
+            )
 
         return {
             "scored": scored,
@@ -279,10 +307,13 @@ class Replay:
         }
 
     @staticmethod
-    def _hairline(scored: Sequence[Mapping[str, Any]], related: float, gap: float) -> bool:
+    def _hairline(
+        scored: Sequence[Mapping[str, Any]], related: float, gap: float
+    ) -> bool:
         best = max(s["score"] for s in scored)
         return any(
-            abs(s["score"] - related) < HAIRLINE or abs(best - s["score"] - gap) < HAIRLINE
+            abs(s["score"] - related) < HAIRLINE
+            or abs(best - s["score"] - gap) < HAIRLINE
             for s in scored
         )
 
@@ -317,7 +348,9 @@ def replay(
         if not runtime.ready:
             raise ReplayError("the API did not become ready")
         reporter = Replay(app.test_client(), runtime, recording, clock, clusters)
-        for n, (row, at) in enumerate(zip(rows, post_times(rows), strict=True), start=1):
+        for n, (row, at) in enumerate(
+            zip(rows, post_times(rows), strict=True), start=1
+        ):
             records.append(reporter.post(n, row, at))
             record(records[-1])
     finally:
@@ -391,7 +424,9 @@ def _environ(args: argparse.Namespace, remote: Path, cache: Path) -> dict[str, s
         "MATCH_GAP": args.gap,
         "MATCH_LEXICAL_WEIGHT": args.lexical_weight,
     }
-    environ |= {f"FIELDNOTES_{k}": str(v) for k, v in overrides.items() if v is not None}
+    environ |= {
+        f"FIELDNOTES_{k}": str(v) for k, v in overrides.items() if v is not None
+    }
     return environ
 
 
@@ -399,22 +434,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Replay the mined dataset through the API into an empty store (gate 1)."
     )
-    parser.add_argument("--dataset", type=Path, required=True, help="the dataset directory")
-    parser.add_argument("--out", type=Path, required=True, help="where the store and log go")
     parser.add_argument(
-        "--cache", type=Path, help="the embedding cache (default OUT/cache); runs may share one"
+        "--dataset", type=Path, required=True, help="the dataset directory"
+    )
+    parser.add_argument(
+        "--out", type=Path, required=True, help="where the store and log go"
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        help="the embedding cache (default OUT/cache); runs may share one",
     )
     parser.add_argument("--models-url", default=DEFAULT_MODELS_URL)
-    parser.add_argument("--likely", type=float, help="high threshold (default: the API's)")
-    parser.add_argument("--related", type=float, help="low threshold (default: the API's)")
+    parser.add_argument(
+        "--likely", type=float, help="high threshold (default: the API's)"
+    )
+    parser.add_argument(
+        "--related", type=float, help="low threshold (default: the API's)"
+    )
     parser.add_argument("--gap", type=float, help="the gap (default: the API's)")
     parser.add_argument(
-        "--lexical-weight", type=float, help="the lexical overlap's weight (default: the API's)"
+        "--lexical-weight",
+        type=float,
+        help="the lexical overlap's weight (default: the API's)",
     )
     parser.add_argument("--limit", type=int, help="post only the first N rows")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s"
+    )
     # Absolute: git runs in the checkout, where a relative remote would not resolve.
     args.out = args.out.resolve()
     cache = (args.cache or args.out / "cache").resolve()
@@ -423,7 +472,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"{remote} exists: the replay starts from an empty store")
     args.out.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)], check=True
+        ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)],
+        check=True,
     )
     settings = load_settings(_environ(args, remote, cache))
 

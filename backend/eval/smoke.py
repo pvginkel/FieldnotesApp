@@ -107,7 +107,9 @@ def p95(samples: list[float]) -> float:
 
 
 async def check(client: httpx.AsyncClient) -> bool:
-    response = await client.post("/embed", json={"inputs": [PARAPHRASE_A, PARAPHRASE_B, UNRELATED]})
+    response = await client.post(
+        "/embed", json={"inputs": [PARAPHRASE_A, PARAPHRASE_B, UNRELATED]}
+    )
     response.raise_for_status()
     a, b, c = response.json()
     paraphrase = cosine(a, b)
@@ -119,7 +121,9 @@ async def check(client: httpx.AsyncClient) -> bool:
     return embed_ok
 
 
-async def time_calls(client: httpx.AsyncClient, words: int, repeats: int) -> list[float]:
+async def time_calls(
+    client: httpx.AsyncClient, words: int, repeats: int
+) -> list[float]:
     """Seconds per embedding of one text, a different text each round. One extra round runs
     first as a warm-up and is dropped."""
     samples: list[float] = []
@@ -134,8 +138,12 @@ async def time_calls(client: httpx.AsyncClient, words: int, repeats: int) -> lis
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--url", default=DEFAULT_URL, help=f"models pod (default {DEFAULT_URL})")
-    parser.add_argument("--repeats", type=int, default=10, help="timed rounds per length")
+    parser.add_argument(
+        "--url", default=DEFAULT_URL, help=f"models pod (default {DEFAULT_URL})"
+    )
+    parser.add_argument(
+        "--repeats", type=int, default=10, help="timed rounds per length"
+    )
     parser.add_argument(
         "--words",
         type=int,

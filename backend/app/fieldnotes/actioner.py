@@ -81,13 +81,19 @@ class HttpController:
                 path, headers={"Authorization": f"Bearer {self._settings.token}"}
             )
         except httpx.HTTPError as exc:
-            raise ControllerError(f"the controller could not be reached: {exc!r}") from exc
+            raise ControllerError(
+                f"the controller could not be reached: {exc!r}"
+            ) from exc
         if response.status_code == 202:
             return
         problem = _problem(response)
         if response.status_code == 409 and problem.get("type") == "conflict":
-            raise RunInFlight(str(problem.get("title", "the timer has a run in flight")))
-        raise ControllerError(f"{path} answered {response.status_code}: {response.text[:200]}")
+            raise RunInFlight(
+                str(problem.get("title", "the timer has a run in flight"))
+            )
+        raise ControllerError(
+            f"{path} answered {response.status_code}: {response.text[:200]}"
+        )
 
 
 class ActionerStart(BaseModel):
@@ -128,11 +134,15 @@ class Actioner:
         """Start the actioner on the task service and return at once, unless a start is pending
         already: that one covers the caller's submit."""
         if self.controller is None:
-            logger.warning("the actioner is not started: FIELDNOTES_KUBECODER_* are unset")
+            logger.warning(
+                "the actioner is not started: FIELDNOTES_KUBECODER_* are unset"
+            )
             return
         with self._lock:
             if self._pending:
-                logger.info("an actioner start is pending already; it covers this submit")
+                logger.info(
+                    "an actioner start is pending already; it covers this submit"
+                )
                 return
             self._pending = True
         tasks.start_task(_Start(self))
@@ -160,11 +170,15 @@ class Actioner:
             return "in_flight"
         except ControllerError as exc:
             self.metrics.actioner_starts.labels("failed").inc()
-            logger.error("actioner start failed: %s; Run now in KubeCoder is the retry", exc)
+            logger.error(
+                "actioner start failed: %s; Run now in KubeCoder is the retry", exc
+            )
             self._settle()
             return "failed"
         self.metrics.actioner_starts.labels("started").inc()
-        logger.info("actioner started for %d waiting: %s", len(waiting), ", ".join(waiting))
+        logger.info(
+            "actioner started for %d waiting: %s", len(waiting), ", ".join(waiting)
+        )
         self._settle()
         return "started"
 

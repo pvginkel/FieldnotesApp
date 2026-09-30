@@ -18,7 +18,10 @@ def test_health_answers_without_a_token(start):
     with start() as api:
         assert api.get("/health/healthz").status_code == 200
         # The template's readiness also waits on the SSE gateway, which no suite runs.
-        assert api.get("/health/readyz").json()["store"] == {"ok": True, "failed": False}
+        assert api.get("/health/readyz").json()["store"] == {
+            "ok": True,
+            "failed": False,
+        }
 
 
 def test_a_failed_start_keeps_the_store_unready(start, auth):
@@ -26,7 +29,10 @@ def test_a_failed_start_keeps_the_store_unready(start, auth):
     (`FieldnotesService`); here the runtime has no `on_failure`."""
     with start(ready=False, FIELDNOTES_STORE_URL="/nonexistent/remote.git") as api:
         api.runtime.wait_started(20)
-        assert api.get("/health/readyz").json()["store"] == {"ok": False, "failed": True}
+        assert api.get("/health/readyz").json()["store"] == {
+            "ok": False,
+            "failed": True,
+        }
         problem = post(api, auth).json()
         assert (problem["status"], problem["type"]) == (503, "not-ready")
 
@@ -68,17 +74,21 @@ def test_a_novel_post_creates_an_observation(start, auth, remote):
             "text": DUPLICATE,
         }
     ]
-    assert Document(remote.file(observation_path(id_))).observation.model_dump(mode="json") == (
-        observation
-    )
+    assert Document(remote.file(observation_path(id_))).observation.model_dump(
+        mode="json"
+    ) == (observation)
 
 
-def test_a_duplicate_post_returns_candidates_and_creates_nothing(start, auth, remote, clock):
+def test_a_duplicate_post_returns_candidates_and_creates_nothing(
+    start, auth, remote, clock
+):
     with start() as api:
         first = post(api, auth).json()["id"]
         clock.tick()
         api.post(
-            f"/api/observations/{first}/reactions", json={"emoji": "👍", "repo": "r/b"}, headers=auth()
+            f"/api/observations/{first}/reactions",
+            json={"emoji": "👍", "repo": "r/b"},
+            headers=auth(),
         )
 
         response = post(api, auth, text="uv sync installs no workspace members at all")
@@ -142,7 +152,11 @@ def test_a_ruling_reaches_the_next_reporter(start, auth, remote, pull):
         response = post(api, auth)
 
     [candidate] = response.json()["candidates"]
-    assert (candidate["id"], candidate["outcome"], candidate["reason"]) == (id_, "wont-do", reason)
+    assert (candidate["id"], candidate["outcome"], candidate["reason"]) == (
+        id_,
+        "wont-do",
+        reason,
+    )
 
 
 def test_a_reaction_is_appended_with_its_provenance(start, auth, remote, clock):
@@ -170,7 +184,11 @@ def test_a_reaction_is_appended_with_its_provenance(start, auth, remote, clock):
         "client": "skills",
         "text": "Fixed upstream.",
     }
-    assert observation["last_seen"] == observation["last_updated"] == "2026-09-19T10:01:00Z"
+    assert (
+        observation["last_seen"]
+        == observation["last_updated"]
+        == "2026-09-19T10:01:00Z"
+    )
     assert observation["created"] == "2026-09-19T10:00:00Z"
     assert observation["repos"] == ["pvginkel/Example", "pvginkel/Other"]
     assert remote.log()[0] == f"react {id_} 👎 (skills)"
@@ -180,7 +198,9 @@ def test_a_reaction_leaves_a_hand_edit_alone(start, auth, remote, clock):
     with start() as api:
         id_ = post(api, auth).json()["id"]
         path = observation_path(id_)
-        edited = remote.file(path).replace("status: open", "# reviewed\nstatus: proposed")
+        edited = remote.file(path).replace(
+            "status: open", "# reviewed\nstatus: proposed"
+        )
         remote.push({path: edited})
         clock.tick()
 
@@ -202,9 +222,13 @@ def test_a_reaction_to_a_closed_observation_is_taken(start, auth, remote):
     with start() as api:
         id_ = post(api, auth).json()["id"]
         path = observation_path(id_)
-        remote.push({path: Document(remote.file(path)).with_fields(status="closed").text})
+        remote.push(
+            {path: Document(remote.file(path)).with_fields(status="closed").text}
+        )
         response = api.post(
-            f"/api/observations/{id_}/reactions", json={"emoji": "👍", "repo": "x/y"}, headers=auth()
+            f"/api/observations/{id_}/reactions",
+            json={"emoji": "👍", "repo": "x/y"},
+            headers=auth(),
         )
     assert response.status_code == 200
     assert "status: closed" in remote.file(path)
@@ -215,7 +239,9 @@ def test_a_reaction_to_a_merged_away_observation_is_not_found(start, auth, remot
         id_ = post(api, auth).json()["id"]
         remote.push({observation_path(id_): None}, "merge it away")
         response = api.post(
-            f"/api/observations/{id_}/reactions", json={"emoji": "👍", "repo": "x/y"}, headers=auth()
+            f"/api/observations/{id_}/reactions",
+            json={"emoji": "👍", "repo": "x/y"},
+            headers=auth(),
         )
     assert response.status_code == 404
     assert response.json()["type"] == "not-found"
@@ -226,9 +252,13 @@ def test_a_reaction_to_a_broken_file_is_a_conflict(start, auth, remote):
     with start() as api:
         id_ = post(api, auth).json()["id"]
         path = observation_path(id_)
-        remote.push({path: remote.file(path).replace("category: hint", "category: bug")})
+        remote.push(
+            {path: remote.file(path).replace("category: hint", "category: bug")}
+        )
         response = api.post(
-            f"/api/observations/{id_}/reactions", json={"emoji": "👍", "repo": "x/y"}, headers=auth()
+            f"/api/observations/{id_}/reactions",
+            json={"emoji": "👍", "repo": "x/y"},
+            headers=auth(),
         )
     assert response.status_code == 409
     assert response.json()["type"] == "conflict"
@@ -275,7 +305,9 @@ def test_match_names_the_commit_it_scored_until_the_pull_takes_a_push_in(
     # The reconciler's `recall` compares it with its own HEAD: a push the API has not pulled yet
     # was not scored, and the reply says so.
     def match(api):
-        return api.post("/api/match", json={"text": DUPLICATE}, headers=auth("skills")).json()
+        return api.post(
+            "/api/match", json={"text": DUPLICATE}, headers=auth("skills")
+        ).json()
 
     with start() as api:
         post(api, auth)
@@ -292,8 +324,12 @@ def test_match_names_the_commit_it_scored_until_the_pull_takes_a_push_in(
 def test_neighbors_leave_the_observation_itself_out(start, auth):
     with start() as api:
         first = post(api, auth).json()["id"]
-        second = post(api, auth, text="grafana dashboards show the browser timezone").json()["id"]
-        response = api.get(f"/api/observations/{first}/neighbors?k=3", headers=auth("skills"))
+        second = post(
+            api, auth, text="grafana dashboards show the browser timezone"
+        ).json()["id"]
+        response = api.get(
+            f"/api/observations/{first}/neighbors?k=3", headers=auth("skills")
+        )
 
     assert response.json()["id"] == first
     assert [n["id"] for n in response.json()["neighbors"]] == [second]

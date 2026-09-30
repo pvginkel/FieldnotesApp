@@ -52,7 +52,9 @@ Repo = Annotated[
 ]
 Session = Annotated[
     SessionText | None,
-    Field(description="Optional provenance: an id of the session you are in, if you have one."),
+    Field(
+        description="Optional provenance: an id of the session you are in, if you have one."
+    ),
 ]
 
 
@@ -145,7 +147,12 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
         `force=true`. When nothing matches, `post` creates the observation and answers
         `{id, candidates: []}`."""
         request = PostRequest(
-            area=area, category=category, text=text, repo=repo, session=session, force=force
+            area=area,
+            category=category,
+            text=text,
+            repo=repo,
+            session=session,
+            force=force,
         )
         return await _call("post", api.post(request))
 

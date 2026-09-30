@@ -85,7 +85,9 @@ class Observations:
         self.board = board
         self.outcomes = outcomes
         self.metrics = metrics
-        self._settling: dict[str, threading.Timer] = {}  # observation id -> its waiting sync
+        self._settling: dict[
+            str, threading.Timer
+        ] = {}  # observation id -> its waiting sync
         self._settling_lock = threading.Lock()
 
     def get(self, id_: str) -> Observation:
@@ -107,7 +109,8 @@ class Observations:
                     request.category,
                     forced=False,
                     candidates=[
-                        (m.entry.observation.id, str(m.match_class), m.score) for m in matches
+                        (m.entry.observation.id, str(m.match_class), m.score)
+                        for m in matches
                     ],
                 )
                 return PostReply(candidates=[candidate(match) for match in matches])
@@ -137,7 +140,11 @@ class Observations:
 
         self.store.write(create)
         self.metrics.posted(
-            client, request.repo, request.session, request.category, forced=request.force
+            client,
+            request.repo,
+            request.session,
+            request.category,
+            forced=request.force,
         )
         logger.info("post %s by %s from %s", id_, client, request.repo)
         return PostReply(id=id_)
@@ -169,18 +176,28 @@ class Observations:
             document = document.with_reaction(reaction).with_fields(**fields)
             file.write_text(document.text)
             message = f"react {id_} {request.emoji} ({client})"
-            return reaction_counts(document.observation), Commit((observation_path(id_),), message)
+            return reaction_counts(document.observation), Commit(
+                (observation_path(id_),), message
+            )
 
         reactions = self.store.write(append)
         self.metrics.reacted(client, request.repo, request.session, id_)
-        logger.info("react %s %s by %s from %s", id_, request.emoji, client, request.repo)
+        logger.info(
+            "react %s %s by %s from %s", id_, request.emoji, client, request.repo
+        )
         return ReactReply(id=id_, reactions=reactions)
 
     def match(self, request: MatchRequest) -> MatchReply:
-        text = embedded_text(request.area, request.text) if request.area else request.text
-        indexed = self.store.indexed  # read first: the match sees this commit or a later one
+        text = (
+            embedded_text(request.area, request.text) if request.area else request.text
+        )
+        indexed = (
+            self.store.indexed
+        )  # read first: the match sees this commit or a later one
         matches = self.matcher.match(text, request.k)
-        return MatchReply(candidates=[candidate(match) for match in matches], indexed_commit=indexed)
+        return MatchReply(
+            candidates=[candidate(match) for match in matches], indexed_commit=indexed
+        )
 
     def neighbors(self, id_: str, k: int) -> NeighborsReply:
         entry = self.index.get(id_)
@@ -212,11 +229,17 @@ class Observations:
                 f"the card {observation.card} is not on the board",
                 detail=f"observation {id_} names an issue YouTrack does not have; correct its card",
             ) from exc
-        reply: BoardSyncReply = self.store.write(lambda root: self._apply(root, id_, card))
-        self.metrics.board_syncs.labels("changed" if reply.changed else "unchanged").inc()
+        reply: BoardSyncReply = self.store.write(
+            lambda root: self._apply(root, id_, card)
+        )
+        self.metrics.board_syncs.labels(
+            "changed" if reply.changed else "unchanged"
+        ).inc()
         return reply
 
-    def _apply(self, root: Path, id_: str, card: Card) -> tuple[BoardSyncReply, Commit | None]:
+    def _apply(
+        self, root: Path, id_: str, card: Card
+    ) -> tuple[BoardSyncReply, Commit | None]:
         file = root / observation_path(id_)
         if not file.exists():
             raise not_found(id_)
@@ -228,12 +251,18 @@ class Observations:
         unchanged = (
             observation.card is None
             or observation.card.upper() != card.id.upper()
-            or (observation.card_updated is not None and card.updated <= observation.card_updated)
+            or (
+                observation.card_updated is not None
+                and card.updated <= observation.card_updated
+            )
         )
         if unchanged:
             return _synced(observation, changed=False), None
 
-        fields: dict[str, object] = {"card_updated": card.updated, "last_updated": self.clock()}
+        fields: dict[str, object] = {
+            "card_updated": card.updated,
+            "last_updated": self.clock(),
+        }
         outcome = self.outcomes.get(card.resolution) if card.resolution else None
         if outcome is not None and observation.status in _CLOSABLE:
             fields |= {"status": Status.closed, "outcome": outcome}
@@ -254,6 +283,7 @@ class Observations:
         commits the change the delivery is about. A delivery that arrives while an earlier one for
         the same observation is still waiting restarts the wait: one read then covers both. The
         wait is spent here, not in the store's write queue."""
+
         def settled() -> None:
             with self._settling_lock:
                 if self._settling.get(id_) is not timer:
@@ -266,7 +296,9 @@ class Observations:
                 logger.exception("board-sync %s failed", id_)
                 return
             if reply.changed:
-                logger.info("board-sync %s: %s is %s", reply.id, reply.card, reply.status)
+                logger.info(
+                    "board-sync %s: %s is %s", reply.id, reply.card, reply.status
+                )
 
         timer = threading.Timer(settle, settled)
         timer.name = f"board-sync {id_}"

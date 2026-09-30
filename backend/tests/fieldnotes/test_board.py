@@ -50,7 +50,12 @@ def test_the_resolution_comes_from_the_configured_field():
 
 def test_the_latest_change_counts_comments_and_drops_the_milliseconds():
     comments = [
-        {"text": "a", "created": ms(9), "updated": ms(10, 30, 5, 999), "deleted": False},
+        {
+            "text": "a",
+            "created": ms(9),
+            "updated": ms(10, 30, 5, 999),
+            "deleted": False,
+        },
         {"text": "b", "created": ms(11), "updated": None, "deleted": True},
     ]
     card = read_card(issue(comments=comments), "Resolution")
@@ -66,9 +71,17 @@ def test_the_pointer_comes_from_the_newest_resolved_comment():
             "updated": None,
         },
         {"text": "Thanks", "created": ms(11), "updated": None},
-        {"text": "Resolved: deleted", "created": ms(12), "updated": None, "deleted": True},
+        {
+            "text": "Resolved: deleted",
+            "created": ms(12),
+            "updated": None,
+            "deleted": True,
+        },
     ]
-    assert read_card(issue(comments=comments), "Resolution").pointer == "pvginkel/Example@abc123"
+    assert (
+        read_card(issue(comments=comments), "Resolution").pointer
+        == "pvginkel/Example@abc123"
+    )
 
 
 SETTINGS = BoardSettings(
@@ -86,7 +99,9 @@ def test_the_client_reads_the_issue_with_a_bearer_and_the_fields_it_needs():
         seen.append(request)
         return httpx.Response(200, json=issue())
 
-    client = httpx.Client(transport=httpx.MockTransport(youtrack), base_url=SETTINGS.url)
+    client = httpx.Client(
+        transport=httpx.MockTransport(youtrack), base_url=SETTINGS.url
+    )
     card = HttpBoard(client, SETTINGS).card("FN-12")
 
     assert card.id == "FN-12"

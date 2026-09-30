@@ -54,7 +54,15 @@ class Remote:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp_path = tmp_path
         self.path = tmp_path / "remote.git"
-        git(tmp_path, "init", "--quiet", "--bare", "--initial-branch", "main", str(self.path))
+        git(
+            tmp_path,
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            str(self.path),
+        )
 
     def file(self, path: str) -> str:
         return git(self.path, "show", f"main:{path}")
@@ -62,7 +70,9 @@ class Remote:
     def files(self, directory: str = "observations") -> list[str]:
         if not git(self.path, "branch", "--list", "main"):
             return []
-        return git(self.path, "ls-tree", "--name-only", "main", f"{directory}/").splitlines()
+        return git(
+            self.path, "ls-tree", "--name-only", "main", f"{directory}/"
+        ).splitlines()
 
     def head(self) -> str:
         return git(self.path, "rev-parse", "main").strip()
@@ -141,7 +151,10 @@ def environ(tmp_path, remote, youtrack, kubecoder) -> dict[str, str]:
         "FIELDNOTES_KUBECODER_URL": "http://kubecoder.example.invalid",
         "FIELDNOTES_KUBECODER_TOKEN": kubecoder.token,
         "FIELDNOTES_KUBECODER_ACTIONER_TIMER": kubecoder.timer,
-        **{f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token for name, token in TOKENS.items()},
+        **{
+            f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token
+            for name, token in TOKENS.items()
+        },
     }
 
 
@@ -199,7 +212,9 @@ class Api:
 
 
 @pytest.fixture
-def start(environ, models, clock, youtrack, kubecoder, test_settings, test_app_settings):
+def start(
+    environ, models, clock, youtrack, kubecoder, test_settings, test_app_settings
+):
     """Start the API; `with start() as api:` yields a client that is ready. `app` serves it from
     an app of the test's own, such as the OIDC-enabled `oidc_app`."""
 
@@ -219,7 +234,9 @@ def start(environ, models, clock, youtrack, kubecoder, test_settings, test_app_s
         )
         if app is None:
             app = create_app(
-                test_settings, app_settings=test_app_settings, skip_background_services=True
+                test_settings,
+                app_settings=test_app_settings,
+                skip_background_services=True,
             )
         app.container.fieldnotes_service().use(runtime)
         runtime.metrics.register(REGISTRY)

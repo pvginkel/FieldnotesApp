@@ -35,7 +35,9 @@ def test_each_post_records_what_it_was_scored_against(records):
     by_row = {s["of"]: s for s in r5["scored"]}
     assert set(by_row) == {"r1", "r3", "r4"}
     assert by_row["r3"]["mate"] and 0.3 < by_row["r3"]["score"] < 0.4
-    assert by_row["r3"]["score"] == by_row["r3"]["cosine"] and by_row["r3"]["lexical"] > 0
+    assert (
+        by_row["r3"]["score"] == by_row["r3"]["cosine"] and by_row["r3"]["lexical"] > 0
+    )
     assert r5["rank"] == {"score": 1, "cosine": 1}
     assert r5["top3"] == [s["id"] for s in r5["scored"]]
     assert [s["score"] for s in r5["scored"]] == sorted(
@@ -44,8 +46,12 @@ def test_each_post_records_what_it_was_scored_against(records):
 
 
 def test_a_lexical_weight_enters_the_recorded_score(dataset, settings):
-    weighted = replace(settings, match=replace(settings.match, lexical_weight=1.0, likely=1.5))
-    records = replay(load_rows(dataset), load_clusters(dataset), weighted, models=FakeModels())
+    weighted = replace(
+        settings, match=replace(settings.match, lexical_weight=1.0, likely=1.5)
+    )
+    records = replay(
+        load_rows(dataset), load_clusters(dataset), weighted, models=FakeModels()
+    )
 
     # r5's mate r3 shares its rarest words: the overlap lifts the pair over the low threshold.
     r5 = records[4]

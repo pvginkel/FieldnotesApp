@@ -122,14 +122,20 @@ def item_faults(name: str, item: dict[str, Any]) -> list[str]:
         found.append(f"the file name is not {id_}.json")
     if "written" in item and not is_time(str(item["written"])):
         found.append(f"written {item['written']!r} is not a UTC timestamp")
-    found += [f"{key} is not text" for key in ITEM_TEXTS if key in item and not _is_text(item[key])]
+    found += [
+        f"{key} is not text"
+        for key in ITEM_TEXTS
+        if key in item and not _is_text(item[key])
+    ]
     if "snapshot" in item and not isinstance(item["snapshot"], dict):
         found.append("snapshot is not an object")
     reports = item.get("reports")
     if "reports" in item and not isinstance(reports, list):
         found.append("reports is not a list")
     for position, report in enumerate(reports if isinstance(reports, list) else [], 1):
-        if not isinstance(report, dict) or any(report.get(k) is None for k in REPORT_KEYS[:3]):
+        if not isinstance(report, dict) or any(
+            report.get(k) is None for k in REPORT_KEYS[:3]
+        ):
             found.append(f"report {position} lacks at, emoji or repo")
     ruling = item.get("ruling")
     if ruling is not None:
@@ -139,7 +145,9 @@ def item_faults(name: str, item: dict[str, Any]) -> list[str]:
             found.append("the ruling's note is not text")
         elif not is_time(str(ruling.get("at"))):
             found.append("the ruling's at is not a UTC timestamp")
-        elif ruling.get("submitted") is not None and not is_time(str(ruling["submitted"])):
+        elif ruling.get("submitted") is not None and not is_time(
+            str(ruling["submitted"])
+        ):
             found.append("the ruling's submitted is neither null nor a UTC timestamp")
     question = item.get("question")
     if question is not None and (
@@ -177,7 +185,9 @@ class Snapshot(_Model):
 
     @classmethod
     def of(cls, observation: Observation) -> Snapshot:
-        return cls.model_validate(observation.model_dump(mode="json", include=set(SNAPSHOT_KEYS)))
+        return cls.model_validate(
+            observation.model_dump(mode="json", include=set(SNAPSHOT_KEYS))
+        )
 
 
 class Report(_Model):
@@ -317,7 +327,9 @@ class TriageIndex:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._items: dict[str, TriageItem] = {}  # observation id -> its open item
-        self._lock = threading.Lock()  # the store's listener writes on the queue's thread
+        self._lock = (
+            threading.Lock()
+        )  # the store's listener writes on the queue's thread
 
     def items(self) -> list[TriageItem]:
         with self._lock:
@@ -339,7 +351,9 @@ class TriageIndex:
             if match is None:
                 continue
             id_ = match.group(1)
-            read[id_] = self._read(path, f"{id_}.json") if (self.root / path).exists() else None
+            read[id_] = (
+                self._read(path, f"{id_}.json") if (self.root / path).exists() else None
+            )
         with self._lock:
             for id_, item in read.items():
                 if item is None:
@@ -352,7 +366,8 @@ class TriageIndex:
         the rest, each group by `written`, oldest first."""
         waiting = [item for item in self.items() if not item.submitted]
         return sorted(
-            waiting, key=lambda item: (not item.returned, item.written, item.observation)
+            waiting,
+            key=lambda item: (not item.returned, item.written, item.observation),
         )
 
 

@@ -17,7 +17,11 @@ from fieldnotes_contracts import (
 
 
 def post(**overrides):
-    fields = {"area": "uv workspace", "category": "hint", "text": "Sync with --all-packages."}
+    fields = {
+        "area": "uv workspace",
+        "category": "hint",
+        "text": "Sync with --all-packages.",
+    }
     fields["repo"] = "pvginkel/Example"
     return PostRequest(**{**fields, **overrides})
 
@@ -93,5 +97,7 @@ def test_match_bounds_k_by_the_candidate_cap(k):
 
 
 def test_problem_carries_extension_members():
-    problem = Problem(type="validation-error", title="t", status=422, errors=[{"loc": ["body"]}])
+    problem = Problem(
+        type="validation-error", title="t", status=422, errors=[{"loc": ["body"]}]
+    )
     assert problem.model_dump(exclude_none=True)["errors"] == [{"loc": ["body"]}]

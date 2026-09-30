@@ -62,9 +62,13 @@ def test_a_signed_push_pulls_and_reembeds_only_the_edited_observation(
     with start() as api:
         edited = post(api, auth, "grafana dashboards show the browser timezone")
         other = post(api, auth, "uv sync installs no workspace members")
-        before = api.get(f"/api/observations/{other}/neighbors", headers=auth("skills")).json()
+        before = api.get(
+            f"/api/observations/{other}/neighbors", headers=auth("skills")
+        ).json()
         path = observation_path(edited)
-        rewritten = Document(remote.file(path)).with_fields(canonical="uv sync installs no members")
+        rewritten = Document(remote.file(path)).with_fields(
+            canonical="uv sync installs no members"
+        )
         remote.push({path: rewritten.text}, "reconciler: rewrite")
         models.embedded.clear()
 
@@ -72,17 +76,23 @@ def test_a_signed_push_pulls_and_reembeds_only_the_edited_observation(
         response = api.post("/api/hooks/github", content=body, headers=headers)
         eventually(
             lambda: (
-                api.get(f"/api/observations/{edited}", headers=auth()).json()["canonical"]
+                api.get(f"/api/observations/{edited}", headers=auth()).json()[
+                    "canonical"
+                ]
                 == "uv sync installs no members"
             ),
             "the pull",
         )
-        after = api.get(f"/api/observations/{other}/neighbors", headers=auth("skills")).json()
+        after = api.get(
+            f"/api/observations/{other}/neighbors", headers=auth("skills")
+        ).json()
 
     assert response.status_code == 200
     assert response.json() == {"action": "queued"}
     assert models.embedded[0] == "uv: uv sync installs no members"
-    assert models.embedded[1:] == ["uv: uv sync installs no workspace members"]  # the query
+    assert models.embedded[1:] == [
+        "uv: uv sync installs no workspace members"
+    ]  # the query
     assert before["neighbors"][0]["match_class"] is None
     assert after["neighbors"][0]["id"] == edited
     assert after["neighbors"][0]["match_class"] == "likely"
@@ -93,7 +103,9 @@ def test_a_bad_signature_is_refused_and_pulls_nothing(start, pulls, delivery):
         queued = pulls(api)
         body, headers = delivery(secret="not-the-secret")
         response = api.post("/api/hooks/github", content=body, headers=headers)
-        unsigned = api.post("/api/hooks/github", content=body, headers={"X-GitHub-Event": "push"})
+        unsigned = api.post(
+            "/api/hooks/github", content=body, headers={"X-GitHub-Event": "push"}
+        )
 
     assert response.status_code == unsigned.status_code == 401
     assert response.json()["type"] == "unauthenticated"
@@ -118,7 +130,9 @@ def test_a_body_changed_after_signing_is_refused(start, pulls, delivery):
         {"repo": "pvginkel/SomethingElse"},
     ],
 )
-def test_everything_but_a_push_to_the_stores_main_is_ignored(start, pulls, delivery, kind):
+def test_everything_but_a_push_to_the_stores_main_is_ignored(
+    start, pulls, delivery, kind
+):
     with start() as api:
         queued = pulls(api)
         body, headers = delivery(**kind)
@@ -132,7 +146,12 @@ def test_the_repo_matches_whatever_its_case(start, pulls, delivery, environ):
     with start() as api:
         queued = pulls(api)
         body, headers = delivery(repo=environ["FIELDNOTES_GITHUB_REPO"].upper())
-        assert api.post("/api/hooks/github", content=body, headers=headers).json()["action"] == "queued"
+        assert (
+            api.post("/api/hooks/github", content=body, headers=headers).json()[
+                "action"
+            ]
+            == "queued"
+        )
     assert queued == [True]
 
 
@@ -140,5 +159,8 @@ def test_without_a_secret_every_delivery_is_refused(start, pulls, delivery):
     with start(FIELDNOTES_GITHUB_WEBHOOK_SECRET="", FIELDNOTES_GITHUB_REPO="") as api:
         queued = pulls(api)
         body, headers = delivery()
-        assert api.post("/api/hooks/github", content=body, headers=headers).status_code == 401
+        assert (
+            api.post("/api/hooks/github", content=body, headers=headers).status_code
+            == 401
+        )
     assert queued == []

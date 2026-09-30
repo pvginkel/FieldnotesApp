@@ -20,7 +20,12 @@ def carded(start, auth, remote, pull, clock, youtrack):
     @contextlib.contextmanager
     def raised(card: str = "FN-12", status: str = "raised", **environ: str):
         with start(**environ) as api:
-            body = {"area": "uv", "category": "hint", "text": "uv sync", "repo": "pvginkel/Example"}
+            body = {
+                "area": "uv",
+                "category": "hint",
+                "text": "uv sync",
+                "repo": "pvginkel/Example",
+            }
             id_ = api.post("/api/observations", json=body, headers=auth()).json()["id"]
             clock.tick()
             youtrack.add(card.upper(), clock.now)
@@ -62,7 +67,9 @@ def test_the_first_sync_records_the_card_time(carded, auth, remote, clock):
     assert remote.log()[0] == f"board-sync {id_} FN-12"
 
 
-def test_a_resolved_card_closes_the_observation_with_its_pointer(carded, auth, clock, youtrack):
+def test_a_resolved_card_closes_the_observation_with_its_pointer(
+    carded, auth, clock, youtrack
+):
     with carded() as (api, id_):
         youtrack.comment("FN-12", "Resolved: pvginkel/Example@abc123", clock.tick())
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
@@ -82,7 +89,11 @@ def test_a_later_resolution_changes_the_outcome(carded, auth, clock, youtrack, r
         youtrack.resolve("FN-12", clock.tick(), "Won't Do")
         reply = sync(api, auth, id_).json()
 
-    assert (reply["status"], reply["outcome"], reply["changed"]) == ("closed", "wont-do", True)
+    assert (reply["status"], reply["outcome"], reply["changed"]) == (
+        "closed",
+        "wont-do",
+        True,
+    )
     assert "outcome: wont-do" in remote.file(observation_path(id_))
 
 
@@ -128,7 +139,12 @@ def test_a_reopened_observation_keeps_its_status(carded, auth, clock, youtrack):
 
 def test_a_sync_without_a_card_is_a_conflict(start, auth):
     with start() as api:
-        body = {"area": "uv", "category": "hint", "text": "uv sync", "repo": "pvginkel/Example"}
+        body = {
+            "area": "uv",
+            "category": "hint",
+            "text": "uv sync",
+            "repo": "pvginkel/Example",
+        }
         id_ = api.post("/api/observations", json=body, headers=auth()).json()["id"]
         reply = sync(api, auth, id_)
     assert reply.status_code == 409
@@ -143,7 +159,9 @@ def test_a_card_the_board_lacks_is_a_conflict(carded, auth, youtrack):
     assert reply.json()["title"] == "the card FN-12 is not on the board"
 
 
-def test_an_unreachable_board_is_a_502_and_writes_nothing(carded, auth, youtrack, remote):
+def test_an_unreachable_board_is_a_502_and_writes_nothing(
+    carded, auth, youtrack, remote
+):
     with carded() as (api, id_):
         commits = len(remote.log())
         youtrack.fail = True
@@ -169,7 +187,9 @@ def test_an_event_for_a_card_queues_its_sync(carded, auth, clock, youtrack, even
     with carded() as (api, id_):
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
         reply = hook(api, {"event": "issueUpdated", "id": "FN-12", "summary": "…"})
-        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync")
+        eventually(
+            lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync"
+        )
     assert reply.json() == {"action": "queued"}
 
 
@@ -177,15 +197,20 @@ def test_a_comment_event_queues_a_sync_too(carded, auth, clock, youtrack, eventu
     with carded() as (api, id_):
         sync(api, auth, id_)
         youtrack.comment("FN-12", "A proposed fix.", clock.tick(600))
-        reply = hook(api, {"event": "commentAdded", "id": "FN-12", "comments": [{"text": "…"}]})
+        reply = hook(
+            api, {"event": "commentAdded", "id": "FN-12", "comments": [{"text": "…"}]}
+        )
         eventually(
-            lambda: observation(api, auth, id_)["card_updated"] == "2026-09-19T10:11:00Z",
+            lambda: observation(api, auth, id_)["card_updated"]
+            == "2026-09-19T10:11:00Z",
             "the queued sync",
         )
     assert reply.json() == {"action": "queued"}
 
 
-def test_the_card_is_read_once_the_delivery_has_settled(carded, auth, clock, youtrack, eventually):
+def test_the_card_is_read_once_the_delivery_has_settled(
+    carded, auth, clock, youtrack, eventually
+):
     """YouTrack sends the delivery before it commits the change: the card is as it was when the
     delivery arrives, and the change is on it a moment later."""
     with carded(FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE="0.3") as (api, id_):
@@ -193,16 +218,23 @@ def test_the_card_is_read_once_the_delivery_has_settled(carded, auth, clock, you
         assert hook(api, {"id": "FN-12"}).json() == {"action": "queued"}
         assert len(youtrack.reads) == reads
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
-        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the settled sync")
+        eventually(
+            lambda: observation(api, auth, id_)["status"] == "closed",
+            "the settled sync",
+        )
 
 
-def test_deliveries_that_arrive_together_cost_one_read(carded, auth, clock, youtrack, eventually):
+def test_deliveries_that_arrive_together_cost_one_read(
+    carded, auth, clock, youtrack, eventually
+):
     with carded(FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE="0.3") as (api, id_):
         reads = len(youtrack.reads)
         youtrack.comment("FN-12", "A proposed fix.", clock.tick(600))
         for event in ("commentAdded", "issueUpdated", "issueUpdated"):
             hook(api, {"event": event, "id": "FN-12"})
-        eventually(lambda: observation(api, auth, id_)["card_updated"] is not None, "the sync")
+        eventually(
+            lambda: observation(api, auth, id_)["card_updated"] is not None, "the sync"
+        )
         time.sleep(0.5)
     assert len(youtrack.reads) == reads + 1
 
@@ -213,7 +245,11 @@ def test_an_event_for_any_other_issue_is_ignored_without_a_read(carded, youtrack
         replies = [
             hook(api, {"event": "issueUpdated", "id": "KC-65"}),
             hook(api, {"event": "issueUpdated"}),
-            api.post("/api/hooks/youtrack", content=b"not json", headers={"X-YouTrack-Token": TOKEN}),
+            api.post(
+                "/api/hooks/youtrack",
+                content=b"not json",
+                headers={"X-YouTrack-Token": TOKEN},
+            ),
         ]
     assert [r.json() for r in replies] == [{"action": "ignored"}] * 3
     assert len(youtrack.reads) == reads
@@ -223,12 +259,18 @@ def test_the_card_matches_whatever_its_case(carded, auth, clock, youtrack, event
     with carded(card="fn-12") as (api, id_):
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
         assert hook(api, {"id": "FN-12"}).json() == {"action": "queued"}
-        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync")
+        eventually(
+            lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync"
+        )
 
 
 @pytest.mark.parametrize(
     ("token", "header"),
-    [("wrong-token", "X-YouTrack-Token"), (TOKEN, "X-Other-Header"), ("", "X-YouTrack-Token")],
+    [
+        ("wrong-token", "X-YouTrack-Token"),
+        (TOKEN, "X-Other-Header"),
+        ("", "X-YouTrack-Token"),
+    ],
 )
 def test_a_delivery_without_the_token_is_refused(carded, youtrack, token, header):
     with carded() as (api, _):
@@ -250,17 +292,29 @@ def test_without_a_webhook_token_every_delivery_is_refused(start):
         assert hook(api, {"id": "FN-12"}).status_code == 401
 
 
-def test_syncs_and_deliveries_are_counted(carded, auth, clock, youtrack, eventually, scrape):
+def test_syncs_and_deliveries_are_counted(
+    carded, auth, clock, youtrack, eventually, scrape
+):
     with carded() as (api, id_):
         sync(api, auth, id_)
         sync(api, auth, id_)
         hook(api, {"event": "issueUpdated", "id": "KC-65"})
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
         hook(api, {"event": "issueUpdated", "id": "FN-12"})
-        eventually(lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync")
+        eventually(
+            lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync"
+        )
         value = scrape(api)
 
     assert value("fieldnotes_board_syncs_total", result="changed") == 2
     assert value("fieldnotes_board_syncs_total", result="unchanged") == 1
-    assert value("fieldnotes_webhook_deliveries_total", source="youtrack", action="ignored") == 1
-    assert value("fieldnotes_webhook_deliveries_total", source="youtrack", action="queued") == 1
+    assert (
+        value(
+            "fieldnotes_webhook_deliveries_total", source="youtrack", action="ignored"
+        )
+        == 1
+    )
+    assert (
+        value("fieldnotes_webhook_deliveries_total", source="youtrack", action="queued")
+        == 1
+    )

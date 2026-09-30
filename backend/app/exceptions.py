@@ -53,7 +53,10 @@ class InvalidOperationException(BusinessLogicException):
 class RouteNotAvailableException(BusinessLogicException):
     """Exception raised when accessing endpoints that are not available in the current mode."""
 
-    def __init__(self, message: str = "This endpoint is only available when the server is running in testing mode") -> None:
+    def __init__(
+        self,
+        message: str = "This endpoint is only available when the server is running in testing mode",
+    ) -> None:
         super().__init__(message, error_code="ROUTE_NOT_AVAILABLE")
 
 

@@ -23,7 +23,9 @@ def ulid(n: int) -> str:
 
 def write(root: Path, n: int, area: str, text: str, **fields) -> str:
     reaction = Reaction(at=AT, emoji="📝", repo="pvginkel/Example", text=text)
-    document = new_document(id_=ulid(n), area=area, category="hint", text=text, reaction=reaction)
+    document = new_document(
+        id_=ulid(n), area=area, category="hint", text=text, reaction=reaction
+    )
     if fields:
         document = document.with_fields(**fields)
     path = observation_path(ulid(n))
@@ -80,7 +82,9 @@ def test_a_deleted_cache_rebuilds_an_equal_index(root, tmp_path, models):
 
     assert len(models.embedded) == 5  # one vector per observation
     for n in range(5):
-        np.testing.assert_array_equal(first.get(ulid(n)).vector, second.get(ulid(n)).vector)
+        np.testing.assert_array_equal(
+            first.get(ulid(n)).vector, second.get(ulid(n)).vector
+        )
 
 
 def test_a_warm_cache_embeds_nothing(root, tmp_path, models):
@@ -112,7 +116,10 @@ def test_only_a_changed_canonical_is_embedded_again(root, tmp_path, models):
 
 
 def test_a_removed_file_leaves_the_index(root, tmp_path, models):
-    paths = {write(root, 1, "area", "gone soon", card="FN-1"), write(root, 2, "area", "stays")}
+    paths = {
+        write(root, 1, "area", "gone soon", card="FN-1"),
+        write(root, 2, "area", "stays"),
+    }
     built = index(root, tmp_path / "cache", models)
     built.update(paths)
     (root / observation_path(ulid(1))).unlink()
@@ -129,7 +136,9 @@ def test_a_removed_file_leaves_the_index(root, tmp_path, models):
 def test_an_invalid_file_is_logged_and_left_out(root, tmp_path, models, caplog):
     good = write(root, 1, "area", "fine")
     bad = write(root, 2, "area", "broken")
-    (root / bad).write_text((root / bad).read_text().replace("status: open", "status: lost"))
+    (root / bad).write_text(
+        (root / bad).read_text().replace("status: open", "status: lost")
+    )
     renamed = observation_path(ulid(3))
     (root / renamed).write_text((root / good).read_text())
     built = index(root, tmp_path / "cache", models)
@@ -168,7 +177,10 @@ def test_the_whole_index_is_scored_in_the_order_of_its_ids(root, tmp_path, model
 
     assert built.ids == [ulid(1), ulid(2), ulid(3)]
     assert cosines[0] == pytest.approx(1.0) and cosines[0] > cosines[1] > cosines[2]
-    assert overlaps[0] == pytest.approx(1.0) and overlaps[0] > overlaps[1] > overlaps[2] == 0.0
+    assert (
+        overlaps[0] == pytest.approx(1.0)
+        and overlaps[0] > overlaps[1] > overlaps[2] == 0.0
+    )
 
 
 def test_terms_keep_identifiers_whole_and_in_parts():

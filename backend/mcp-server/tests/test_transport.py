@@ -20,7 +20,9 @@ ACCEPT = {"Accept": "application/json, text/event-stream"}
 async def test_the_token_admits_a_tool_call(api):
     api.answer(201, {"id": ID, "candidates": []})
 
-    result = await call(api, "post", {"area": "a", "category": "idea", "text": "t", "repo": "o/r"})
+    result = await call(
+        api, "post", {"area": "a", "category": "idea", "text": "t", "repo": "o/r"}
+    )
 
     assert not result.isError
     assert len(api.requests) == 1

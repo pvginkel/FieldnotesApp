@@ -91,7 +91,9 @@ def _id(value: str) -> str:
 
 
 def _json(model: BaseModel, status: int = 200) -> Response:
-    return Response(model.model_dump_json(), status=status, content_type="application/json")
+    return Response(
+        model.model_dump_json(), status=status, content_type="application/json"
+    )
 
 
 def _route() -> str:
@@ -145,7 +147,9 @@ def _store_unreachable(exc: GitError) -> Response:
 
 @fieldnotes_bp.errorhandler(Exception)
 def _unhandled(exc: Exception) -> Response:
-    logger.exception("unhandled exception on %s %s", request.method, request.path, exc_info=exc)
+    logger.exception(
+        "unhandled exception on %s %s", request.method, request.path, exc_info=exc
+    )
     return problem_response(internal())
 
 
@@ -232,7 +236,9 @@ def neighbors(
 @fieldnotes_bp.route("/match", methods=["POST"])
 @public
 @inject
-def match(service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service]) -> Response:
+def match(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> Response:
     """The match pipeline, writing nothing."""
     runtime = _runtime(service)
     _client(runtime)
@@ -268,7 +274,11 @@ def github_hook(
     github = runtime.settings.github if runtime is not None else None
     body = request.get_data()
     signature = request.headers.get("X-Hub-Signature-256")
-    if runtime is None or github is None or not github_verified(github.secret, body, signature):
+    if (
+        runtime is None
+        or github is None
+        or not github_verified(github.secret, body, signature)
+    ):
         raise ProblemException(
             401,
             ProblemType.unauthenticated,
@@ -319,4 +329,3 @@ def youtrack_hook(
     runtime.observations.sync_later(entry.observation.id, hook.settle)
     runtime.metrics.webhooks.labels("youtrack", "queued").inc()
     return _json(HookReply(action="queued"))
-

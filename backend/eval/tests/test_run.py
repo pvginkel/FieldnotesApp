@@ -17,7 +17,12 @@ def test_the_report_covers_the_pairs_and_the_replay(tmp_path, dataset, records):
     replay = tmp_path / "replay"
     replay.mkdir()
     (replay / "replay.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
-    settings = {"embed_model": "fake", "lexical_weight": 0.0, "related": 0.4, "gap": 0.5}
+    settings = {
+        "embed_model": "fake",
+        "lexical_weight": 0.0,
+        "related": 0.4,
+        "gap": 0.5,
+    }
     summary = {"settings": settings, **summarize(records)}
     (replay / "summary.json").write_text(json.dumps(summary))
     models = FakeModels()

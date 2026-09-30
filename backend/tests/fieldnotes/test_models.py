@@ -22,7 +22,9 @@ class Pod:
         self.requests.append((request.url.path, body))
         if self.status != 200:
             return httpx.Response(self.status, text="Model is overloaded")
-        return httpx.Response(200, json=[[float(len(text)), 1.0] for text in body["inputs"]])
+        return httpx.Response(
+            200, json=[[float(len(text)), 1.0] for text in body["inputs"]]
+        )
 
 
 def client(pod) -> HttpModels:

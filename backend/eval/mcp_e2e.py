@@ -215,10 +215,14 @@ def error_text(result: CallToolResult) -> str:
 
 
 @asynccontextmanager
-async def mcp_session(url: str, token: str, timeout: float) -> AsyncIterator[ClientSession]:
+async def mcp_session(
+    url: str, token: str, timeout: float
+) -> AsyncIterator[ClientSession]:
     """An initialized MCP client session with the server at `url`, presenting the bearer."""
     headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=timeout, verify=TRUST_STORE) as http:
+    async with httpx.AsyncClient(
+        headers=headers, timeout=timeout, verify=TRUST_STORE
+    ) as http:
         async with streamable_http_client(url, http_client=http) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -229,7 +233,9 @@ async def call(session: ClientSession, tool: str, arguments: dict[str, Any]) -> 
     """A tool's structured result; a tool error is a failed check."""
     result = await session.call_tool(tool, arguments)
     require(not result.isError, f"{tool} failed: {error_text(result)}")
-    require(result.structuredContent is not None, f"{tool} answered no structured content")
+    require(
+        result.structuredContent is not None, f"{tool} answered no structured content"
+    )
     return result.structuredContent
 
 
@@ -247,7 +253,9 @@ async def check_the_bearer_gate(url: str, token: str) -> None:
             ("without a bearer", {}),
             ("with a wrong bearer", {"Authorization": f"Bearer {token}x"}),
         ]:
-            response = await http.post(url, json=INITIALIZE, headers={**ACCEPT, **headers})
+            response = await http.post(
+                url, json=INITIALIZE, headers={**ACCEPT, **headers}
+            )
             require(
                 response.status_code == 401,
                 f"{what}: {response.status_code}, expected 401",
@@ -263,7 +271,9 @@ async def check_the_bearer_gate(url: str, token: str) -> None:
     step("the bearer gate refuses a call without the token and with a wrong one")
 
 
-async def post_novel(session: ClientSession, provenance: dict[str, str]) -> tuple[Scenario, str]:
+async def post_novel(
+    session: ClientSession, provenance: dict[str, str]
+) -> tuple[Scenario, str]:
     """The first scenario the store does not hold already, posted: the scenario and the id it
     created. A post answered with candidates created nothing, so trying the next one costs the
     store nothing but the match."""
@@ -283,7 +293,9 @@ async def post_novel(session: ClientSession, provenance: dict[str, str]) -> tupl
         if reply.id:
             return scenario, reply.id
         held = reply.candidates[0]
-        print(f"..  {scenario.area}: the store holds it already ({held.id}); trying the next")
+        print(
+            f"..  {scenario.area}: the store holds it already ({held.id}); trying the next"
+        )
     raise CheckFailed(
         f"all {len(SCENARIOS)} scenarios are in the store already, one per run of this script; "
         "the plan's step 8 clears that test data"
@@ -316,8 +328,12 @@ async def end_to_end(session: ClientSession) -> list[str]:
     step(f"the tool surface is exactly {', '.join(TOOLS)}")
 
     reporter = f"mcp-e2e-{secrets.token_hex(4)}"
-    scenario, created = await post_novel(session, {"repo": FIRST_REPO, "session": reporter})
-    step(f"a novel post created {created} ({scenario.area}, reported from {FIRST_REPO})")
+    scenario, created = await post_novel(
+        session, {"repo": FIRST_REPO, "session": reporter}
+    )
+    step(
+        f"a novel post created {created} ({scenario.area}, reported from {FIRST_REPO})"
+    )
 
     paraphrase = {
         "area": scenario.area,
@@ -351,14 +367,19 @@ async def end_to_end(session: ClientSession) -> list[str]:
             },
         )
     )
-    require(reacted.id == created, f"the reaction answered for {reacted.id}, not {created}")
     require(
-        f"{EMOJI} (1)" in reacted.reactions and f"{POST_EMOJI} (1)" in reacted.reactions,
+        reacted.id == created, f"the reaction answered for {reacted.id}, not {created}"
+    )
+    require(
+        f"{EMOJI} (1)" in reacted.reactions
+        and f"{POST_EMOJI} (1)" in reacted.reactions,
         f"the counts after the reaction are {reacted.reactions}",
     )
     step(f"the reaction was appended: {reacted.reactions}")
 
-    observation = Observation.model_validate(await call(session, "get", {"id": created}))
+    observation = Observation.model_validate(
+        await call(session, "get", {"id": created})
+    )
     entry = next((one for one in observation.reactions if one.emoji == EMOJI), None)
     require(entry is not None, f"the {EMOJI} reaction is not in the observation")
     assert entry is not None  # for the type checker; `require` raised
@@ -382,10 +403,15 @@ async def end_to_end(session: ClientSession) -> list[str]:
         f"moved to {observation.last_seen:%Y-%m-%dT%H:%M:%SZ}"
     )
 
-    forced = PostReply.model_validate(await call(session, "post", {**paraphrase, "force": True}))
+    forced = PostReply.model_validate(
+        await call(session, "post", {**paraphrase, "force": True})
+    )
     require(forced.id is not None, "the forced post created nothing")
     require(forced.id != created, "the forced post answered with the id it matched")
-    require(not forced.candidates, f"the forced post also answered candidates: {forced.candidates}")
+    require(
+        not forced.candidates,
+        f"the forced post also answered candidates: {forced.candidates}",
+    )
     assert forced.id is not None  # for the type checker; `require` raised
     second = Observation.model_validate(await call(session, "get", {"id": forced.id}))
     require(second.canonical, f"the forced observation {forced.id} has no statement")
@@ -404,13 +430,17 @@ async def end_to_end(session: ClientSession) -> list[str]:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--url", default=DEFAULT_URL, help=f"the /mcp endpoint ({DEFAULT_URL})")
+    parser.add_argument(
+        "--url", default=DEFAULT_URL, help=f"the /mcp endpoint ({DEFAULT_URL})"
+    )
     parser.add_argument(
         "--token",
         default=os.environ.get(TOKEN_ENV),
         help=f"the bearer agents present; ${TOKEN_ENV} otherwise",
     )
-    parser.add_argument("--timeout", type=float, default=120.0, help="seconds for one call")
+    parser.add_argument(
+        "--timeout", type=float, default=120.0, help="seconds for one call"
+    )
     args = parser.parse_args()
     if not args.token:
         parser.error(f"a token is needed: --token or ${TOKEN_ENV}")

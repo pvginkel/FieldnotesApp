@@ -16,7 +16,9 @@ def test_self_admits_an_editor(oidc_client: Any, generate_test_jwt: Any) -> None
     assert response.status_code == 200
 
 
-def test_self_refuses_a_user_without_editor(oidc_client: Any, generate_test_jwt: Any) -> None:
+def test_self_refuses_a_user_without_editor(
+    oidc_client: Any, generate_test_jwt: Any
+) -> None:
     oidc_client.set_cookie("access_token", generate_test_jwt(roles=["viewer"]))
 
     response = oidc_client.get("/api/auth/self")

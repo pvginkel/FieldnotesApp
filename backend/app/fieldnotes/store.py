@@ -106,7 +106,9 @@ class Store:
         self._listeners: Sequence[Listener] = ()
         self._seen: str | None = None  # the commit the listeners last took in
         # A job, or None to stop the worker.
-        self._queue: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] = queue.Queue()
+        self._queue: queue.Queue[tuple[Callable[[], Any], Future[Any]] | None] = (
+            queue.Queue()
+        )
         self._worker: threading.Thread | None = None
 
     # -- git -------------------------------------------------------------------------------------
@@ -124,10 +126,14 @@ class Store:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            raise GitError(f"git {args[0]} took longer than {GIT_TIMEOUT:.0f} s") from None
+            raise GitError(
+                f"git {args[0]} took longer than {GIT_TIMEOUT:.0f} s"
+            ) from None
         text = process.stdout.decode(errors="replace")
         if check and process.returncode:
-            raise GitError(f"git {' '.join(args)} failed ({process.returncode}): {text.strip()}")
+            raise GitError(
+                f"git {' '.join(args)} failed ({process.returncode}): {text.strip()}"
+            )
         return process.returncode, text
 
     def _remote_head(self) -> str | None:
@@ -183,7 +189,9 @@ class Store:
         self._listeners = listeners
         self._seen = None
         self._sync()
-        self._worker = threading.Thread(target=self._work, name="store-queue", daemon=True)
+        self._worker = threading.Thread(
+            target=self._work, name="store-queue", daemon=True
+        )
         self._worker.start()
 
     def stop(self) -> None:
@@ -259,7 +267,9 @@ def _rejected(porcelain: str) -> bool:
     """Whether a failed push was refused because the remote moved on, as opposed to any other
     failure (a hook's refusal, a credential)."""
     return any(
-        line.startswith("!") and "[rejected]" in line and "[remote rejected]" not in line
+        line.startswith("!")
+        and "[rejected]" in line
+        and "[remote rejected]" not in line
         for line in porcelain.splitlines()
     )
 

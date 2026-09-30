@@ -15,7 +15,13 @@ REPO = "pvginkel/Example"
 
 
 def post(api, auth, text=DUPLICATE, session="s-1", **fields):
-    body = {"area": "uv", "category": "hint", "text": text, "repo": REPO, "session": session}
+    body = {
+        "area": "uv",
+        "category": "hint",
+        "text": text,
+        "repo": REPO,
+        "session": session,
+    }
     return api.post("/api/observations", json=body | fields, headers=auth())
 
 

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 PROBLEM_CONTENT_TYPE = "application/problem+json"
 
 INTERNAL_TITLE = "the Fieldnotes API hit an unexpected error"
-INTERNAL_DETAIL = "retry the request; if it keeps failing, the API's log holds the traceback"
+INTERNAL_DETAIL = (
+    "retry the request; if it keeps failing, the API's log holds the traceback"
+)
 
 
 class ProblemException(Exception):
@@ -38,7 +40,11 @@ class ProblemException(Exception):
         extensions: dict[str, Any] | None = None,
     ) -> None:
         self.problem = Problem(
-            type=str(type_), title=title, status=status, detail=detail, **(extensions or {})
+            type=str(type_),
+            title=title,
+            status=status,
+            detail=detail,
+            **(extensions or {}),
         )
         super().__init__(title)
 
@@ -95,7 +101,8 @@ def validation_problem(exc: ValidationError, *location: str) -> ProblemException
     each `loc` led by where the value was (`body`; `path`, `id`; `query`, `k`), so the payload is
     never echoed back."""
     errors = [
-        {"loc": [*location, *e["loc"]], "msg": e["msg"], "type": e["type"]} for e in exc.errors()
+        {"loc": [*location, *e["loc"]], "msg": e["msg"], "type": e["type"]}
+        for e in exc.errors()
     ]
     return ProblemException(
         422,

@@ -66,7 +66,9 @@ FIELDS = (
     "card_updated",
     "pointer",
 )
-_NULLABLE = frozenset({"last_reviewed", "outcome", "reason", "card", "card_updated", "pointer"})
+_NULLABLE = frozenset(
+    {"last_reviewed", "outcome", "reason", "card", "card_updated", "pointer"}
+)
 
 REACTIONS = "reactions"
 COMMENTS = "comments"
@@ -85,7 +87,9 @@ class _Loader(yaml.SafeLoader):
 
 
 _Loader.yaml_implicit_resolvers = {
-    first: [(tag, regexp) for tag, regexp in resolvers if tag == "tag:yaml.org,2002:null"]
+    first: [
+        (tag, regexp) for tag, regexp in resolvers if tag == "tag:yaml.org,2002:null"
+    ]
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 
@@ -96,7 +100,11 @@ class _Dumper(yaml.SafeDumper):
 
 
 _Dumper.yaml_implicit_resolvers = {
-    first: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+    first: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag != "tag:yaml.org,2002:timestamp"
+    ]
     for first, resolvers in yaml.SafeDumper.yaml_implicit_resolvers.items()
 }
 
@@ -150,7 +158,9 @@ def render_field(key: str, value: Any) -> list[str]:
 
 def render_entry(entry: Mapping[str, Any]) -> list[str]:
     """The lines of one reaction or comment entry, `None` fields left out."""
-    lines = _dump({k: _plain(v) for k, v in entry.items() if v is not None}).splitlines()
+    lines = _dump(
+        {k: _plain(v) for k, v in entry.items() if v is not None}
+    ).splitlines()
     return [f"- {lines[0]}", *(f"  {line}" for line in lines[1:])]
 
 
@@ -221,7 +231,11 @@ class Document:
         for position, (name, index) in enumerate(headings):
             if name in sections:
                 raise DocumentError(f"the body has two `### {name}` sections")
-            end = headings[position + 1][1] if position + 1 < len(headings) else len(self._lines)
+            end = (
+                headings[position + 1][1]
+                if position + 1 < len(headings)
+                else len(self._lines)
+            )
             sections[name] = (index + 1, end)
         if REACTIONS not in sections:
             raise DocumentError("the body has no `### reactions` section")
@@ -240,10 +254,14 @@ class Document:
         span = self._sections().get(section)
         if span is None:
             return []
-        data = _load("\n".join(self._lines[span[0] : span[1]]), f"`### {section}` section")
+        data = _load(
+            "\n".join(self._lines[span[0] : span[1]]), f"`### {section}` section"
+        )
         if data is None:
             return []
-        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        if not isinstance(data, list) or not all(
+            isinstance(item, dict) for item in data
+        ):
             raise DocumentError(f"the `### {section}` section is not a list of entries")
         return data
 
@@ -252,7 +270,9 @@ class Document:
         """The file as the contract's observation. Frontmatter keys and entry keys the contract
         does not know are left in the file and out of this."""
         fields = {key: self.frontmatter.get(key) for key in FIELDS}
-        missing = [key for key in FIELDS if key not in _NULLABLE and fields[key] is None]
+        missing = [
+            key for key in FIELDS if key not in _NULLABLE and fields[key] is None
+        ]
         if missing:
             raise DocumentError(f"the frontmatter lacks {', '.join(missing)}")
         try:
@@ -273,7 +293,9 @@ class Document:
         spans = self._field_spans()
         closing = self._closing
         replacements = [
-            (spans[key], render_field(key, value)) for key, value in values.items() if key in spans
+            (spans[key], render_field(key, value))
+            for key, value in values.items()
+            if key in spans
         ]
         added = [
             line
@@ -301,12 +323,15 @@ class Document:
 
 
 def _known(model: type[Reaction] | type[Comment], entry: dict[str, Any]) -> Any:
-    return model(**{key: value for key, value in entry.items() if key in model.model_fields})
+    return model(
+        **{key: value for key, value in entry.items() if key in model.model_fields}
+    )
 
 
 def _summary(exc: ValidationError) -> str:
     return "; ".join(
-        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" for error in exc.errors()
+        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+        for error in exc.errors()
     )
 
 

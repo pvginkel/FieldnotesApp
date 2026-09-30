@@ -135,23 +135,31 @@ def test_a_hand_edited_file_reads():
 
 def test_setting_fields_changes_their_lines_and_nothing_else():
     edited = Document(EDITED).with_fields(
-        status="closed", outcome="done", last_updated=LATER, pointer="pvginkel/Example#42"
+        status="closed",
+        outcome="done",
+        last_updated=LATER,
+        pointer="pvginkel/Example#42",
     )
     expected = (
         EDITED.replace("status: raised", "status: closed")
         .replace("outcome:\n", "outcome: done\n")
-        .replace("last_updated: 2026-09-21T09:00:00Z", "last_updated: 2026-09-20T08:00:00Z")
+        .replace(
+            "last_updated: 2026-09-21T09:00:00Z", "last_updated: 2026-09-20T08:00:00Z"
+        )
         .replace("pointer: null", "pointer: pvginkel/Example#42")
     )
     assert edited.text == expected
 
 
 def test_setting_a_multi_line_field_replaces_all_of_its_lines():
-    edited = Document(EDITED).with_fields(canonical="Pass --all-packages.", repos=["a/b"])
+    edited = Document(EDITED).with_fields(
+        canonical="Pass --all-packages.", repos=["a/b"]
+    )
     assert "  none of the members" not in edited.text
     assert "- pvginkel/Other" not in edited.text
-    assert "# condensed by the reconciler\ncanonical: Pass --all-packages.\nrepos: [a/b]\n" in (
-        edited.text
+    assert (
+        "# condensed by the reconciler\ncanonical: Pass --all-packages.\nrepos: [a/b]\n"
+        in (edited.text)
     )
     assert edited.observation.canonical == "Pass --all-packages."
     assert edited.observation.repos == ["a/b"]
@@ -164,13 +172,14 @@ def test_setting_an_absent_field_adds_it_before_the_closing_line():
 
 
 def test_a_reaction_goes_after_the_last_one():
-    reaction = Reaction(at=LATER, emoji="👎", repo="pvginkel/Third", text="Not any more.")
-    edited = Document(EDITED).with_reaction(reaction)
-    entry = (
-        "- at: 2026-09-20T08:00:00Z\n  emoji: 👎\n  repo: pvginkel/Third\n  text: Not any more.\n"
+    reaction = Reaction(
+        at=LATER, emoji="👎", repo="pvginkel/Third", text="Not any more."
     )
+    edited = Document(EDITED).with_reaction(reaction)
+    entry = "- at: 2026-09-20T08:00:00Z\n  emoji: 👎\n  repo: pvginkel/Third\n  text: Not any more.\n"
     assert edited.text == EDITED.replace(
-        "  repo: pvginkel/Other\n\n### comments", f"  repo: pvginkel/Other\n\n{entry}\n### comments"
+        "  repo: pvginkel/Other\n\n### comments",
+        f"  repo: pvginkel/Other\n\n{entry}\n### comments",
     )
     assert edited.observation.reactions[-1] == reaction
 
@@ -185,7 +194,9 @@ def test_a_reaction_goes_into_an_empty_section():
 
 def test_a_reaction_goes_at_the_end_of_a_file_without_comments():
     text = NEW.replace("\n### comments\n", "")
-    edited = Document(text).with_reaction(post_reaction(at=LATER, emoji="👍", text=None))
+    edited = Document(text).with_reaction(
+        post_reaction(at=LATER, emoji="👍", text=None)
+    )
     assert edited.text.endswith(
         "pass --all-packages.'\n\n- at: 2026-09-20T08:00:00Z\n"
         "  emoji: 👍\n  repo: pvginkel/Example\n  session: s-1\n"
@@ -230,10 +241,18 @@ def test_any_text_survives_a_reaction_write():
         (NEW.replace("### reactions", "### notes"), "no `### reactions`"),
         (NEW.replace("status: open", "status: pending"), "status"),
         (NEW.replace("category: hint", "category: bug"), "category"),
-        (NEW.replace("created: 2026-09-19T10:04:12Z", "created: 2026-09-19T10:04:12"), "created"),
+        (
+            NEW.replace(
+                "created: 2026-09-19T10:04:12Z", "created: 2026-09-19T10:04:12"
+            ),
+            "created",
+        ),
         (NEW.replace("area: uv workspace\n", ""), "lacks area"),
         (NEW.replace("### comments\n", "### comments\n\nfree text\n"), "not a list"),
-        (NEW.replace("repos: [pvginkel/Example]", "repos: [unclosed"), "not valid YAML"),
+        (
+            NEW.replace("repos: [pvginkel/Example]", "repos: [unclosed"),
+            "not valid YAML",
+        ),
         (NEW + "\n### reactions\n", "two `### reactions`"),
     ],
 )

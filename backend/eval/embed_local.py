@@ -48,9 +48,15 @@ def embedded_texts(dataset: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Embed the dataset with local models.")
-    parser.add_argument("--dataset", type=Path, required=True, help="the dataset directory")
-    parser.add_argument("--work", type=Path, required=True, help="the bench's work directory")
-    parser.add_argument("models", nargs="+", metavar="MODEL", help="Hugging Face model ids")
+    parser.add_argument(
+        "--dataset", type=Path, required=True, help="the dataset directory"
+    )
+    parser.add_argument(
+        "--work", type=Path, required=True, help="the bench's work directory"
+    )
+    parser.add_argument(
+        "models", nargs="+", metavar="MODEL", help="Hugging Face model ids"
+    )
     args = parser.parse_args()
 
     texts = embedded_texts(args.dataset)
@@ -58,7 +64,9 @@ def main() -> int:
         started = time.perf_counter()
         # Some checkpoints are stored in half precision, and transformers loads what is stored:
         # fp16 on a CPU is many times slower than fp32, which is also what TEI's CPU image runs.
-        model = SentenceTransformer(name, device="cpu", model_kwargs={"dtype": torch.float32})
+        model = SentenceTransformer(
+            name, device="cpu", model_kwargs={"dtype": torch.float32}
+        )
         loaded = time.perf_counter() - started
 
         model.encode(texts[:2], normalize_embeddings=True)
@@ -76,7 +84,9 @@ def main() -> int:
         directory.mkdir(parents=True, exist_ok=True)
         for text, vector in zip(texts, vectors, strict=True):
             key = hashlib.sha256(text.encode()).hexdigest()
-            (directory / key).write_bytes(np.asarray(vector, dtype=np.float32).tobytes())
+            (directory / key).write_bytes(
+                np.asarray(vector, dtype=np.float32).tobytes()
+            )
 
         timing = {
             "model": name,

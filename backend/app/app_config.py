@@ -29,7 +29,9 @@ class AppSettings(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def load(cls, env: "AppEnvironment | None" = None, flask_env: str = "development") -> "AppSettings":
+    def load(
+        cls, env: "AppEnvironment | None" = None, flask_env: str = "development"
+    ) -> "AppSettings":
         """Load app settings from environment variables."""
         if env is None:
             env = AppEnvironment()

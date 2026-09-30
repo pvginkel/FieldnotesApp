@@ -58,7 +58,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         TempFileManager,
         lifecycle_coordinator=lifecycle_coordinator,
     )
-    register_for_background_startup(lambda c: c.temp_file_manager().start_cleanup_thread())
+    register_for_background_startup(
+        lambda c: c.temp_file_manager().start_cleanup_thread()
+    )
 
     # Metrics service - background thread for Prometheus metrics
     metrics_service = providers.Singleton(

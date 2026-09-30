@@ -50,7 +50,9 @@ def build_server(api: ApiClient) -> FastMCP:
         streamable_http_path="/mcp",
         stateless_http=True,
         json_response=False,
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        ),
     )
     register_tools(mcp, api)
     for path in sorted(HEALTH_PATHS):

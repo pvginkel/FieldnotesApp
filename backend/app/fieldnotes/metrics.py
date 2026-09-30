@@ -243,7 +243,9 @@ class Metrics:
             self._expire()
             offered = self._offered.pop((repo, session), None)
         if offered is not None:
-            self.follow_ups.labels("reacted" if id_ in offered[1] else "reacted_other").inc()
+            self.follow_ups.labels(
+                "reacted" if id_ in offered[1] else "reacted_other"
+            ).inc()
         self.reactions.labels(client).inc()
 
     def _expire(self) -> None:

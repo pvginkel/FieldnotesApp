@@ -22,7 +22,9 @@ class ClientRegistry:
     the time taken says nothing about which client matched or how nearly."""
 
     def __init__(self, tokens: Mapping[str, str]) -> None:
-        self._records = tuple((name, _digest(token)) for name, token in sorted(tokens.items()))
+        self._records = tuple(
+            (name, _digest(token)) for name, token in sorted(tokens.items())
+        )
 
     @property
     def names(self) -> tuple[str, ...]:

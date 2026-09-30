@@ -66,18 +66,26 @@ def replace_store(
     body = request.get_json(silent=True)
     files = body.get("files") if isinstance(body, dict) else None
     if not isinstance(files, dict) or not all(
-        isinstance(path, str) and path.split("/")[0] in DIRECTORIES and isinstance(text, str)
+        isinstance(path, str)
+        and path.split("/")[0] in DIRECTORIES
+        and isinstance(text, str)
         for path, text in files.items()
     ):
         return jsonify(
-            {"message": 'expected {"files": {path: text}}, every path under observations/ or triage/'}
+            {
+                "message": 'expected {"files": {path: text}}, every path under observations/ or triage/'
+            }
         ), 400
     service.ready_observations()
     assert service.runtime is not None
 
     def edit(root: Path) -> tuple[None, Commit | None]:
         old = _files(root)
-        changed = {path for path in old.keys() | files.keys() if old.get(path) != files.get(path)}
+        changed = {
+            path
+            for path in old.keys() | files.keys()
+            if old.get(path) != files.get(path)
+        }
         for path in changed:
             target = root / path
             if path in files:

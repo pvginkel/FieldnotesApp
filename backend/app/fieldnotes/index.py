@@ -204,7 +204,9 @@ class Index:
         try:
             observation = Document(path.read_text()).observation
         except DocumentError as exc:
-            logger.error("%s is left out of the index: %s", path.relative_to(self.root), exc)
+            logger.error(
+                "%s is left out of the index: %s", path.relative_to(self.root), exc
+            )
             return None
         if observation.id != id_:
             logger.error(
@@ -232,12 +234,16 @@ class Index:
             if observation is not None
         }
         vectors = {id_: self.cache.get(text) for id_, text in texts.items()}
-        missing = sorted({texts[id_] for id_, vector in vectors.items() if vector is None})
+        missing = sorted(
+            {texts[id_] for id_, vector in vectors.items() if vector is None}
+        )
         if missing:
             embedded = dict(zip(missing, self.models.embed(missing), strict=True))
             for text, vector in embedded.items():
                 self.cache.put(text, vector)
-            vectors = {id_: embedded.get(texts[id_], vector) for id_, vector in vectors.items()}
+            vectors = {
+                id_: embedded.get(texts[id_], vector) for id_, vector in vectors.items()
+            }
 
         # Everything is fetched: apply the lot at once, under the lock, so a match never sees
         # half an update.
@@ -253,7 +259,9 @@ class Index:
                 else np.zeros((0, 0), dtype=np.float32)
             )
         if missing:
-            logger.info("embedded %d texts; %d observations indexed", len(missing), len(self))
+            logger.info(
+                "embedded %d texts; %d observations indexed", len(missing), len(self)
+            )
 
     def _remove(self, id_: str) -> None:
         entry = self._entries.pop(id_, None)
@@ -282,4 +290,6 @@ class Index:
     def overlaps(self, text: str) -> np.ndarray:
         """Every observation's lexical overlap with the text (`Bm25.overlap`)."""
         overlap = self._bm25.overlap(text)
-        return np.asarray([overlap.get(id_, 0.0) for id_ in self._ids], dtype=np.float32)
+        return np.asarray(
+            [overlap.get(id_, 0.0) for id_ in self._ids], dtype=np.float32
+        )

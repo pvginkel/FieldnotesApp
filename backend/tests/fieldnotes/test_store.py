@@ -263,6 +263,8 @@ def test_the_token_travels_as_a_header_in_the_environment(tmp_path, remote):
     env = git_env(settings(tmp_path, remote, token="t0ken"), {"PATH": "/bin"})
     assert env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
     # The header is base64 of "x-access-token:t0ken".
-    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dDBrZW4="
+    assert (
+        env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dDBrZW4="
+    )
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert "GIT_CONFIG_COUNT" not in git_env(settings(tmp_path, remote), {})

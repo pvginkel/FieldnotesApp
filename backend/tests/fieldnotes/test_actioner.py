@@ -38,7 +38,9 @@ def counted(started=0, in_flight=0, failed=0) -> dict[str, float]:
     return {"started": started, "in_flight": in_flight, "failed": failed}
 
 
-def test_a_submit_starts_the_actioner_off_the_request(start, remote, kubecoder, scrape, eventually):
+def test_a_submit_starts_the_actioner_off_the_request(
+    start, remote, kubecoder, scrape, eventually
+):
     seed(remote, item(IDS[0], ruling=ruling()))
     answered = threading.Event()
     kubecoder.on_run = lambda: answered.wait(20)
@@ -59,7 +61,11 @@ def test_a_submit_starts_the_actioner_off_the_request(start, remote, kubecoder, 
 
 def test_a_submit_that_submits_nothing_starts_nothing(start, remote, kubecoder):
     # A submitted item waits, but this submit submits nothing.
-    seed(remote, item(IDS[0]), item(IDS[1], ruling=ruling(submitted="2026-09-21T09:00:00Z")))
+    seed(
+        remote,
+        item(IDS[0]),
+        item(IDS[1], ruling=ruling(submitted="2026-09-21T09:00:00Z")),
+    )
     with start() as api:
         response = submit(api)
         pending = api.runtime.actioner.pending
@@ -79,7 +85,8 @@ def test_an_in_flight_refusal_is_tried_again_a_minute_later_until_the_run_starts
         api.runtime.actioner.retry = 0.01
         submit(api)
         eventually(
-            lambda: len(kubecoder.runs) == 3 and not api.runtime.actioner.pending, "the third run"
+            lambda: len(kubecoder.runs) == 3 and not api.runtime.actioner.pending,
+            "the third run",
         )
         after = starts(api, scrape)
 
@@ -89,13 +96,19 @@ def test_an_in_flight_refusal_is_tried_again_a_minute_later_until_the_run_starts
 
 def _stamped(remote):
     """The actioner carried the item out: it left `triage/` for `done/`."""
-    done = item(IDS[0], ruling=ruling(submitted=AT), actioned={"at": AT, "done": "closed"})
-    remote.push({item_path(IDS[0]): None, f"triage/done/{IDS[0]}.json": spelled(done)}, "action")
+    done = item(
+        IDS[0], ruling=ruling(submitted=AT), actioned={"at": AT, "done": "closed"}
+    )
+    remote.push(
+        {item_path(IDS[0]): None, f"triage/done/{IDS[0]}.json": spelled(done)}, "action"
+    )
 
 
 def _returned(remote):
     """The actioner handed the item back with a question, its ruling no longer submitted."""
-    remote.push({item_path(IDS[0]): spelled(item(IDS[0], ruling=ruling(), question=QUESTION))})
+    remote.push(
+        {item_path(IDS[0]): spelled(item(IDS[0], ruling=ruling(), question=QUESTION))}
+    )
 
 
 @pytest.mark.parametrize("carried", [_stamped, _returned], ids=["stamped", "returned"])
@@ -146,7 +159,9 @@ def test_a_submit_while_a_retry_waits_is_covered_by_it(
     assert not stopped
 
 
-@pytest.mark.parametrize("answer", [500, 404, None], ids=["error", "no such timer", "unreachable"])
+@pytest.mark.parametrize(
+    "answer", [500, 404, None], ids=["error", "no such timer", "unreachable"]
+)
 def test_another_failure_is_logged_and_counted_not_retried(
     start, remote, kubecoder, scrape, eventually, caplog, answer
 ):
@@ -189,7 +204,9 @@ def test_without_its_settings_submit_writes_and_the_start_is_skipped_and_logged(
     assert remote.log() == ["submit 1 (operator)", *before]
     assert not pending
     assert kubecoder.runs == []
-    assert "the actioner is not started: FIELDNOTES_KUBECODER_* are unset" in caplog.text
+    assert (
+        "the actioner is not started: FIELDNOTES_KUBECODER_* are unset" in caplog.text
+    )
 
 
 def test_a_restarted_api_resumes_no_start(start, remote, kubecoder):

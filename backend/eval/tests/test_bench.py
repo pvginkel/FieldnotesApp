@@ -65,7 +65,9 @@ def test_the_lexical_overlap_reads_only_the_rows_before(dataset):
 
 def test_the_report_compares_the_scorers(tmp_path, dataset):
     work = tmp_path / "work"
-    embed_missing(load_rows(dataset), EmbeddingCache(work / "cache", "fake"), FakeModels())
+    embed_missing(
+        load_rows(dataset), EmbeddingCache(work / "cache", "fake"), FakeModels()
+    )
     unlabeled = tmp_path / "unlabeled.jsonl"
 
     report = bench(dataset, work, ["fake"], unlabeled)

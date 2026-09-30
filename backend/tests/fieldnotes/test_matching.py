@@ -26,7 +26,9 @@ class Store:
     def __init__(self, tmp_path: Path) -> None:
         self.root = tmp_path / "checkout"
         self.models = FakeModels()
-        self.index = Index(self.root, EmbeddingCache(tmp_path / "cache", "m"), self.models)
+        self.index = Index(
+            self.root, EmbeddingCache(tmp_path / "cache", "m"), self.models
+        )
         self.paths: set[str] = set()
 
     def add(self, n: int, text: str, area: str = "a", **fields) -> None:
@@ -91,7 +93,9 @@ def test_classes_follow_the_thresholds(store):
 def test_the_gap_drops_what_trails_the_best(store):
     store.add(1, "uv sync installs no workspace members")  # 1.0
     store.add(2, "uv sync installs no workspace")  # 6/sqrt(42) = 0.93, within the gap
-    store.add(3, "uv sync installs no")  # 5/sqrt(35) = 0.85: related, but trails by more than 0.1
+    store.add(
+        3, "uv sync installs no"
+    )  # 5/sqrt(35) = 0.85: related, but trails by more than 0.1
     matcher = store.matcher()
 
     matches = matcher.match("a: uv sync installs no workspace members", 3)
@@ -110,7 +114,9 @@ def test_at_most_k_come_back(store):
 
 def test_closed_observations_match_too(store):
     # FR-3.
-    store.add(1, "uv sync installs no workspace members", status="closed", outcome="done")
+    store.add(
+        1, "uv sync installs no workspace members", status="closed", outcome="done"
+    )
     matcher = store.matcher()
 
     [match] = matcher.match("a: uv sync installs no workspace members", 3)
@@ -201,7 +207,9 @@ def test_a_ruling_s_reason_is_returned_and_never_matched(store):
 
 
 def test_a_candidate_carries_what_fr_2_names(store):
-    store.add(1, "uv sync installs no workspace members", status="closed", outcome="done")
+    store.add(
+        1, "uv sync installs no workspace members", status="closed", outcome="done"
+    )
     store.add(
         1,
         "uv sync installs no workspace members",
@@ -216,7 +224,11 @@ def test_a_candidate_carries_what_fr_2_names(store):
 
     assert wire.id == ulid(1)
     assert wire.canonical == "uv sync installs no workspace members"
-    assert (wire.status, wire.outcome, wire.pointer) == ("closed", "done", "pvginkel/Example#4")
+    assert (wire.status, wire.outcome, wire.pointer) == (
+        "closed",
+        "done",
+        "pvginkel/Example#4",
+    )
     assert wire.reactions == ["📝 (1)"]
     assert wire.match_class is MatchClass.likely
     assert wire.score == 1.0
@@ -228,8 +240,11 @@ def test_reaction_counts_put_the_most_frequent_first(store):
     store.add(1, "text")
     matcher = store.matcher()
     reactions = [
-        Reaction(at=AT, emoji=emoji, repo="r") for emoji in ["📝", "👎", "👍", "👍", "👎", "👍"]
+        Reaction(at=AT, emoji=emoji, repo="r")
+        for emoji in ["📝", "👎", "👍", "👍", "👎", "👍"]
     ]
-    observation = matcher.index.get(ulid(1)).observation.model_copy(update={"reactions": reactions})
+    observation = matcher.index.get(ulid(1)).observation.model_copy(
+        update={"reactions": reactions}
+    )
 
     assert reaction_counts(observation) == ["👍 (3)", "👎 (2)", "📝 (1)"]

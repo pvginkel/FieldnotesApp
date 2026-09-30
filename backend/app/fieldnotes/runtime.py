@@ -60,10 +60,14 @@ class Runtime:
         self.settings = settings
         self._clients: list[httpx.Client] = []
         if models is None:
-            self._clients.append(httpx.Client(base_url=settings.models_url, timeout=MODELS_TIMEOUT))
+            self._clients.append(
+                httpx.Client(base_url=settings.models_url, timeout=MODELS_TIMEOUT)
+            )
             models = HttpModels(self._clients[-1])
         if board is None and settings.board is not None:
-            self._clients.append(httpx.Client(base_url=settings.board.url, timeout=BOARD_TIMEOUT))
+            self._clients.append(
+                httpx.Client(base_url=settings.board.url, timeout=BOARD_TIMEOUT)
+            )
             board = HttpBoard(self._clients[-1], settings.board)
         if controller is None and settings.actioner is not None:
             self._clients.append(
@@ -73,7 +77,9 @@ class Runtime:
         outcomes = settings.board.outcomes if settings.board is not None else {}
         self.store = Store(settings.store, os.environ if environ is None else environ)
         self.index = Index(
-            settings.store.root, EmbeddingCache(settings.cache_dir, settings.embed_model), models
+            settings.store.root,
+            EmbeddingCache(settings.cache_dir, settings.embed_model),
+            models,
         )
         self.triage = TriageIndex(settings.store.root)
         self.matcher = Matcher(self.index, models, settings.match)
@@ -90,7 +96,9 @@ class Runtime:
 
     def start(self) -> None:
         """Clone and index on a thread of its own, and return at once."""
-        self._starting = threading.Thread(target=self._start, name="store-startup", daemon=True)
+        self._starting = threading.Thread(
+            target=self._start, name="store-startup", daemon=True
+        )
         self._starting.start()
 
     def wait_started(self, timeout: float | None = None) -> None:

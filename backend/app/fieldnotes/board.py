@@ -86,7 +86,10 @@ def read_card(issue: Mapping[str, Any], resolution_field: str) -> Card:
             pointer = match.group(1)
             break
     return Card(
-        id=issue["idReadable"], resolution=resolution, updated=_time(max(times)), pointer=pointer
+        id=issue["idReadable"],
+        resolution=resolution,
+        updated=_time(max(times)),
+        pointer=pointer,
     )
 
 
@@ -109,5 +112,7 @@ class HttpBoard:
         if response.status_code == 404:
             raise CardMissing(f"YouTrack has no issue {issue}")
         if response.status_code != 200:
-            raise BoardError(f"YouTrack answered {response.status_code}: {response.text[:200]}")
+            raise BoardError(
+                f"YouTrack answered {response.status_code}: {response.text[:200]}"
+            )
         return read_card(response.json(), self._settings.resolution_field)

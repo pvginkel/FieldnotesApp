@@ -50,7 +50,10 @@ def _problem(response: httpx.Response) -> Problem:
 
 class ApiClient:
     def __init__(
-        self, base_url: str, token: str, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        base_url: str,
+        token: str,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """`transport` replaces the network, in the suites."""
         self._http = httpx.AsyncClient(
@@ -88,7 +91,9 @@ class ApiClient:
         return PostReply.model_validate(response.json())
 
     async def react(self, id_: str, request: ReactRequest) -> ReactReply:
-        response = await self._request("POST", f"/observations/{id_}/reactions", request)
+        response = await self._request(
+            "POST", f"/observations/{id_}/reactions", request
+        )
         return ReactReply.model_validate(response.json())
 
     async def get(self, id_: str) -> Observation:

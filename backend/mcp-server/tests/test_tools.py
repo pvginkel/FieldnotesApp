@@ -26,7 +26,11 @@ TOOLS = {
         ["area", "category", "text", "repo"],
         "PostReply",
     ),
-    "react": (["id", "emoji", "text", "repo", "session"], ["id", "emoji", "repo"], "ReactReply"),
+    "react": (
+        ["id", "emoji", "text", "repo", "session"],
+        ["id", "emoji", "repo"],
+        "ReactReply",
+    ),
     "get": (["id"], ["id"], "Observation"),
 }
 
@@ -102,7 +106,9 @@ async def test_post_strips_what_it_sends(api):
         {"area": "x" * 201},
     ],
 )
-async def test_post_refuses_what_the_contract_refuses_without_calling_the_api(api, override):
+async def test_post_refuses_what_the_contract_refuses_without_calling_the_api(
+    api, override
+):
     result = await call(api, "post", {**POST, **override})
 
     assert result.isError
@@ -113,13 +119,18 @@ async def test_react_appends_a_reaction(api):
     api.answer(200, {"id": ID, "reactions": ["👍 (3)", "📝 (1)"]})
 
     result = await call(
-        api, "react", {"id": ID, "emoji": "👍", "text": "Also on Python 3.14.", "repo": "a/b"}
+        api,
+        "react",
+        {"id": ID, "emoji": "👍", "text": "Also on Python 3.14.", "repo": "a/b"},
     )
 
     assert not result.isError
     assert result.structuredContent == {"id": ID, "reactions": ["👍 (3)", "📝 (1)"]}
     [request] = api.requests
-    assert (request.method, request.url.path) == ("POST", f"/observations/{ID}/reactions")
+    assert (request.method, request.url.path) == (
+        "POST",
+        f"/observations/{ID}/reactions",
+    )
     assert api.body() == {
         "emoji": "👍",
         "text": "Also on Python 3.14.",
@@ -190,7 +201,9 @@ async def test_a_validation_problem_names_each_field_at_fault(api):
             "title": "the request is not valid",
             "status": 422,
             "detail": "the errors list names each field at fault",
-            "errors": [{"loc": ["body", "repo"], "msg": "too long", "type": "string_too_long"}],
+            "errors": [
+                {"loc": ["body", "repo"], "msg": "too long", "type": "string_too_long"}
+            ],
         },
     )
 
@@ -207,7 +220,9 @@ async def test_an_answer_that_is_not_a_problem_is_still_a_tool_error(api):
 
     result = await call(api, "get", {"id": ID})
 
-    assert "the Fieldnotes API answered 502 Bad Gateway [internal, 502]" in error_text(result)
+    assert "the Fieldnotes API answered 502 Bad Gateway [internal, 502]" in error_text(
+        result
+    )
 
 
 async def test_an_unreachable_api_is_a_tool_error(api):

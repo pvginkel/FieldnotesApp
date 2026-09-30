@@ -70,22 +70,30 @@ class Matcher:
             return []
         vector = self.models.embed([text])[0]
         scored = []
-        with self.index.lock:  # the embedding is fetched; the reads see one state of the index
+        with (
+            self.index.lock
+        ):  # the embedding is fetched; the reads see one state of the index
             cosines = self.index.cosines(vector)
             scores = cosines
             if self.settings.lexical_weight:
-                scores = cosines + self.settings.lexical_weight * self.index.overlaps(text)
+                scores = cosines + self.settings.lexical_weight * self.index.overlaps(
+                    text
+                )
             for n in np.argsort(-scores, kind="stable"):
                 entry = self.index.get(self.index.ids[n])
                 if entry is None or entry.observation.id == exclude:
                     continue
                 score = float(scores[n])
-                scored.append(Scored(entry, float(cosines[n]), score, self.classify(score)))
+                scored.append(
+                    Scored(entry, float(cosines[n]), score, self.classify(score))
+                )
                 if len(scored) == k:
                     break
         if thresholds:
             scored = [s for s in scored if s.match_class is not None]
-            scored = [s for s in scored if scored[0].score - s.score <= self.settings.gap]
+            scored = [
+                s for s in scored if scored[0].score - s.score <= self.settings.gap
+            ]
         return scored
 
 

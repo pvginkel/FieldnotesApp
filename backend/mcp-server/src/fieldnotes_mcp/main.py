@@ -14,7 +14,8 @@ from .server import build_app
 def main() -> None:
     settings = load_settings()
     logging.basicConfig(
-        level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        level=settings.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     uvicorn.run(
         build_app(ApiClient(settings.api_url, settings.api_token), settings.mcp_token),

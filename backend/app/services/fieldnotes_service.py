@@ -50,7 +50,9 @@ class FieldnotesService:
         lifecycle_coordinator: LifecycleCoordinatorProtocol,
     ) -> None:
         self.runtime: Runtime | None = None
-        self._empty_store = config.is_testing  # the Playwright backend's, built on start
+        self._empty_store = (
+            config.is_testing
+        )  # the Playwright backend's, built on start
         self._scratch: Path | None = None  # its temporary directory
         if not self._empty_store:
             try:
@@ -81,7 +83,15 @@ class FieldnotesService:
         self._scratch = Path(tempfile.mkdtemp(prefix="fieldnotes-store-"))
         remote = self._scratch / "remote.git"
         subprocess.run(
-            ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)],
+            [
+                "git",
+                "init",
+                "--quiet",
+                "--bare",
+                "--initial-branch",
+                "main",
+                str(remote),
+            ],
             check=True,
         )
         logger.info("testing: serving an empty Fieldnotes store at %s", remote)

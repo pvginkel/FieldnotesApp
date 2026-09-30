@@ -70,7 +70,9 @@ def _id(value: str) -> str:
 def _refused(location: str) -> Callable[..., None]:
     """Spectree's `before` hook: a request that fails its model is `422 validation-error`."""
 
-    def before(_req: Any, _resp: Any, error: ValidationError | None, _instance: Any) -> None:
+    def before(
+        _req: Any, _resp: Any, error: ValidationError | None, _instance: Any
+    ) -> None:
         if error is not None:
             raise validation_problem(error, location)
 

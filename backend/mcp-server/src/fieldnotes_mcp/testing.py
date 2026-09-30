@@ -54,13 +54,19 @@ class FakeApi:
 
 def serve(api: FakeApi) -> Starlette:
     """The app the pod serves, its API client on `api`."""
-    return build_app(ApiClient(API_URL, API_TOKEN, transport=httpx.MockTransport(api)), MCP_TOKEN)
+    return build_app(
+        ApiClient(API_URL, API_TOKEN, transport=httpx.MockTransport(api)), MCP_TOKEN
+    )
 
 
-def http_client(app: Starlette, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
+def http_client(
+    app: Starlette, headers: dict[str, str] | None = None
+) -> httpx.AsyncClient:
     """An HTTP client of `app`, served in-process: no port is bound."""
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://mcp.test", headers=headers
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://mcp.test",
+        headers=headers,
     )
 
 
@@ -135,5 +141,7 @@ def observation(id_: str = ID) -> dict[str, Any]:
                 "text": "Sync with --all-packages, or the members are not installed.",
             }
         ],
-        "comments": [{"at": AT, "author": "reconciler", "text": "Checked against the docs."}],
+        "comments": [
+            {"at": AT, "author": "reconciler", "text": "Checked against the docs."}
+        ],
     }

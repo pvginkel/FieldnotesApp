@@ -36,7 +36,13 @@ _ids = iter(range(1, 1000))
 
 
 def target(expr, legend="", **extra):
-    return {"datasource": DATASOURCE, "expr": expr, "legendFormat": legend, "refId": "A", **extra}
+    return {
+        "datasource": DATASOURCE,
+        "expr": expr,
+        "legendFormat": legend,
+        "refId": "A",
+        **extra,
+    }
 
 
 def panel(kind, title, x, y, w, h, targets, description="", **extra):
@@ -122,7 +128,14 @@ def ranking(title, x, y, w, expr, legend, description, heatmap=False):
         y,
         w,
         8,
-        [target(expr, legend, instant=True, format="heatmap" if heatmap else "time_series")],
+        [
+            target(
+                expr,
+                legend,
+                instant=True,
+                format="heatmap" if heatmap else "time_series",
+            )
+        ],
         description,
         fieldConfig={"defaults": {"decimals": 0, "min": 0}, "overrides": []},
         options={
@@ -132,7 +145,11 @@ def ranking(title, x, y, w, expr, legend, description, heatmap=False):
             "showUnfilled": True,
         }
         # Thin bars, so a histogram's eleven buckets fit the panel without scrolling.
-        | ({"sizing": "manual", "minVizHeight": 12, "maxVizHeight": 300} if heatmap else {}),
+        | (
+            {"sizing": "manual", "minVizHeight": 12, "maxVizHeight": 300}
+            if heatmap
+            else {}
+        ),
     )
 
 
@@ -158,7 +175,13 @@ def dashboard():
     requests = "fieldnotes_http_request_duration_seconds"
     panels = [
         row("Does the answer land", 0),
-        stat("Posts", 0, 1, inc(posts), "Posts in the range, created, matched and forced alike."),
+        stat(
+            "Posts",
+            0,
+            1,
+            inc(posts),
+            "Posts in the range, created, matched and forced alike.",
+        ),
         stat(
             "Answered from the store",
             4,
@@ -176,7 +199,13 @@ def dashboard():
             "candidate it was offered. The rest reacted elsewhere, forced, reposted or left it.",
             unit="percentunit",
         ),
-        stat("Reactions", 12, 1, inc("fieldnotes_reactions_total"), "Reactions in the range."),
+        stat(
+            "Reactions",
+            12,
+            1,
+            inc("fieldnotes_reactions_total"),
+            "Reactions in the range.",
+        ),
         stat(
             "Open observations",
             16,
@@ -336,7 +365,12 @@ def dashboard():
             16,
             48,
             8,
-            inc(f"{requests}_count", 'status=~"[45].."', by="route, status", window="$__interval"),
+            inc(
+                f"{requests}_count",
+                'status=~"[45].."',
+                by="route, status",
+                window="$__interval",
+            ),
             "{{status}} {{route}}",
             "4xx and 5xx answers by route and status. A 401 on a webhook is a refused delivery.",
         ),
@@ -345,7 +379,11 @@ def dashboard():
             0,
             56,
             8,
-            inc("fieldnotes_webhook_deliveries_total", by="source, action", window="$__interval"),
+            inc(
+                "fieldnotes_webhook_deliveries_total",
+                by="source, action",
+                window="$__interval",
+            ),
             "{{source}} {{action}}",
             "Verified deliveries: queued work, or ignored as none of ours.",
         ),

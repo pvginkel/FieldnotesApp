@@ -59,7 +59,9 @@ def github_verified(secret: str, body: bytes, signature: str | None) -> bool:
     )
 
 
-def github_push_to(settings: GithubSettings, branch: str, event: str | None, body: bytes) -> bool:
+def github_push_to(
+    settings: GithubSettings, branch: str, event: str | None, body: bytes
+) -> bool:
     """Whether a verified delivery is a push to the store's branch."""
     if event != "push":
         return False

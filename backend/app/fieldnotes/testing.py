@@ -72,24 +72,42 @@ class FakeYouTrack:
 
     def resolve(self, id_: str, at: datetime, resolution: str = "Resolved") -> None:
         """Move the issue to Done with the resolution; Done is what shows the field."""
-        self.issues[id_] |= {"updated": _millis(at), "state": "Done", "resolution": resolution}
+        self.issues[id_] |= {
+            "updated": _millis(at),
+            "state": "Done",
+            "resolution": resolution,
+        }
 
     def reopen(self, id_: str, at: datetime) -> None:
         """Back to an unresolved state: the field's condition hides the resolution."""
-        self.issues[id_] |= {"updated": _millis(at), "state": "Accepted", "resolution": None}
+        self.issues[id_] |= {
+            "updated": _millis(at),
+            "state": "Accepted",
+            "resolution": None,
+        }
 
-    def comment(self, id_: str, text: str, at: datetime, *, moves_issue: bool = False) -> None:
+    def comment(
+        self, id_: str, text: str, at: datetime, *, moves_issue: bool = False
+    ) -> None:
         """A comment. By default it leaves the issue's own `updated` alone, the harder case."""
-        self.issues[id_]["comments"].append({"text": text, "created": _millis(at), "updated": None})
+        self.issues[id_]["comments"].append(
+            {"text": text, "created": _millis(at), "updated": None}
+        )
         if moves_issue:
             self.issues[id_]["updated"] = _millis(at)
 
     def _json(self, id_: str) -> dict[str, Any]:
         issue = self.issues[id_]
-        fields: list[dict[str, Any]] = [{"name": "State", "value": {"name": issue["state"]}}]
+        fields: list[dict[str, Any]] = [
+            {"name": "State", "value": {"name": issue["state"]}}
+        ]
         if issue["resolution"] is not None:
-            fields.append({"name": "Resolution", "value": {"name": issue["resolution"]}})
-        comments = [{**c, "deleted": False, "$type": "IssueComment"} for c in issue["comments"]]
+            fields.append(
+                {"name": "Resolution", "value": {"name": issue["resolution"]}}
+            )
+        comments = [
+            {**c, "deleted": False, "$type": "IssueComment"} for c in issue["comments"]
+        ]
         return {
             "idReadable": id_,
             "updated": issue["updated"],
@@ -110,7 +128,9 @@ class FakeYouTrack:
         return httpx.Response(200, content=json.dumps(self._json(id_)))
 
     def board(self, settings: BoardSettings) -> HttpBoard:
-        client = httpx.Client(transport=httpx.MockTransport(self), base_url=settings.url)
+        client = httpx.Client(
+            transport=httpx.MockTransport(self), base_url=settings.url
+        )
         return HttpBoard(client, settings)
 
 
@@ -128,7 +148,9 @@ class FakeController:
 
     def _problem(self, status: int, type_: str, title: str) -> httpx.Response:
         body = {"type": type_, "title": title, "status": status}
-        return httpx.Response(status, json=body, headers={"Content-Type": "application/problem+json"})
+        return httpx.Response(
+            status, json=body, headers={"Content-Type": "application/problem+json"}
+        )
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.headers.get("Authorization") != f"Bearer {self.token}":
@@ -142,11 +164,17 @@ class FakeController:
         if request.url.path != f"/timers/{self.timer}/run":
             return self._problem(404, "not-found", "no such timer")
         if status == 202:
-            return httpx.Response(202, json={"id": self.timer, "running": {"envId": None}})
+            return httpx.Response(
+                202, json={"id": self.timer, "running": {"envId": None}}
+            )
         if status == 409:
-            return self._problem(409, "conflict", f"timer {self.timer!r} has a run in flight")
+            return self._problem(
+                409, "conflict", f"timer {self.timer!r} has a run in flight"
+            )
         return self._problem(status, "internal", "the controller failed")
 
     def controller(self, settings: ActionerSettings) -> HttpController:
-        client = httpx.Client(transport=httpx.MockTransport(self), base_url=settings.url)
+        client = httpx.Client(
+            transport=httpx.MockTransport(self), base_url=settings.url
+        )
         return HttpController(client, settings)

@@ -6,7 +6,13 @@ from fieldnotes_eval.metrics import auc, distribution, precision_recall, sweep
 
 def test_distribution_gives_the_quantiles():
     d = distribution([float(x) for x in range(1, 102)])
-    assert (d["n"], d["min"], d["p50"], d["p90"], d["max"]) == (101, 1.0, 51.0, 91.0, 101.0)
+    assert (d["n"], d["min"], d["p50"], d["p90"], d["max"]) == (
+        101,
+        1.0,
+        51.0,
+        91.0,
+        101.0,
+    )
     assert distribution([]) == {"n": 0}
     assert distribution([0.5])["p10"] == 0.5
 
@@ -23,14 +29,22 @@ def test_precision_and_recall_count_the_pairs_at_or_above_each_threshold():
     low, high, none = precision_recall(scored, [0.5, 0.85, 0.95])
     assert (low["tp"], low["fp"], low["recall"]) == (2, 1, 1.0)
     assert low["precision"] == pytest.approx(2 / 3)
-    assert (high["tp"], high["fp"], high["precision"], high["recall"]) == (1, 0, 1.0, 0.5)
+    assert (high["tp"], high["fp"], high["precision"], high["recall"]) == (
+        1,
+        0,
+        1.0,
+        0.5,
+    )
     assert none["precision"] is None and none["recall"] == 0.0
 
 
 def test_sweep_replays_a_threshold_and_a_gap_over_the_recorded_candidates():
     records = [
         # A cluster-mate in the store, scored 0.6 behind a non-mate at 0.9.
-        {"mates": ["m"], "scored": [{"id": "m", "score": 0.6}, {"id": "x", "score": 0.9}]},
+        {
+            "mates": ["m"],
+            "scored": [{"id": "m", "score": 0.6}, {"id": "x", "score": 0.9}],
+        },
         # A novel post whose best candidate scores 0.7.
         {"mates": [], "scored": [{"id": "y", "score": 0.7}]},
     ]

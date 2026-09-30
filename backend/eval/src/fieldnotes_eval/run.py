@@ -47,7 +47,21 @@ from .scoring import cosine_matrix, embed_missing, lexical_matrix
 
 LABELS = ("same", "related", "unrelated")
 
-COSINE_THRESHOLDS = (0.6, 0.65, 0.7, 0.75, 0.78, 0.8, 0.82, 0.84, 0.86, 0.88, 0.9, 0.925, 0.95)
+COSINE_THRESHOLDS = (
+    0.6,
+    0.65,
+    0.7,
+    0.75,
+    0.78,
+    0.8,
+    0.82,
+    0.84,
+    0.86,
+    0.88,
+    0.9,
+    0.925,
+    0.95,
+)
 GAPS = (0.02, 0.05, 0.1, 1.0)
 STEPS = 13  # thresholds tried for a scorer that has no grid of its own
 
@@ -67,7 +81,9 @@ def thresholds(scorer: str, scores: Iterable[float]) -> tuple[float, ...]:
 class Scores:
     """Each scorer's number for a post row against a stored row."""
 
-    def __init__(self, rows: Sequence[Row], cache: EmbeddingCache, lexical_weight: float) -> None:
+    def __init__(
+        self, rows: Sequence[Row], cache: EmbeddingCache, lexical_weight: float
+    ) -> None:
         self.order = {row.id: n for n, row in enumerate(rows)}
         cosine = cosine_matrix(rows, cache)
         lexical = lexical_matrix(rows)
@@ -99,7 +115,9 @@ def _number(value: Any, digits: int = 4) -> str:
     return str(value)
 
 
-def table(headers: Sequence[str], rows: Iterable[Sequence[Any]], digits: int = 4) -> list[str]:
+def table(
+    headers: Sequence[str], rows: Iterable[Sequence[Any]], digits: int = 4
+) -> list[str]:
     lines = ["| " + " | ".join(headers) + " |", "|" + " --- |" * len(headers)]
     lines += ["| " + " | ".join(_number(v, digits) for v in row) + " |" for row in rows]
     return lines + [""]
@@ -145,7 +163,9 @@ class Report:
         self.out(
             "## Labeled pairs",
             "",
-            f"{len(self.pairs)} pairs: " + ", ".join(f"{n} `{k}`" for k, n in counts.items()) + ".",
+            f"{len(self.pairs)} pairs: "
+            + ", ".join(f"{n} `{k}`" for k, n in counts.items())
+            + ".",
             "The later row of each pair (replay order) is the query.",
             "",
             "### Separability: AUC of `same` against each other label",
@@ -180,7 +200,12 @@ class Report:
                         d.get("max"),
                     ]
                 )
-            self.out(*table(["label", "n", "min", "p10", "p25", "p50", "p75", "p90", "max"], rows))
+            self.out(
+                *table(
+                    ["label", "n", "min", "p10", "p25", "p50", "p75", "p90", "max"],
+                    rows,
+                )
+            )
 
         self.out("### Precision and recall of `same` across thresholds", "")
         for scorer in self.scores.scorers:
@@ -195,10 +220,14 @@ class Report:
             self.out(
                 f"`{scorer}`:",
                 "",
-                *table(["at or above", "same", "not same", "precision", "recall"], rows, 3),
+                *table(
+                    ["at or above", "same", "not same", "precision", "recall"], rows, 3
+                ),
             )
 
-    def replay_section(self, records: Sequence[dict[str, Any]], summary: Mapping[str, Any]) -> None:
+    def replay_section(
+        self, records: Sequence[dict[str, Any]], summary: Mapping[str, Any]
+    ) -> None:
         self.out("## Replay", "", "Settings: " + json.dumps(summary["settings"]), "")
         recall, alarms = summary["recall_at_3"], summary["false_alarms"]
         latency = summary["latency"]
@@ -207,9 +236,18 @@ class Report:
             ["cluster-mate in the store (eligible)", summary["eligible"]],
             ["novel", summary["novel"]],
             *[[f"outcome: {k}", v] for k, v in summary["outcomes"].items()],
-            ["recall@3, as answered", f"{recall['answered']['n']}/{recall['answered']['of']}"],
-            ["recall@3, top 3 with no threshold", f"{recall['top3']['n']}/{recall['top3']['of']}"],
-            ["false alarms, as answered", f"{alarms['answered']['n']}/{alarms['answered']['of']}"],
+            [
+                "recall@3, as answered",
+                f"{recall['answered']['n']}/{recall['answered']['of']}",
+            ],
+            [
+                "recall@3, top 3 with no threshold",
+                f"{recall['top3']['n']}/{recall['top3']['of']}",
+            ],
+            [
+                "false alarms, as answered",
+                f"{alarms['answered']['n']}/{alarms['answered']['of']}",
+            ],
             [
                 "false alarms, top 3 with no threshold",
                 f"{alarms['top3']['n']}/{alarms['top3']['of']}",
@@ -317,7 +355,9 @@ class Report:
             "### False alarms",
             "",
             f"{len(alarms)} novel posts answered with candidates. The pair label of each one's "
-            "top candidate: " + ", ".join(f"{n} {k}" for k, n in sorted(tally.items())) + ".",
+            "top candidate: "
+            + ", ".join(f"{n} {k}" for k, n in sorted(tally.items()))
+            + ".",
             "",
             f"The {quote} highest-scored, quoted:",
             "",
@@ -364,7 +404,10 @@ def evaluate(
     records: list[dict[str, Any]] = []
     summary: dict[str, Any] = {}
     if replay is not None:
-        records = [json.loads(line) for line in (replay / "replay.jsonl").read_text().splitlines()]
+        records = [
+            json.loads(line)
+            for line in (replay / "replay.jsonl").read_text().splitlines()
+        ]
         summary = json.loads((replay / "summary.json").read_text())
         model = summary["settings"].get("embed_model", model)
         if lexical_weight is None:
@@ -389,13 +432,21 @@ def evaluate(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Score the labeled pairs and a replay (gate 1).")
-    parser.add_argument("--dataset", type=Path, required=True, help="the dataset directory")
-    parser.add_argument("--work", type=Path, required=True, help="where vectors are cached")
+    parser = argparse.ArgumentParser(
+        description="Score the labeled pairs and a replay (gate 1)."
+    )
+    parser.add_argument(
+        "--dataset", type=Path, required=True, help="the dataset directory"
+    )
+    parser.add_argument(
+        "--work", type=Path, required=True, help="where vectors are cached"
+    )
     parser.add_argument("--replay", type=Path, help="a replay's output directory")
     parser.add_argument("--models-url", default=DEFAULT_MODELS_URL)
     parser.add_argument(
-        "--lexical-weight", type=float, help="the lexical overlap's weight (default: the replay's)"
+        "--lexical-weight",
+        type=float,
+        help="the lexical overlap's weight (default: the replay's)",
     )
     args = parser.parse_args(argv)
 
@@ -404,7 +455,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return HttpModels(client), client.close
 
     report = evaluate(
-        args.dataset, args.work.resolve(), args.replay, http, lexical_weight=args.lexical_weight
+        args.dataset,
+        args.work.resolve(),
+        args.replay,
+        http,
+        lexical_weight=args.lexical_weight,
     )
     print(report)
     return 0

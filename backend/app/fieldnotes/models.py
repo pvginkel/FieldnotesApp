@@ -38,7 +38,9 @@ class HttpModels:
         except httpx.HTTPError as exc:
             raise ModelsError(f"{path} could not be reached: {exc!r}") from exc
         if response.status_code != 200:
-            raise ModelsError(f"{path} answered {response.status_code}: {response.text[:200]}")
+            raise ModelsError(
+                f"{path} answered {response.status_code}: {response.text[:200]}"
+            )
         return response.json()
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:

@@ -46,9 +46,15 @@ def dataset(tmp_path):
          "text": text, "source": {"kind": "close-out"}}
         for id_, date, area, text in ROWS
     ]  # fmt: skip
-    (directory / "observations.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
-    clusters = [{"cluster": c, "theme": None, "members": m} for c, m in CLUSTERS.items()]
-    (directory / "clusters.jsonl").write_text("".join(json.dumps(x) + "\n" for x in clusters))
+    (directory / "observations.jsonl").write_text(
+        "".join(json.dumps(x) + "\n" for x in lines)
+    )
+    clusters = [
+        {"cluster": c, "theme": None, "members": m} for c, m in CLUSTERS.items()
+    ]
+    (directory / "clusters.jsonl").write_text(
+        "".join(json.dumps(x) + "\n" for x in clusters)
+    )
     pairs = [{"a": a, "b": b, "label": label} for a, b, label in PAIRS]
     (directory / "pairs.jsonl").write_text("".join(json.dumps(x) + "\n" for x in pairs))
     return directory
@@ -58,7 +64,8 @@ def dataset(tmp_path):
 def settings(tmp_path):
     remote = tmp_path / "remote.git"
     subprocess.run(
-        ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)], check=True
+        ["git", "init", "--quiet", "--bare", "--initial-branch", "main", str(remote)],
+        check=True,
     )
     return load_settings(
         {
@@ -77,4 +84,6 @@ def settings(tmp_path):
 @pytest.fixture
 def records(dataset, settings):
     """The replay of the invented dataset, one record per row."""
-    return replay(load_rows(dataset), load_clusters(dataset), settings, models=FakeModels())
+    return replay(
+        load_rows(dataset), load_clusters(dataset), settings, models=FakeModels()
+    )

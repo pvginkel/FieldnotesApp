@@ -108,7 +108,12 @@ MODELS = {
     },
     "HookReply": {"action": "Literal['queued', 'ignored']"},
     "HealthReply": {"status": "Literal['ok']"},
-    "Problem": {"type": "str", "title": "str", "status": "int", "detail": "str | None = None"},
+    "Problem": {
+        "type": "str",
+        "title": "str",
+        "status": "int",
+        "detail": "str | None = None",
+    },
 }
 
 ENUMS = {
@@ -164,7 +169,9 @@ def fields(model: type[BaseModel]) -> dict[str, str]:
 
 
 def test_the_routes_are_pinned(test_settings, test_app_settings):
-    app = create_app(test_settings, app_settings=test_app_settings, skip_background_services=True)
+    app = create_app(
+        test_settings, app_settings=test_app_settings, skip_background_services=True
+    )
     routes = set()
     for rule in app.url_map.iter_rules():
         if rule.endpoint.startswith("api.fieldnotes.") or rule.endpoint in (
@@ -199,7 +206,9 @@ def test_the_enums_are_pinned():
         and issubclass(getattr(contracts, name), StrEnum)
     }
     assert exported == set(ENUMS)
-    assert {name: [m.value for m in getattr(contracts, name)] for name in ENUMS} == ENUMS
+    assert {
+        name: [m.value for m in getattr(contracts, name)] for name in ENUMS
+    } == ENUMS
 
 
 def test_the_constants_are_pinned():

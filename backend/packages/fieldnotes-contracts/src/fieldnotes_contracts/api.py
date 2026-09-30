@@ -97,7 +97,9 @@ class PostReply(WireModel):
     @model_validator(mode="after")
     def _one_or_the_other(self) -> PostReply:
         if (self.id is None) == (not self.candidates):
-            raise ValueError("a post reply carries either an id or candidates, never both")
+            raise ValueError(
+                "a post reply carries either an id or candidates, never both"
+            )
         return self
 
 

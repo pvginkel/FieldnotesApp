@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import { Info } from 'lucide-react';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
@@ -34,7 +35,10 @@ export function TriageCard({ item, live }: TriageCardProps) {
         <div className="meta">
           <div className="id-anchor">
             <HoverPopover content={store}>
-              <span className="id mono" data-testid="triage.card.id">{item.observation}</span>
+              <span className="id" data-testid="triage.card.id">
+                <span className="mono">{item.observation}</span>
+                <Info className="icon" aria-label="What the store says now" />
+              </span>
             </HoverPopover>
           </div>
           {changes.length > 0 && (

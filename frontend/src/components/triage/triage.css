@@ -272,7 +272,8 @@ kbd {
   border-radius: 4px;
 }
 .meta .id-anchor { margin-right: auto; }
-.meta .id { font-size: 12px; cursor: default; }
+.meta .id { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; cursor: default; }
+.meta .id .icon { font-size: 9px; }
 .meta .sep { opacity: 0.5; }
 .changed-chip {
   cursor: default;

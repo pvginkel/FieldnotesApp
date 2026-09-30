@@ -26,9 +26,11 @@ projects:
     setup:
       - cexec modern-app uv sync --locked
     test: cexec modern-app uv run pytest
-    # The same three checks backend/scripts/check.py runs.
+    # The same three checks backend/scripts/check.py runs, and the formatter's
+    # check.
     lint:
       - cexec modern-app uv run ruff check .
+      - cexec modern-app uv run ruff format --check .
       - cexec modern-app uv run mypy .
       - cexec modern-app uv run vulture app/ vulture_whitelist.py --min-confidence 80
 

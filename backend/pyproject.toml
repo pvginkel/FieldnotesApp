@@ -78,6 +78,48 @@ target-version = "py313"
 line-length = 88
 exclude = ["vulture_whitelist.py"]
 
+[tool.ruff.format]
+# The template-owned files the ModernAppTemplate ships unformatted at this line length: they
+# are the template's to format, and a copier update would merge a local reformat back out.
+# `ruff format --check` holds every other file to the formatter.
+exclude = [
+    "app/__init__.py",
+    "app/api/auth.py",
+    "app/api/metrics.py",
+    "app/api/oidc_hooks.py",
+    "app/api/sse.py",
+    "app/api/tasks.py",
+    "app/api/testing_auth.py",
+    "app/api/testing_logs.py",
+    "app/api/testing_sse.py",
+    "app/config.py",
+    "app/schemas/common.py",
+    "app/schemas/health_schema.py",
+    "app/schemas/sse_gateway_schema.py",
+    "app/schemas/task_schema.py",
+    "app/schemas/testing_auth.py",
+    "app/schemas/testing_sse.py",
+    "app/services/auth_service.py",
+    "app/services/base_task.py",
+    "app/services/frontend_version_service.py",
+    "app/services/metrics_service.py",
+    "app/services/oidc_client_service.py",
+    "app/services/sse_connection_manager.py",
+    "app/services/task_service.py",
+    "app/utils/auth.py",
+    "app/utils/flask_error_handlers.py",
+    "app/utils/lifecycle_coordinator.py",
+    "app/utils/log_capture.py",
+    "app/utils/request_parsing.py",
+    "app/utils/spectree_config.py",
+    "app/utils/sse_utils.py",
+    "app/utils/temp_file_manager.py",
+    "app/utils/text_utils.py",
+    "app/utils/url_utils.py",
+    "run.py",
+    "tests/conftest_infrastructure.py",
+]
+
 [tool.ruff.lint]
 select = [
     "E",     # pycodestyle errors

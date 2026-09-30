@@ -290,6 +290,28 @@ store's open items (the `triage/*.json` on `pvginkel/Fieldnotes`'s `origin/main`
 absent or not submitted), and `fieldnotes_triage_rulings_total` and
 `fieldnotes_actioner_starts_total` carry every label from zero.
 
+**The dashboard**, when the slice changes `grafana/dashboard.py` or the metrics its panels read.
+Upload it once the roll is confirmed:
+
+```bash
+cexec modern-app uv run grafana/dashboard.py --upload
+```
+
+It regenerates `grafana/fieldnotes.json` (commit it with the slice if it moved) and writes the
+dashboard over the one in Grafana, by its uid `fieldnotes`; Grafana answers `'status': 'success'`
+with the new version (the same version when nothing changed). It reads `GRAFANA_URL` and
+`GRAFANA_TOKEN`, which this environment projects. Then prove each new or changed panel shows prd
+series: run its expression through Grafana's Prometheus datasource, whose uid is the script's
+`DATASOURCE`:
+
+```bash
+curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+  "$GRAFANA_URL/api/datasources/proxy/uid/ce0kvu6exy9z4c/api/v1/query" \
+  --data-urlencode 'query=<the panel expression>'
+```
+
+`"status":"success"` with a non-empty `result`; an empty one is a finding.
+
 **The reconciler and the actioner** are not deployed services: they are skills in the store repo,
 proven by a `--dry-run` session over a generated store and a local API
 ([the gate-2 handover](../../FieldnotesAppSpecs/handovers/gate-2-and-what-follows.md), section 4),

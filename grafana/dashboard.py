@@ -310,7 +310,7 @@ def dashboard():
             "Triage queue",
             0,
             39,
-            8,
+            6,
             triage_queue(),
             "in the queue",
             "Items waiting for the operator: open items in the store's triage/ whose ruling is "
@@ -319,9 +319,9 @@ def dashboard():
         ),
         bars(
             "Rulings by verb",
-            8,
+            6,
             39,
-            8,
+            6,
             inc("fieldnotes_triage_rulings_total", by="verb", window="$__interval"),
             "{{verb}}",
             "The operator's rulings: every ruling written counts, a draft ruled over or taken "
@@ -329,14 +329,27 @@ def dashboard():
         ),
         bars(
             "Actioner starts",
-            16,
+            12,
             39,
-            8,
+            6,
             inc("fieldnotes_actioner_starts_total", by="result", window="$__interval"),
             "{{result}}",
-            "Starts of the actioner's timer after a submit. started: the controller ran it. "
-            "in_flight: refused while a run was in flight, tried again a minute later. failed: "
-            "any other failure, not retried; Run now in KubeCoder is the retry.",
+            "Starts of the actioner's prompt run after a submit. started: the controller "
+            "accepted it. in_flight: a run was held, tried again a minute later. failed: the "
+            "controller refused it or could not be reached, not retried; the next submit is "
+            "the retry.",
+        ),
+        bars(
+            "Actioner runs",
+            18,
+            39,
+            6,
+            inc("fieldnotes_actioner_runs_total", by="outcome, reason", window="$__interval"),
+            "{{outcome}} {{reason}}",
+            "Actioner runs ended, as the controller's webhook reports them. A skip for want of "
+            "an environment (in-use, no-capacity) is tried again five minutes later; any other "
+            "skip or failure is not retried: the next submit, or a session in the store's "
+            "environment, is the retry.",
         ),
         row("The service", 47),
         lines(

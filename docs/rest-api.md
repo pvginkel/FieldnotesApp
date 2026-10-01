@@ -10,7 +10,7 @@ The surface is the ModernAppTemplate backend's (`backend/`, Flask under waitress
 (`backend/app/api/fieldnotes.py`), and the domain behind them is `backend/app/fieldnotes/`. The
 UI's nginx in the same pod proxies `/api/` to it.
 
-Every endpoint except the health checks, `GET /metrics`, the two webhooks and the triage endpoints
+Every endpoint except the health checks, `GET /metrics`, the three webhooks and the triage endpoints
 requires `Authorization: Bearer <token>` (NFR-4). These are `@public` to the template's OIDC hook,
 which gates only the UI's own endpoints on the operator's session: the agents' surface checks its
 client tokens itself. A token resolves to a named client configured as
@@ -18,7 +18,8 @@ client tokens itself. A token resolves to a named client configured as
 Resolution compares digests in constant time against every configured client. With no client
 configured, every bearer is refused. The resolved client's name goes into the commit message of any
 write, onto the reactions it writes (`client`), and into the log. The webhooks verify their own
-secrets; see [webhooks.md](webhooks.md).
+secrets, but for KubeCoder's, which carries none and is acted on only for the run the actioner
+holds; see [webhooks.md](webhooks.md).
 
 The triage endpoints (`/api/triage/…`, `backend/app/api/triage.py`) are the triage UI's, and take
 the operator's OIDC session instead (NFR-4): the template's, gated on the `editor` client role for
@@ -40,6 +41,7 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `POST /api/observations/{id}/board-sync` | | 200 `BoardSyncReply` |
 | `POST /api/match` | `MatchRequest` | 200 `{candidates, indexed_commit}` |
 | `POST /api/hooks/github`, `POST /api/hooks/youtrack` | the sender's payload | 200 `{action: "queued" or "ignored"}` |
+| `POST /api/hooks/kubecoder` | the controller's prompt-run outcome | 200 `{action: "queued" or "ignored"}` |
 | `GET /api/triage/queue` | | 200 `{items, observations}` |
 | `PUT /api/triage/items/{id}/ruling` | `RulingRequest` | 200 the item as it now stands |
 | `DELETE /api/triage/items/{id}/ruling?written=…` | `written` | 200 the item as it now stands |
@@ -145,7 +147,8 @@ time.
 | `fieldnotes_webhook_deliveries_total` | `source`, `action` | verified deliveries, `queued` or `ignored`; a refused one shows only as a 401 in the request metric |
 | `fieldnotes_board_syncs_total` | `result` | `changed`, `unchanged`, or `failed` (a queued sync that raised) |
 | `fieldnotes_triage_rulings_total` | `verb` | the operator's rulings, `yes`, `no` or `later`; a refused one is not counted |
-| `fieldnotes_actioner_starts_total` | `result` | calls to run the actioner's timer: `started`, `in_flight` (refused while a run is in flight, tried again a minute later) or `failed` (any other failure, not retried); a start skipped for want of settings, or with nothing waiting, makes no call and is not counted |
+| `fieldnotes_actioner_starts_total` | `result` | actioner starts: `started` (the controller accepted the prompt run), `in_flight` (a run is held, tried again a minute later; no call) or `failed` (the controller refused the run or could not be reached, not retried); a start skipped for want of settings, or with nothing waiting, is not counted |
+| `fieldnotes_actioner_runs_total` | `outcome`, `reason` | actioner runs ended, as the controller's webhook reports them: `success` (reason `none`), or `skipped` or `failed` with the controller's reason (`in-use`, `no-capacity`, `turn-error`, `timeout`, …) |
 | `fieldnotes_http_request_duration_seconds` | `method`, `route`, `status` | requests by route template (histogram) |
 
 A matched post is remembered for its reporter, meaning the `(repo, session)` it came from or the repo
@@ -192,27 +195,43 @@ its `ruling`, so a commit's diff is the ruling; timestamps are UTC, whole second
 
 ## The actioner start
 
-A submit that submitted something starts the actioner (FR-27): the API runs the actioner's
-KubeCoder timer, `POST /timers/<FIELDNOTES_KUBECODER_ACTIONER_TIMER>/run` on
-`FIELDNOTES_KUBECODER_URL`, with `FIELDNOTES_KUBECODER_TOKEN` as a bearer. The call runs as a task
-on the template's task service, after the submit's write, so the reply does not wait for it.
+A submit that submitted something starts the actioner (FR-27): the API asks the KubeCoder
+controller for a prompt run, `POST /prompt-runs` on `FIELDNOTES_KUBECODER_URL` with
+`FIELDNOTES_KUBECODER_TOKEN` as a bearer, of the actioner's prompt in the project
+`FIELDNOTES_KUBECODER_REPO`, with `FIELDNOTES_KUBECODER_WEBHOOK_URL` as the run's webhook. The call
+runs as a task on the template's task service, after the submit's write, so the reply does not wait
+for it.
 
 Each attempt first reads the triage index for the items that wait: submitted, and so not yet
 stamped `actioned` (an open item that carries the stamp breaks the store's rules and is not in the
-index). With none waiting it makes no call. The controller's `202` starts the run. A `409` whose
-problem `type` is `conflict` is taken for the controller's refusal while the timer has a run in
-flight, and is tried again 60 seconds later, and again after that for as long as items wait. Any other answer, a refused
-token included, or a controller that cannot be reached is logged at ERROR and not retried:
-KubeCoder's **Run now** on the timer is the retry. Each call is counted in
-`fieldnotes_actioner_starts_total`.
+index). With none waiting it makes no call. It then reads the hold: `actioner-run.json` in
+`FIELDNOTES_CACHE_DIR`, on the volume both pods mount, naming the run the API started last and when.
+A live hold means a run is in flight, and the attempt is tried again 60 seconds later, and again
+after that for as long as items wait. A hold 30 minutes old has expired, since its webhook will not
+come, and is logged at WARNING and passed over. The controller's `202` and its `runId` start the
+run, and the API takes the hold for it. Any other answer, a refused token included, or a
+controller that cannot be reached is logged at ERROR and not retried. Each call, and each attempt
+that found a live hold, is counted in `fieldnotes_actioner_starts_total`.
+
+The run's outcome comes back to `POST /api/hooks/kubecoder` (see
+[webhooks.md](webhooks.md#kubecoder-post-apihookskubecoder)), which releases the hold:
+
+- **a success** starts the actioner again, which calls nothing unless items still wait, such as an
+  item submitted while the run worked;
+- **a skip for want of an environment**, `in-use` (every environment of the project busy) or
+  `no-capacity` (none could be started), is tried again 300 seconds later, while items wait;
+- **any other ending**, a failure or a `no-environment` skip, is logged at ERROR with its reason and
+  the tail of the session's answer, and not retried: the next submit, or a session in the store's
+  environment asked to action the triage, is the retry.
+
+Each is counted in `fieldnotes_actioner_runs_total`.
 
 At most one start is pending in a pod, from the submit that asked for it until the run starts, a
 call fails or nothing waits; a submit through that pod meanwhile starts nothing, since the pending
-start covers it. While a rollout runs two pods each may hold one, and the controller's refusal while
-a run is in flight still makes it one run. The pending start lives in the process alone: shutdown
-cancels a retry that waits, a retired pod's included, and a pod that starts resumes none, so the
-items wait for the next submit or **Run now**. Without the three settings a submit still writes,
-and the start is skipped with a warning in the log.
+start covers it. The pending start lives in the process alone: shutdown cancels a retry that waits,
+a retired pod's included, and a pod that starts resumes none, so the items wait for the next submit
+or the held run's webhook. The hold outlives the pod, and either pod may receive the webhook. Without
+the four settings a submit still writes, and the start is skipped with a warning in the log.
 
 ## Errors
 
@@ -288,5 +307,6 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_YOUTRACK_RESOLUTION_FIELD`, `FIELDNOTES_YOUTRACK_OUTCOMES` | see webhooks.md | |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN`, `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | none, `X-YouTrack-Token` | see [webhooks.md](webhooks.md) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | 5 | seconds between a YouTrack delivery and the read of its card; see [webhooks.md](webhooks.md) |
-| `FIELDNOTES_KUBECODER_URL`, `FIELDNOTES_KUBECODER_TOKEN`, `FIELDNOTES_KUBECODER_ACTIONER_TIMER` | none | the KubeCoder controller, the API's client token there (secret) and the actioner's timer id; set together or not at all; see [The actioner start](#the-actioner-start) |
+| `FIELDNOTES_KUBECODER_URL`, `FIELDNOTES_KUBECODER_TOKEN`, `FIELDNOTES_KUBECODER_REPO`, `FIELDNOTES_KUBECODER_WEBHOOK_URL` | none | the KubeCoder controller, the API's client token there (secret), the store's KubeCoder project (`owner/Name`) and the address the controller reaches `/api/hooks/kubecoder` at; set together or not at all; see [The actioner start](#the-actioner-start) |
+| `FIELDNOTES_KUBECODER_ACTIONER_PROMPT`, `FIELDNOTES_KUBECODER_ACTIONER_MODEL`, `FIELDNOTES_KUBECODER_ACTIONER_EFFORT` | the store's prompt, the engine's defaults | the actioner's prompt, model and reasoning effort |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |

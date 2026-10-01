@@ -1,7 +1,8 @@
 # Webhooks and board sync
 
-This covers the two inbound webhooks, GitHub's push notifications and YouTrack's board events, and
-board sync, the routine that reconciles an observation with its YouTrack card (FR-20..FR-22).
+This covers the inbound webhooks, GitHub's push notifications and YouTrack's board events, and
+board sync, the routine that reconciles an observation with its YouTrack card (FR-20..FR-22); and
+KubeCoder's report of how an actioner run ended (FR-27).
 
 ## GitHub: `POST /api/hooks/github`
 
@@ -103,3 +104,23 @@ An observation with no card, or a card YouTrack does not have, is a 409 `conflic
 unreachable or refusing the read is a 502 `board-unreachable`; with `FIELDNOTES_YOUTRACK_URL` and
 `FIELDNOTES_YOUTRACK_TOKEN` unset (they are set together or not at all) a sync is a 503
 `board-unreachable`. A sync queued by the webhook that fails is logged.
+
+## KubeCoder: `POST /api/hooks/kubecoder`
+
+The KubeCoder controller posts a prompt run's outcome here once the run has fully ended, to the
+address the API gave it with the run, `FIELDNOTES_KUBECODER_WEBHOOK_URL`: the API's Service
+in-cluster, `http://fieldnotes-api.fieldnotes-prd.svc/api/hooks/kubecoder` on prd. The body is the
+controller's: `runId`, `repo`, exactly one of `success` and `failure` (the record a timer's
+`lastSuccess` or `lastFailure` holds, `outcome` and `reason` on a failure), and the run's condensed
+`log`. The API reads `runId`, which side is set, `outcome`, `reason` and `result`, and ignores the
+rest.
+
+The delivery carries no signature, secret or token. The API acts on it only when `runId` is the run
+its hold names, and answers every other delivery 200 `{"action": "ignored"}`, so a delivery forged
+without the run's id changes nothing. The held run's delivery releases the hold and answers 200
+`{"action": "queued"}`; what it starts runs off the request, as
+[rest-api.md](rest-api.md#the-actioner-start) describes. A body without a `runId` is a 422
+`validation-error`, and until the API is ready a delivery is a 503 `not-ready`; the controller
+retries both, with backoff, for up to an hour. Either pod may receive it: the hold is on the volume
+both mount.
+

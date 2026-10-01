@@ -7,7 +7,7 @@ store already knows, the operator's ruling included, and the agent reacts to tha
 re-posting: that post-time answer is the knowledge delivery. There is no search tool, because the
 store is temporary: what is reported gets fixed or documented and then leaves it. A scheduled
 reconciler session curates the store into triage items, the operator rules on them in the app's
-triage UI, and an actioner session, which Submit starts through a KubeCoder timer, carries the
+triage UI, and an actioner session, which Submit starts as a KubeCoder prompt run, carries the
 rulings out.
 
 **It is a proof of concept, built and live since 2026-09-21**, to find out whether the idea proves

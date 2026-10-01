@@ -741,7 +741,7 @@
       "gridPos": {
         "x": 0,
         "y": 39,
-        "w": 8,
+        "w": 6,
         "h": 8
       },
       "targets": [
@@ -784,9 +784,9 @@
         "uid": "ce0kvu6exy9z4c"
       },
       "gridPos": {
-        "x": 8,
+        "x": 6,
         "y": 39,
-        "w": 8,
+        "w": 6,
         "h": 8
       },
       "targets": [
@@ -826,15 +826,15 @@
       "id": 21,
       "type": "timeseries",
       "title": "Actioner starts",
-      "description": "Starts of the actioner's timer after a submit. started: the controller ran it. in_flight: refused while a run was in flight, tried again a minute later. failed: any other failure, not retried; Run now in KubeCoder is the retry.",
+      "description": "Starts of the actioner's prompt run after a submit. started: the controller accepted it. in_flight: a run was held, tried again a minute later. failed: the controller refused it or could not be reached, not retried; the next submit is the retry.",
       "datasource": {
         "type": "prometheus",
         "uid": "ce0kvu6exy9z4c"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 39,
-        "w": 8,
+        "w": 6,
         "h": 8
       },
       "targets": [
@@ -872,6 +872,54 @@
     },
     {
       "id": 22,
+      "type": "timeseries",
+      "title": "Actioner runs",
+      "description": "Actioner runs ended, as the controller's webhook reports them. A skip for want of an environment (in-use, no-capacity) is tried again five minutes later; any other skip or failure is not retried: the next submit, or a session in the store's environment, is the retry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ce0kvu6exy9z4c"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 39,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ce0kvu6exy9z4c"
+          },
+          "expr": "sum by (outcome, reason) (increase(fieldnotes_actioner_runs_total{}[$__interval]))",
+          "legendFormat": "{{outcome}} {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "interval": "1h",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 23,
       "type": "row",
       "title": "The service",
       "collapsed": false,
@@ -884,7 +932,7 @@
       "panels": []
     },
     {
-      "id": 23,
+      "id": 24,
       "type": "timeseries",
       "title": "Requests",
       "description": "Requests per second by route; health checks and scrapes left out.",
@@ -929,7 +977,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 25,
       "type": "timeseries",
       "title": "Latency p95",
       "description": "The 95th percentile by route. A post embeds its text on the models pod first.",
@@ -974,7 +1022,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 26,
       "type": "timeseries",
       "title": "Errors",
       "description": "4xx and 5xx answers by route and status. A 401 on a webhook is a refused delivery.",
@@ -1022,7 +1070,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 27,
       "type": "timeseries",
       "title": "Webhook deliveries",
       "description": "Verified deliveries: queued work, or ignored as none of ours.",
@@ -1070,7 +1118,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 28,
       "type": "timeseries",
       "title": "Board syncs",
       "description": "Syncs of an observation's card: changed, unchanged, or failed when queued.",
@@ -1118,7 +1166,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 29,
       "type": "timeseries",
       "title": "Reads by id",
       "description": "Observations read in full, by client: mcp is an agent's get, skills the reconciler.",

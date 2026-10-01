@@ -172,7 +172,7 @@ relations:
     target: svc:youtrack-prd-youtrack,57c32c7f-0b5d-5d96-914d-e426bc7ab7c7
     type: Association
 
-  # A submit in the triage UI starts the actioner's timer through the controller.
+  # A submit in the triage UI starts the actioner as a prompt run through the controller.
   - id: rel:fieldnotes-consumes-kubecoder-controller
     source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
     target: svc:kubecoder-controller-api,6f8c9cdd-96fd-41ee-8f4f-08ba2c9c1fb0

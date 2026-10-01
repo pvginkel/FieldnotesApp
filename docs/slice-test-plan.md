@@ -328,8 +328,9 @@ no agent holds an `editor` session, so what the queue lists is the operator's to
 `GET https://fieldnotes-api.home/api/triage/queue` with no session, and with an agent's bearer,
 answers `401`. On `https://fieldnotes-api.home/metrics`, `fieldnotes_triage_queue` equals the
 store's open items (the `triage/*.json` on `pvginkel/Fieldnotes`'s `origin/main` whose ruling is
-absent or not submitted), and `fieldnotes_triage_rulings_total` and
-`fieldnotes_actioner_starts_total` carry every label from zero.
+absent or not submitted), and `fieldnotes_triage_rulings_total`,
+`fieldnotes_actioner_starts_total` and `fieldnotes_actioner_runs_total{outcome="success"}` carry
+every label from zero.
 
 **The dashboard**, when the slice changes `grafana/dashboard.py` or the metrics its panels read.
 Upload it once the roll is confirmed:

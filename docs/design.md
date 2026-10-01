@@ -51,7 +51,7 @@ Everything below follows from that.
 | Vetting | The reconciler writes only the triage items. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. |
 | Output | Triage items in the store, one file per observation listed (ask, evidence, recommendation, impact, every report on it → ruling), plus a Telegram message with the size of the operator's queue and the triage UI's address. No cap, no threshold. An item stays in the queue until it is ruled; the reconciler lists an observation again only when it has something new to say. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. Ruled 2026-09-26 with the triage UI: records instead of documents, so that nothing is ruled in an old document or lost in one; the document's summary and its second half, every new report word for word, went with it, the operator having read the raw reports for the while they asked for. |
 | Rulings | A verb, `yes`, `no` or `later`, and a note written as the operator would say it: the reason for a `no`, the revisit trigger for a `later`, and whatever else the actioner should know, a merge included. The actioner reads a ruling; it does not parse one. When it cannot read one with confidence it asks back on the item, and the operator answers in the queue. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the ruling is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. The verb and one note field were ruled with the triage UI. |
-| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; previous, skip and progress; a finish card whose Submit starts the actioner through a KubeCoder timer. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. Triage only: no browsing observations, no dashboard, nothing about the actioner's runs. | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
+| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; previous, skip and progress; a finish card whose Submit starts the actioner as a KubeCoder prompt run. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. Triage only: no browsing observations, no dashboard, nothing about the actioner's runs. | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
 | Retirement | An observation is deleted once what it says is better learned elsewhere: the friction was fixed, or the hint went into documentation agents read anyway. The reconciler decides that on its own, as a rule when the card closes as done; the actioner does it for a ruling that says the work is already delivered. What was ruled and never carded stays for good. | The store is for what an agent cannot learn any other way. A recurrence after a deletion arrives as a fresh post, which is the signal that the fix did not hold. Git history is the record. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
@@ -59,6 +59,7 @@ Everything below follows from that.
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
+| Actioner start | Submit has the API ask the KubeCoder controller for a prompt run of the actioner's prompt in the store's project, and the run's outcome comes back as the controller's webhook. The API holds one run at a time, in a file on the volume both pods mount; a hold whose webhook does not come expires after 30 minutes. A run skipped for want of a free environment is tried again five minutes later; a failure is logged and counted. | Ruled 2026-10-01 (FN-26): the actioner depends on no timer. The controller refuses no second prompt run, so the API keeps it to one; the file outlives a pod and is shared through a rollout's overlap. Runs take minutes (1.5 to 4.5 from submit to the last stamp, measured), and a lost webhook almost always means a lost run. A prompt run's failure sends no Telegram message and has no **Run now**: the log and the metrics are enough, and a session in the store's environment is the retry. |
 | Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
@@ -159,8 +160,8 @@ scope here.
     observation should say, a merge. The ruling is the operator's channel to the actioner and is
     read, not parsed: the verb is the lead, the prose is the instruction. A ruling that is not
     submitted is a draft, and nobody but the operator acts on it.
-19. FR-19 The `actioner` skill, run unattended by a KubeCoder timer the API runs (FR-27) when the
-    operator submits, carries out each submitted item that has no `actioned` stamp, through the
+19. FR-19 The `actioner` skill, run unattended as a KubeCoder prompt run the API starts (FR-27) when
+    the operator submits, carries out each submitted item that has no `actioned` stamp, through the
     YouTrack MCP tools and on the observation files, with the judgment the reconciler has over the
     files (FR-14). Its defaults: `yes` → an issue whose description names the observation id for the
     reader, the issue id written to the observation's `card`, status `raised`; a card the operator
@@ -238,18 +239,25 @@ scope here.
     submitted and stays in the queue. With nothing to submit, submit writes nothing, starts nothing
     and is not an error.
 27. FR-27 A submit that submitted something must start the actioner (FR-19) after its write and off
-    the request, so the reply does not wait on it: the API runs the actioner's timer through the
-    KubeCoder controller, with a client token of its own. When the controller refuses because a run
-    is in flight, the API tries again a minute later, for as long as submitted items without an
-    `actioned` stamp are waiting, and stops once none is. At most one start waits at a time in a
-    pod, and a submit made meanwhile through that pod is covered by it; while a rollout overlaps two
-    pods each may hold one, and the controller's refusal while a run is in flight still keeps it to
-    one run. Any other failure is logged and counted, not retried. A pod that starts resumes no
-    waiting start, and a retired pod's waiting start goes with it: the items wait for the next
-    submit or the timer's **Run now** in KubeCoder. The API polls nothing for display and the UI
-    hears nothing of the actioner: a failed run is KubeCoder's own Telegram message, and **Run now**
-    is its retry. Without the controller's address, the token and the timer's id the API still
-    starts and submit still writes; the start is skipped and logged.
+    the request, so the reply does not wait on it: the API asks the KubeCoder controller, with a
+    client token of its own, for a prompt run of the actioner's prompt in the store's project, and
+    the run's outcome comes back as the controller's webhook. One run is held at a time: the API
+    records the run it started, its id and when, in a file on the volume both pods mount, and starts
+    no other while that hold is live; a hold whose webhook has not come within 30 minutes has
+    expired. A start that finds a live hold is tried again a minute later, for as long as submitted
+    items without an `actioned` stamp are waiting, and stops once none is. At most one start waits
+    at a time in a pod, and a submit made meanwhile through that pod is covered by it. The held
+    run's webhook, whichever pod it reaches, clears the hold, and a delivery for any other run is
+    ignored. After a success the actioner is started again if items still wait; a run skipped
+    because no environment of the project was free (`in-use`) or could be started (`no-capacity`)
+    is tried again five minutes later, while items wait. Any other skip or failure, and a start the
+    controller refuses, is logged and counted, not retried. A pod that starts resumes no waiting
+    start and a retired pod's waiting start goes with it, while the hold outlives both. The API
+    polls nothing for display and the UI hears nothing of the actioner: a failed run is in the API's
+    log and metrics, and the retry is the next submit or a session in the store's environment asked
+    to action the triage. Without the controller's address, the token, the store's project and the
+    webhook's address the API still starts and submit still writes; the start is skipped and
+    logged.
 
 **Non-functional**
 
@@ -286,13 +294,14 @@ flowchart LR
   X[Actioner session] -->|MCP: create issues| Y
   X <-->|edit / push| G
   O[Operator] -->|triage UI, OIDC| R
-  R -->|run the actioner timer| K[KubeCoder controller]
+  R -->|actioner prompt run| K[KubeCoder controller]
   K -->|starts| X
+  K -->|run outcome webhook| R
 ```
 
 Agents talk only to the MCP server; the skills talk to the store, the API and the board. GitHub and
-the board talk back to the API alone. The operator rules in the UI, and a submit makes the API run
-the actioner's timer at the KubeCoder controller.
+the board talk back to the API alone. The operator rules in the UI, and a submit makes the API ask
+the KubeCoder controller for the actioner's prompt run, whose outcome the controller posts back.
 
 ### This repo
 
@@ -350,7 +359,7 @@ takes its own inbound bearer token from agents and holds the `mcp` client token 
 | `skills/install/` | `SKILL.md`: pull `main` into the session's checkout, then load the skill named in the prompt |
 | `skills/reconciler/` | `SKILL.md` plus Python helpers |
 | `skills/actioner/` | `SKILL.md` plus Python helpers |
-| `.kubecoder/` | Makes the store a KubeCoder project, so its timers can run the reconciler and the actioner in an environment of it |
+| `.kubecoder/` | Makes the store a KubeCoder project, so its timer can run the reconciler, and the API's prompt runs the actioner, in an environment of it |
 
 Embedded text is `area + ": " + canonical`. Comments and reactions never change it, so they never
 trigger a re-embed; a reconciler rewrite of `canonical` does.
@@ -475,6 +484,12 @@ no observation. `POST /observations/{id}/board-sync` runs the same routine from 
 `card`, and is what the reconciler's board scan calls, so the field map lives in one place: the
 API's config.
 
+**KubeCoder.** The controller posts a prompt run's outcome to `/api/hooks/kubecoder`, in-cluster, at
+the address the API gave it with the run (FR-27). The delivery carries no signature or token, so the
+handler acts only on the run id the hold names, and answers every other delivery `200` and ignores
+it. It reads the hold and the triage index and writes nothing to the store; a start it asks for runs
+off the request.
+
 ### Skills
 
 **Install.** The scheduled session's prompt is "pull, then load skill X". The install skill fetches
@@ -490,24 +505,24 @@ written from an item list, an open item rewritten or withdrawn. A `--dry-run` mo
 store root as a parameter, defaulting to its own repo, so it can be run against a generated test
 store.
 
-**Actioner.** Run by its timer when the operator submits, with nobody in the session. A helper
-lists the submitted items that carry no stamp; the session reads each one, verb and note together,
-and carries it out (FR-19): issues through the YouTrack MCP tools, fields on the observation through
-the reconciler's helpers, a deletion where the work is already delivered. It writes the `reason` of
-a `no` for the agent who will be shown it, not as a copy of what the operator wrote to the actioner.
-Each item is stamped and moved to `triage/done/` as it is finished, or handed back with a question,
-and the run commits and pushes as it goes. A stamped item is skipped.
+**Actioner.** Run as the API's prompt run when the operator submits, with nobody in the session. A
+helper lists the submitted items that carry no stamp; the session reads each one, verb and note
+together, and carries it out (FR-19): issues through the YouTrack MCP tools, fields on the
+observation through the reconciler's helpers, a deletion where the work is already delivered. It
+writes the `reason` of a `no` for the agent who will be shown it, not as a copy of what the operator
+wrote to the actioner. Each item is stamped and moved to `triage/done/` as it is finished, or handed
+back with a question, and the run commits and pushes as it goes. A stamped item is skipped.
 
 ### Security and config
 
 Bearer tokens on the agents' API and the MCP server, and the template's OIDC session with the
 `editor` client role on the operator's triage endpoints (NFR-4); the GitHub webhook secret and the
 YouTrack webhook token verified before any processing. The API holds a GitHub credential scoped to
-the store repo, a read-only YouTrack token and the token of its own KubeCoder client, which runs the
-actioner's timer (FR-27); skills use the session's own credentials, provided by KubeCoder.
-Thresholds, model names, the resolution field and value map, the actioner's timer, and endpoints are
-configuration, not code. Every secret is an OpenBao leaf materialised by External Secrets and
-referenced by `secretKeyRef`; none is ever in a config file, an image or this repo.
+the store repo, a read-only YouTrack token and the token of its own KubeCoder client, which starts
+the actioner's prompt runs (FR-27); skills use the session's own credentials, provided by KubeCoder.
+Thresholds, model names, the resolution field and value map, the actioner's prompt and project, and
+endpoints are configuration, not code. Every secret is an OpenBao leaf materialised by External
+Secrets and referenced by `secretKeyRef`; none is ever in a config file, an image or this repo.
 
 ## Validation
 
@@ -526,6 +541,7 @@ are issues, they'll surface soon enough").
 | Board sync | Raise an issue by hand and set an observation's `card` to it, move the issue to Done with a `Resolved:` comment, then change the resolution field to Won't Do | Observation `closed` / `done` with pointer; outcome changes to `wont-do` on the second event; with webhooks disabled, closed after the next board scan |
 | Card feedback | Comment a workaround on a raised observation's card, sync it twice, then run the reconciler with `--dry-run` | `card_updated` moves on the first sync and the second writes nothing; the observation is in the queue; the reconciler's edit carries the workaround |
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | Triage items the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
+| Actioner start | Rule an item in the triage UI on prd and submit | One prompt run starts; its webhook clears the hold; `fieldnotes_actioner_runs_total{outcome="success"}` counts it; the item is stamped |
 | Actioner idempotency | Submit rulings on items, run the actioner twice | Second run creates nothing and reports zero actions |
 
 The suites behind `kc project test` are hermetic and cover none of the rows that need real models, a

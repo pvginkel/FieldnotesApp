@@ -151,7 +151,8 @@ def environ(tmp_path, remote, youtrack, kubecoder) -> dict[str, str]:
         "FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE": "0",
         "FIELDNOTES_KUBECODER_URL": "http://kubecoder.example.invalid",
         "FIELDNOTES_KUBECODER_TOKEN": kubecoder.token,
-        "FIELDNOTES_KUBECODER_ACTIONER_TIMER": kubecoder.timer,
+        "FIELDNOTES_KUBECODER_REPO": kubecoder.repo,
+        "FIELDNOTES_KUBECODER_WEBHOOK_URL": kubecoder.webhook_url,
         **{
             f"FIELDNOTES_CLIENT_TOKEN_{name.upper()}": token
             for name, token in TOKENS.items()

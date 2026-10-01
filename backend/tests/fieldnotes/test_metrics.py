@@ -61,6 +61,8 @@ def test_every_closed_label_set_is_there_from_the_start(start, scrape):
         'fieldnotes_actioner_starts_total{result="started"} 0.0',
         'fieldnotes_actioner_starts_total{result="in_flight"} 0.0',
         'fieldnotes_actioner_starts_total{result="failed"} 0.0',
+        'fieldnotes_actioner_runs_total{outcome="success",reason="none"} 0.0',
+        'fieldnotes_webhook_deliveries_total{action="ignored",source="kubecoder"} 0.0',
     ):
         assert line in text
 

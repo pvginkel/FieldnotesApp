@@ -26,25 +26,29 @@
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | `5` | seconds a delivery waits before its card is read |
 | `FIELDNOTES_KUBECODER_URL` | none | the KubeCoder controller, for starting the actioner |
 | `FIELDNOTES_KUBECODER_TOKEN` | none | the API's client token at the controller (secret) |
-| `FIELDNOTES_KUBECODER_ACTIONER_TIMER` | none | the id of the actioner's timer |
+| `FIELDNOTES_KUBECODER_REPO` | none | the store's KubeCoder project, `owner/Name` |
+| `FIELDNOTES_KUBECODER_WEBHOOK_URL` | none | where the controller reaches `/api/hooks/kubecoder` |
+| `FIELDNOTES_KUBECODER_ACTIONER_PROMPT` | the store's | the actioner's prompt |
+| `FIELDNOTES_KUBECODER_ACTIONER_MODEL`, `_EFFORT` | the engine's | its model and reasoning effort |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |
 
 Tokens are never in code or config files, only in environment variables materialised from
 secrets. A malformed value fails startup and names its variable. The GitHub webhook's two
 variables are set together or not at all, and so are YouTrack's URL and token, and KubeCoder's
-three. Without the webhooks' secrets every delivery is refused, without YouTrack no card can be
+first four. Without the webhooks' secrets every delivery is refused, without YouTrack no card can be
 synced, and without KubeCoder a submit starts no actioner.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.fieldnotes.actioner import ActionerSettings
+from app.fieldnotes.actioner import DEFAULT_PROMPT, ActionerSettings
 from app.fieldnotes.auth import ClientRegistry
 from app.fieldnotes.board import BoardSettings
 from app.fieldnotes.hooks import GithubSettings, YouTrackHookSettings
@@ -54,6 +58,7 @@ from fieldnotes_contracts import Outcome
 
 PREFIX = "FIELDNOTES_"
 CLIENT_TOKEN_PREFIX = f"{PREFIX}CLIENT_TOKEN_"
+REPO = re.compile(r"[^/\s]+/[^/\s]+")
 
 DEFAULT_MODELS_URL = "http://models.models-prd.svc.cluster.local"
 DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
@@ -220,17 +225,31 @@ def _youtrack_hook(environ: Mapping[str, str]) -> YouTrackHookSettings | None:
 
 
 def _actioner(environ: Mapping[str, str]) -> ActionerSettings | None:
-    url = _optional(environ, "KUBECODER_URL")
-    token = _optional(environ, "KUBECODER_TOKEN")
-    timer = _optional(environ, "KUBECODER_ACTIONER_TIMER")
-    if url is None and token is None and timer is None:
+    names = (
+        "KUBECODER_URL",
+        "KUBECODER_TOKEN",
+        "KUBECODER_REPO",
+        "KUBECODER_WEBHOOK_URL",
+    )
+    url, token, repo, webhook_url = (_optional(environ, name) for name in names)
+    if url is None and token is None and repo is None and webhook_url is None:
         return None
-    if url is None or token is None or timer is None:
+    if url is None or token is None or repo is None or webhook_url is None:
         raise SettingsError(
-            f"{PREFIX}KUBECODER_URL, {PREFIX}KUBECODER_TOKEN and {PREFIX}KUBECODER_ACTIONER_TIMER "
-            "are set together or not at all"
+            ", ".join(PREFIX + name for name in names)
+            + " are set together or not at all"
         )
-    return ActionerSettings(url=url, token=token, timer=timer)
+    if not REPO.fullmatch(repo):
+        raise SettingsError(f"{PREFIX}KUBECODER_REPO is not owner/Name: {repo!r}")
+    return ActionerSettings(
+        url=url,
+        token=token,
+        repo=repo,
+        webhook_url=webhook_url,
+        prompt=_get(environ, "KUBECODER_ACTIONER_PROMPT", DEFAULT_PROMPT),
+        model=_optional(environ, "KUBECODER_ACTIONER_MODEL"),
+        reasoning_effort=_optional(environ, "KUBECODER_ACTIONER_EFFORT"),
+    )
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:

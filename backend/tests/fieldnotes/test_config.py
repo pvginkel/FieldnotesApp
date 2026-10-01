@@ -86,11 +86,21 @@ def test_match_settings_are_read():
         ({"FIELDNOTES_KUBECODER_URL": "http://kc"}, "set together or not at all"),
         (
             {
+                "FIELDNOTES_KUBECODER_URL": "http://kc",
                 "FIELDNOTES_KUBECODER_TOKEN": "t",
-                "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9",
+                "FIELDNOTES_KUBECODER_REPO": "pvginkel/Fieldnotes",
             },
-            "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN and "
-            "FIELDNOTES_KUBECODER_ACTIONER_TIMER are set together or not at all",
+            "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN, FIELDNOTES_KUBECODER_REPO, "
+            "FIELDNOTES_KUBECODER_WEBHOOK_URL are set together or not at all",
+        ),
+        (
+            {
+                "FIELDNOTES_KUBECODER_URL": "http://kc",
+                "FIELDNOTES_KUBECODER_TOKEN": "t",
+                "FIELDNOTES_KUBECODER_REPO": "Fieldnotes",
+                "FIELDNOTES_KUBECODER_WEBHOOK_URL": "http://api/api/hooks/kubecoder",
+            },
+            "FIELDNOTES_KUBECODER_REPO is not owner/Name",
         ),
         (
             {
@@ -107,23 +117,45 @@ def test_a_bad_variable_fails_startup_by_name(overrides, named):
         load_settings(BASE | overrides)
 
 
-def test_the_actioner_start_reads_kubecoders_three_and_its_token_is_no_client():
-    """FR-27: the controller, the API's token there and the actioner's timer. The token is the
-    API's own at the controller, not an inbound client's bearer."""
+KUBECODER = {
+    "FIELDNOTES_KUBECODER_URL": "http://kubecoder-controller.example.invalid:8080",
+    "FIELDNOTES_KUBECODER_TOKEN": " kubecoder-token ",
+    "FIELDNOTES_KUBECODER_REPO": "pvginkel/Fieldnotes",
+    "FIELDNOTES_KUBECODER_WEBHOOK_URL": "http://fieldnotes-api.example.invalid/api/hooks/kubecoder",
+}
+
+
+def test_the_actioner_start_reads_kubecoders_four_and_its_token_is_no_client():
+    """FR-27: the controller, the API's token there, the store's project and the webhook's
+    address; the store's prompt and the engine's model by default. The token is the API's own at
+    the controller, not an inbound client's bearer. The timer it replaced is no longer read."""
     settings = load_settings(
-        BASE
-        | {
-            "FIELDNOTES_KUBECODER_URL": "http://kubecoder-controller.example.invalid:8080",
-            "FIELDNOTES_KUBECODER_TOKEN": " kubecoder-token ",
-            "FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9",
-        }
+        BASE | KUBECODER | {"FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9"}
     )
     assert settings.actioner == ActionerSettings(
         url="http://kubecoder-controller.example.invalid:8080",
         token="kubecoder-token",
-        timer="f3c603f9",
+        repo="pvginkel/Fieldnotes",
+        webhook_url="http://fieldnotes-api.example.invalid/api/hooks/kubecoder",
     )
+    assert "load skill actioner" in settings.actioner.prompt
     assert settings.clients.names == ()
+
+
+def test_the_actioners_prompt_model_and_effort_are_settings():
+    settings = load_settings(
+        BASE
+        | KUBECODER
+        | {
+            "FIELDNOTES_KUBECODER_ACTIONER_PROMPT": "Action the triage.",
+            "FIELDNOTES_KUBECODER_ACTIONER_MODEL": "opus",
+            "FIELDNOTES_KUBECODER_ACTIONER_EFFORT": "high",
+        }
+    )
+    assert settings.actioner is not None
+    assert settings.actioner.prompt == "Action the triage."
+    assert settings.actioner.model == "opus"
+    assert settings.actioner.reasoning_effort == "high"
 
 
 def test_ulids_are_well_formed_and_sort_by_time():

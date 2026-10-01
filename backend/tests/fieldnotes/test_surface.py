@@ -26,6 +26,7 @@ ROUTES = {
     ("POST", "/api/match"),
     ("POST", "/api/hooks/github"),
     ("POST", "/api/hooks/youtrack"),
+    ("POST", "/api/hooks/kubecoder"),
     ("GET", "/health/healthz"),
     ("GET", "/health/readyz"),
     ("GET", "/metrics"),

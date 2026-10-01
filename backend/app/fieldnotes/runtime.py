@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from app.fieldnotes.actioner import Actioner, Controller, HttpController
+from app.fieldnotes.actioner import Actioner, Controller, Hold, HttpController
 from app.fieldnotes.board import Board, HttpBoard
 from app.fieldnotes.config import Settings
 from app.fieldnotes.errors import not_ready
@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 MODELS_TIMEOUT = 60.0
 BOARD_TIMEOUT = 30.0
 CONTROLLER_TIMEOUT = 30.0
+# The actioner's hold, on the volume both pods mount (FR-27).
+ACTIONER_HOLD = "actioner-run.json"
 
 
 def utcnow() -> datetime:
@@ -88,7 +90,13 @@ class Runtime:
             self.store, self.index, self.matcher, clock, board, outcomes, self.metrics
         )
         self.rulings = Rulings(self.store, clock, self.metrics)
-        self.actioner = Actioner(controller, self.triage, self.metrics)
+        self.actioner = Actioner(
+            controller,
+            self.triage,
+            self.metrics,
+            Hold(settings.cache_dir / ACTIONER_HOLD),
+            clock,
+        )
         self.ready = False
         self.failed = False
         self._on_failure = on_failure

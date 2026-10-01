@@ -2,7 +2,8 @@
 
 Every endpoint takes a named client's bearer token, not the operator's OIDC session: they are
 `@public` to the template's OIDC hook and check the bearer themselves. The webhooks verify their
-own signature or token instead. The contract models are the surface's definition, so the
+own signature or token instead, but for KubeCoder's, which carries neither and is acted on only for
+the run the actioner holds. The contract models are the surface's definition, so the
 endpoints validate with them directly and answer problem+json (RFC 9457) in the API's own shape.
 """
 
@@ -15,6 +16,7 @@ from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, g, request
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from app.fieldnotes.actioner import RunReport
 from app.fieldnotes.auth import bearer
 from app.fieldnotes.board import BoardError
 from app.fieldnotes.errors import (
@@ -36,6 +38,7 @@ from app.fieldnotes.runtime import Runtime
 from app.fieldnotes.store import GitError
 from app.services.container import ServiceContainer
 from app.services.fieldnotes_service import FieldnotesService
+from app.services.task_service import TaskService
 from app.utils.auth import public
 from fieldnotes_contracts import (
     ID_PATTERN,
@@ -328,4 +331,22 @@ def youtrack_hook(
         return _json(HookReply(action="ignored"))
     runtime.observations.sync_later(entry.observation.id, hook.settle)
     runtime.metrics.webhooks.labels("youtrack", "queued").inc()
+    return _json(HookReply(action="queued"))
+
+
+@fieldnotes_bp.route("/hooks/kubecoder", methods=["POST"])
+@public
+@inject
+def kubecoder_hook(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+    tasks: TaskService = Provide[ServiceContainer.task_service],
+) -> Response:
+    """FR-27: a prompt run's outcome. The held run's releases the hold and starts the actioner
+    again as its ending asks, off the request; a delivery for any other run is ignored."""
+    report = _body(RunReport)
+    runtime = _runtime(service)
+    if not runtime.actioner.ended(report, tasks):
+        runtime.metrics.webhooks.labels("kubecoder", "ignored").inc()
+        return _json(HookReply(action="ignored"))
+    runtime.metrics.webhooks.labels("kubecoder", "queued").inc()
     return _json(HookReply(action="queued"))

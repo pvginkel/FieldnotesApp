@@ -165,9 +165,16 @@ class Metrics:
         self.actioner_starts = Counter(
             "fieldnotes_actioner_starts",
             "Actioner starts through the KubeCoder controller, by result: started, in_flight "
-            "(refused while a run is in flight, and tried again a minute later) or failed (any "
-            "other failure, not retried).",
+            "(a run is held, so tried again a minute later) or failed (the controller refused "
+            "the run or could not be reached, not retried).",
             ["result"],
+            registry=self.registry,
+        )
+        self.actioner_runs = Counter(
+            "fieldnotes_actioner_runs",
+            "Actioner runs ended, as the controller's webhook reports them, by outcome (success, "
+            "skipped or failed) and the controller's reason (none on a success).",
+            ["outcome", "reason"],
             registry=self.registry,
         )
         self.requests = Histogram(
@@ -188,7 +195,7 @@ class Metrics:
             self.candidates.labels(match_class.value)
         for result in FOLLOW_UPS:
             self.follow_ups.labels(result)
-        for source in ("github", "youtrack"):
+        for source in ("github", "youtrack", "kubecoder"):
             for action in ("queued", "ignored"):
                 self.webhooks.labels(source, action)
         for result in ("changed", "unchanged", "failed"):
@@ -197,6 +204,7 @@ class Metrics:
             self.rulings.labels(verb.value)
         for result in ACTIONER_STARTS:
             self.actioner_starts.labels(result)
+        self.actioner_runs.labels("success", "none")
 
     def exposition(self) -> bytes:
         self._expire()

@@ -8,8 +8,9 @@ and `m` distinct words with `shared` in common: a test sets a score by choosing 
 `FakeYouTrack` answers `GET /api/issues/{id}` as YouTrack does, over an httpx transport, so the
 real board client and its reading of the JSON run in every test that syncs a card.
 
-`FakeController` answers `POST /timers/{id}/run` as the KubeCoder controller does, over an httpx
-transport, so the real controller client runs in every test that submits.
+`FakeController` answers `POST /prompt-runs` as the KubeCoder controller does, over an httpx
+transport, so the real controller client runs in every test that submits, and writes the webhook's
+body a run's ending would send.
 """
 
 from __future__ import annotations
@@ -136,14 +137,17 @@ class FakeYouTrack:
 
 class FakeController:
     """Each run is answered with the next of `answers`, the last one for every run after: `202`
-    starts it, `409` is the in-flight refusal, another status the controller's other problems,
-    and `None` a connection that fails. `on_run` is called inside a run, before its answer."""
+    accepts it with the next run id, another status is the controller's problems, and `None` a
+    connection that fails. `runs` holds each accepted or refused run's body, `ids` the ids
+    answered. `on_run` is called inside a run, before its answer."""
 
-    def __init__(self, token: str = "kubecoder-token", timer: str = "f00dcafe") -> None:
+    def __init__(self, token: str = "kubecoder-token") -> None:
         self.token = token
-        self.timer = timer
+        self.repo = "pvginkel/Fieldnotes"
+        self.webhook_url = "http://fieldnotes-api.example.invalid/api/hooks/kubecoder"
         self.answers: list[int | None] = [202]
-        self.runs: list[str] = []  # the paths run with the token, in order
+        self.runs: list[dict[str, Any]] = []
+        self.ids: list[str] = []
         self.on_run: Callable[[], object] | None = None
 
     def _problem(self, status: int, type_: str, title: str) -> httpx.Response:
@@ -155,23 +159,42 @@ class FakeController:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.headers.get("Authorization") != f"Bearer {self.token}":
             return self._problem(401, "unauthenticated", "no valid bearer token")
-        self.runs.append(request.url.path)
+        if request.url.path != "/prompt-runs":
+            return self._problem(404, "not-found", "no such route")
+        self.runs.append(json.loads(request.content))
         if self.on_run is not None:
             self.on_run()
         status = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         if status is None:
             raise httpx.ConnectError("connection refused", request=request)
-        if request.url.path != f"/timers/{self.timer}/run":
-            return self._problem(404, "not-found", "no such timer")
         if status == 202:
-            return httpx.Response(
-                202, json={"id": self.timer, "running": {"envId": None}}
-            )
-        if status == 409:
-            return self._problem(
-                409, "conflict", f"timer {self.timer!r} has a run in flight"
-            )
+            self.ids.append(f"run-{len(self.ids) + 1}")
+            return httpx.Response(202, json={"runId": self.ids[-1]})
         return self._problem(status, "internal", "the controller failed")
+
+    def report(
+        self, run_id: str, outcome: str | None = None, reason: str | None = None
+    ) -> dict[str, Any]:
+        """The webhook's body for `run_id`: a success, or a failure of `outcome` / `reason`."""
+        record: dict[str, Any] = {
+            "scheduledFor": "2026-09-19T10:00:00Z",
+            "startedAt": "2026-09-19T10:00:00Z",
+            "endedAt": "2026-09-19T10:03:00Z",
+            "envId": "pvginkel-fieldnotes-000001",
+            "sessionName": "claude-1",
+            "result": "two items actioned",
+            "judged": [],
+            "conversationId": None,
+        }
+        if outcome is not None:
+            record |= {"outcome": outcome, "reason": reason, "result": "it broke"}
+        return {
+            "runId": run_id,
+            "repo": self.repo,
+            "success": record if outcome is None else None,
+            "failure": record if outcome is not None else None,
+            "log": ["the run's log"],
+        }
 
     def controller(self, settings: ActionerSettings) -> HttpController:
         client = httpx.Client(

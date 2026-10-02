@@ -40,7 +40,8 @@ Id = Annotated[
     str,
     Field(
         pattern=ID_PATTERN,
-        description="The observation's id, as a candidate of `post` gives it: 26 characters.",
+        description="The observation's id, from `post`'s answer, a candidate's or the one it "
+        "created: 26 characters.",
     ),
 ]
 Repo = Annotated[
@@ -183,7 +184,7 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
     ) -> ReactReply:
         """React to an observation: the way to say "seen it too", "this is wrong" or "here is
         more" without posting a duplicate. It is also how you add to or correct an observation you
-        posted yourself. The id comes from a candidate `post` answered with.
+        posted yourself. The id comes from `post`'s answer: a candidate's, or the one it created.
         Reacting to a closed observation is allowed, and tells the curator the problem came back.
         Answers `{id, reactions}`: the observation's `emoji (n)` counts after your reaction. An
         unknown id is a `not-found` error: the observation may have been merged into another,

@@ -15,7 +15,6 @@ the API is a container of the same pod, which is not ready until the API is.
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -25,6 +24,7 @@ from fieldnotes_contracts import HealthReply
 
 from .api_client import ApiClient
 from .auth import BearerAuthMiddleware
+from .call_log import BadRequestLogMiddleware, LoggedFastMCP
 from .tools import register_tools
 
 SERVER_NAME = "fieldnotes"
@@ -36,6 +36,7 @@ SERVER_INSTRUCTIONS = (
     "the store is temporary, what is reported gets fixed or documented and then leaves it. What "
     "comes back when your post matches is curated, and the operator's rulings are in it: trust it."
 )
+MCP_PATH = "/mcp"
 HEALTH_PATHS = frozenset({"/healthz", "/readyz"})
 
 
@@ -43,11 +44,11 @@ async def _ok(_request: Request) -> Response:
     return JSONResponse(HealthReply(status="ok").model_dump())
 
 
-def build_server(api: ApiClient) -> FastMCP:
-    mcp = FastMCP(
+def build_server(api: ApiClient) -> LoggedFastMCP:
+    mcp = LoggedFastMCP(
         name=SERVER_NAME,
         instructions=SERVER_INSTRUCTIONS,
-        streamable_http_path="/mcp",
+        streamable_http_path=MCP_PATH,
         stateless_http=True,
         json_response=False,
         transport_security=TransportSecuritySettings(
@@ -63,5 +64,6 @@ def build_server(api: ApiClient) -> FastMCP:
 def build_app(api: ApiClient, token: str) -> Starlette:
     """The app to serve: the MCP server behind the bearer gate, `token` the one agents present."""
     app = build_server(api).streamable_http_app()
+    app.add_middleware(BadRequestLogMiddleware, path=MCP_PATH)
     app.add_middleware(BearerAuthMiddleware, token=token, public=HEALTH_PATHS)
     return app

@@ -184,8 +184,9 @@ Every write goes through the write queue of the pod that takes it, is a commit o
 `main`, and is pushed before the reply, so a 2xx means it is on the remote, whether or not the
 observation index has taken it in: a write does not wait on the models pod (see
 [match-pipeline.md](match-pipeline.md#the-index)). Commit messages: `post <id> (<client>): <area>`,
-`react <id> <emoji> (<client>)`, `board-sync <id> <card>`, and the operator's `rule <id> <verb>
-(operator)`, `unrule <id> (operator)`, `submit <n> (operator)`. A write fetches and resets to the
+`post <id> (<client>, forced): <area>` for a post with `force`, `react <id> <emoji> (<client>)`,
+`board-sync <id> <card>`, and the operator's `rule <id> <verb> (operator)`,
+`unrule <id> (operator)`, `submit <n> (operator)`. A write fetches and resets to the
 remote first, and a fetch that fails fails the write; a push rejected because another writer pushed
 in between (a skill, or the other pod while a rollout runs two) makes the write start over on the
 new tip and apply its edit again; a write that fails leaves nothing behind that a later push could

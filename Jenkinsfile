@@ -1,206 +1,108 @@
-import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
+// Tests FieldnotesApp's backend and frontend in a Kubernetes Job, then builds the fieldnotes and
+// fieldnotes-ui images and pins them into FieldnotesDeploy, which Argo CD syncs to prd.
+//
+// The images are built from the tree the suite passed on, so `latest` is tagged at build time and
+// there is no promote stage.
+//
+// Controller config:
+//   - Job: FieldnotesApp
+//   - SCM: pvginkel/FieldnotesApp, branch main
+//   - Script Path: Jenkinsfile
 
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
-// Both of the job's properties, declared here rather than in its UI configuration. A `properties`
-// step replaces the whole set, so a bare disableConcurrentBuilds() would drop the push trigger.
-// The lock is what cicd.writeVersionPins() below asks of its caller: two builds pushing pins at
-// once lose the race on the second push.
-properties([
-    disableConcurrentBuilds(abortPrevious: true),
-    pipelineTriggers([githubPush()])
-])
+pipeline {
+    agent {
+        kubernetes {
+            inheritFrom 'jenkins-agent kaniko'
+            yamlMergeStrategy merge()
+            yaml podYaml(templates: ['k8s'])
+        }
+    }
 
-podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
-    containerTemplates.k8s('k8s')
-]) {
-    node(POD_LABEL) {
-        def gitRev
-        def k8sNamespace = kubectl.currentNamespace()
+    options {
+        disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout()
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
 
-        stage('Cloning repo') {
-            def scmVars = checkout scm
-            gitRev = scmVars.GIT_COMMIT
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
 
-        stage('Run validation') {
-            container('k8s') {
-                // The validation Job runs in the image of the dev environment's
-                // `modern-app` sidecar. It carries Chromium's OS dependencies but no
-                // browser (run-suite downloads it), and no /work: uid 1000 cannot
-                // create one at the filesystem root, so the pod mounts an emptyDir there.
-
-                // Stream the whole monorepo working tree in instead of baking an image.
-                sh "tar czf /tmp/context.tar.gz --exclude=.git --exclude=node_modules --exclude=.venv --exclude=test-results --exclude=.pnpm-store ."
-
-                def suites = ['backend', 'frontend']
-                def jobName = "fieldnotes-validation-${BUILD_NUMBER}"
-
-                try {
-                    kubectl.startJob("""\
-                        apiVersion: batch/v1
-                        kind: Job
-                        metadata:
-                            name: ${jobName}
-                            namespace: ${k8sNamespace}
-                            labels:
-                                app.kubernetes.io/name: fieldnotes-validation
-                                app.kubernetes.io/managed-by: jenkins
-                                jenkins/build-number: "${BUILD_NUMBER}"
-                        spec:
-                            backoffLimit: 0
-                            activeDeadlineSeconds: 3600
-                            ttlSecondsAfterFinished: 3600
-                            template:
-                                spec:
-                                    restartPolicy: Never
-                                    tolerations:
-                                        - key: size
-                                          operator: Equal
-                                          value: large
-                                          effect: PreferNoSchedule
-                                    volumes:
-                                        - name: work
-                                          emptyDir: {}
-                                    containers:
-                                        - name: validation
-                                          image: registry:5000/kube-coder-modern-app-toolchain:node-24
-                                          imagePullPolicy: Always
-                                          securityContext:
-                                              runAsUser: 1000
-                                              runAsGroup: 1000
-                                          volumeMounts:
-                                              - name: work
-                                                mountPath: /work
-                                          command: ["sh", "-c"]
-                                          args:
-                                              - |
-                                                mkdir -p /work/staging /work/results
-                                                echo "Waiting for code upload..."
-                                                while [ ! -f /work/staging/ready ]; do sleep 1; done
-                                                echo "Code received, extracting..."
-                                                tar xzf /work/staging/context.tar.gz -C /work
-                                                rm -rf /work/staging
-                                                cd /work && uv sync --locked --no-dev
-                                                uv run --no-sync run-suite --output-mode full --junitxml-dir /work/results --retries 2
-                                                echo \$? > /work/results/exit-code
-                                                sleep infinity
-                                          resources:
-                                              requests:
-                                                  cpu: "1"
-                                                  memory: 3584Mi
-                    """.stripIndent())
-
-                    def podName = kubectl.getJobPodName(jobName, k8sNamespace)
-                    kubectl.waitForContainer(podName, 'validation', k8sNamespace)
-                    sh "kubectl cp -n ${k8sNamespace} -c validation /tmp/context.tar.gz ${podName}:/work/staging/context.tar.gz"
-                    sh "kubectl exec -n ${k8sNamespace} -c validation ${podName} -- touch /work/staging/ready"
-
-                    // The container stays alive (sleep infinity) after running,
-                    // so we wait for the exit-code file and then copy results
-                    // out while it's still running.
-                    kubectl.waitForFile(podName, 'validation', k8sNamespace, '/work/results/exit-code')
-
-                    kubectl.savePodLogs(podName, 'validation', k8sNamespace, 'validation-raw.log')
-                    utils.cleanLog('validation-raw.log', 'validation.log')
-
-                    sh 'mkdir -p test-results'
-                    sh "kubectl cp -n ${k8sNamespace} -c validation ${podName}:/work/results/. test-results/"
-
-                    def exitCode = fileExists('test-results/exit-code') ? readFile('test-results/exit-code').trim() : ''
-
-                    // Generate a summary from the SUITE_RESULT markers in the log.
-                    // run-suite emits one marker per JUnit XML; the file stem is the
-                    // suite name (backend, frontend). Group by suite via prefix match.
-                    def log = readFile('validation.log')
-                    def resultLines = log.split('\n').findAll { it.startsWith('===SUITE_RESULT:') }
-                    def summaryLines = []
-                    def totalP = 0, totalF = 0, totalS = 0
-
-                    suites.each { suite ->
-                        def suiteLines = resultLines.findAll { line ->
-                            def name = line.replace('===SUITE_RESULT:', '').split(':')[0]
-                            name == suite || name.startsWith("${suite}-")
-                        }
-                        if (suiteLines) {
-                            def p = 0, f = 0, s = 0
-                            suiteLines.each { line ->
-                                def parts = line.replace('===SUITE_RESULT:', '').replace('===', '').split(':')
-                                p += parts[1] as int; f += parts[2] as int; s += parts[3] as int
-                            }
-                            totalP += p; totalF += f; totalS += s
-                            summaryLines << String.format('  %-12s %3d passed  %3d failed  %3d skipped', suite, p, f, s)
-                        } else {
-                            summaryLines << String.format('  %-12s status unknown (no test results produced)', suite)
-                        }
-                    }
-
-                    def summary = [
-                        '',
-                        '============================================',
-                        '  TEST SUMMARY',
-                        '============================================',
-                        *summaryLines,
-                        '--------------------------------------------',
-                        String.format('  %-12s %3d passed  %3d failed  %3d skipped', 'TOTAL', totalP, totalF, totalS),
-                        '============================================',
-                    ].join('\n')
-                    writeFile file: 'validation-summary.log', text: summary + '\n'
-
-                    // Clean up intermediate files.
-                    sh 'rm -f validation-raw.log /tmp/context.tar.gz test-results/exit-code'
-
-                    archiveArtifacts artifacts: 'validation*.log, test-results/*.xml', allowEmptyArchive: true
-                    junit testResults: 'test-results/*.xml', allowEmptyResults: true
-
-                    currentBuild.description = "exit=${exitCode ?: 'n/a'}, ${totalP} passed, ${totalF} failed, ${totalS} skipped"
-
-                    if (!exitCode) {
-                        def failReason = kubectl.getJobFailReason(jobName, k8sNamespace)
-                        def msg = "Validation failed: no exit code recorded"
-                        if (failReason) {
-                            msg += " (job: ${failReason})"
-                        }
-                        error(msg)
-                    } else if (exitCode != '0') {
-                        error("Validation failed: exit code ${exitCode}")
-                    }
-                } finally {
-                    kubectl.deleteJob(jobName, k8sNamespace)
+        stage('Test') {
+            steps {
+                script {
+                    modernApp.test(
+                        job: 'fieldnotes-validation',
+                        install: 'uv sync --locked --no-dev',
+                        run: 'uv run --no-sync',
+                        suites: ['backend', 'frontend'],
+                        services: [],
+                        env: [:],
+                        secrets: [],
+                    )
                 }
             }
         }
 
-        stage('Building fieldnotes') {
-            container('kaniko') {
-                helmCharts.kaniko("backend/Dockerfile", "backend", [
-                    "registry:5000/fieldnotes:${currentBuild.number}",
-                    "registry:5000/fieldnotes:latest"
-                ])
+        stage('Build fieldnotes image') {
+            steps {
+                container('kaniko') {
+                    script {
+                        helmCharts.kaniko2(
+                            dockerfile: 'backend/Dockerfile',
+                            context: 'backend',
+                            destinations: [
+                                "registry:5000/fieldnotes:${currentBuild.number}",
+                                'registry:5000/fieldnotes:latest',
+                            ]
+                        )
+                    }
+                }
             }
         }
 
-        stage('Building fieldnotes-ui') {
-            writeFile file: 'frontend/git-rev', text: gitRev
-
-            container('kaniko') {
-                helmCharts.kaniko("frontend/Dockerfile", "frontend", [
-                    "registry:5000/fieldnotes-ui:${currentBuild.number}",
-                    "registry:5000/fieldnotes-ui:latest"
-                ])
+        stage('Build fieldnotes-ui image') {
+            steps {
+                // The frontend shows the commit it was built from, and its build context holds no
+                // .git to read it from.
+                sh 'git rev-parse HEAD > frontend/git-rev'
+                container('kaniko') {
+                    script {
+                        helmCharts.kaniko2(
+                            dockerfile: 'frontend/Dockerfile',
+                            context: 'frontend',
+                            destinations: [
+                                "registry:5000/fieldnotes-ui:${currentBuild.number}",
+                                'registry:5000/fieldnotes-ui:latest',
+                            ]
+                        )
+                    }
+                }
             }
         }
 
-        // The build hands its images to Argo CD by pinning them in the deploy repo (argo-cd D53);
-        // Argo syncs the commit. HelmCharts no longer deploys this app.
         stage('Write image pins') {
-            container('k8s') {
-                cicd.writeVersionPins(repo: 'pvginkel/FieldnotesDeploy', pins: [
-                    'config/prd/values.yaml': [
-                        'images.fieldnotes': ":${currentBuild.number}",
-                        'images.fieldnotesUI': ":${currentBuild.number}"
-                    ]
-                ])
+            steps {
+                container('k8s') {
+                    script {
+                        cicd.writeVersionPins(repo: 'pvginkel/FieldnotesDeploy', pins: [
+                            'config/prd/values.yaml': [
+                                'images.fieldnotes': ":${currentBuild.number}",
+                                'images.fieldnotesUI': ":${currentBuild.number}",
+                            ],
+                        ])
+                    }
+                }
             }
         }
     }

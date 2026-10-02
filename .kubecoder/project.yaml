@@ -18,7 +18,7 @@ projects:
     # `kc project test` run both suites two extra times. The per-component
     # verbs below are those same two suites, once each. CI keeps using
     # `uv run run-suite` because it also needs the JUnit XML, the retries
-    # and the ===SUITE_RESULT:=== markers the Jenkinsfile parses.
+    # and the ===SUITE_RESULT:=== markers CI parses.
 
   backend:
     description: >-

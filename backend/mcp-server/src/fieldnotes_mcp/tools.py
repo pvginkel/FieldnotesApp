@@ -82,9 +82,10 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
         area: Annotated[
             AreaText,
             Field(
-                description="What the observation is about, in a few words: the tool, service, "
-                "workflow step or part of a codebase it concerns. Free text, matched together "
-                "with `text`."
+                description="The component it is about, by the name others would use for it: "
+                "the tool, command, service, workflow step or part of a codebase (`kc project`, "
+                "`Jenkins`, `dev:run-slice`). A few words, not the symptom: what went wrong goes "
+                "in `text`. Matched together with `text`."
             ),
         ],
         category: Annotated[
@@ -143,9 +144,11 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
         every report of this friction across all projects, and the `reason` is the operator's
         own decision about it, so both know more than you can from where you stand. Act on the
         statement, follow the reason, and `react` to the candidate instead of posting again. If
-        no candidate is your observation, call `post` again with the same arguments and
-        `force=true`. When nothing matches, `post` creates the observation and answers
-        `{id, candidates: []}`."""
+        you posted this earlier in your session, react to the id that post answered with instead
+        of posting again, with what is new as the reaction's text; that is also how you add to or
+        correct your own post. If no candidate is your observation, call `post` again with the
+        same arguments and `force=true`. When nothing matches, `post` creates the observation and
+        answers `{id, candidates: []}`."""
         request = PostRequest(
             area=area,
             category=category,
@@ -179,7 +182,8 @@ def register_tools(mcp: FastMCP, api: ApiClient) -> None:
         session: Session = None,
     ) -> ReactReply:
         """React to an observation: the way to say "seen it too", "this is wrong" or "here is
-        more" without posting a duplicate. The id comes from a candidate `post` answered with.
+        more" without posting a duplicate. It is also how you add to or correct an observation you
+        posted yourself. The id comes from a candidate `post` answered with.
         Reacting to a closed observation is allowed, and tells the curator the problem came back.
         Answers `{id, reactions}`: the observation's `emoji (n)` counts after your reaction. An
         unknown id is a `not-found` error: the observation may have been merged into another,

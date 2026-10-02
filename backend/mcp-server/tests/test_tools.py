@@ -58,6 +58,36 @@ async def test_the_tool_surface_is_pinned(api):
     assert api.requests == []
 
 
+# Slice 003, D1: the ruled texts, verbatim, as the server serves them.
+AREA = (
+    "The component it is about, by the name others would use for it: the tool, command, "
+    "service, workflow step or part of a codebase (`kc project`, `Jenkins`, `dev:run-slice`). "
+    "A few words, not the symptom: what went wrong goes in `text`. Matched together with `text`."
+)
+OWN_POST = (
+    "`react` to the candidate instead of posting again. If you posted this earlier in your "
+    "session, react to the id that post answered with instead of posting again, with what is "
+    "new as the reaction's text; that is also how you add to or correct your own post."
+)
+OWN_REACTION = (
+    "It is also how you add to or correct an observation you posted yourself."
+)
+
+
+def _words(description: str) -> str:
+    return " ".join(description.split())
+
+
+async def test_the_descriptions_carry_the_ruled_texts(api):
+    async with mcp_session(api) as session:
+        tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+
+    post, react = tools["post"], tools["react"]
+    assert post.inputSchema["properties"]["area"]["description"] == AREA
+    assert OWN_POST in _words(post.description)
+    assert OWN_REACTION in _words(react.description)
+
+
 async def test_post_creates_when_nothing_matches(api):
     api.answer(201, {"id": ID, "candidates": []})
 

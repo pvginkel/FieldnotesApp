@@ -136,7 +136,10 @@ class Observations:
             path = observation_path(id_)
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             (root / path).write_text(document.text)
-            return id_, Commit((path,), f"post {id_} ({client}): {request.area}")
+            forced = ", forced" if request.force else ""
+            return id_, Commit(
+                (path,), f"post {id_} ({client}{forced}): {request.area}"
+            )
 
         self.store.write(create)
         self.metrics.posted(

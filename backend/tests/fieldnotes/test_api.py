@@ -146,10 +146,24 @@ def test_a_duplicate_post_returns_candidates_and_creates_nothing(
 
 def test_a_forced_post_creates_despite_candidates(start, auth, remote):
     with start() as api:
-        post(api, auth)
+        first = post(api, auth).json()["id"]
         response = post(api, auth, force=True)
+    forced = response.json()["id"]
     assert response.status_code == 201
     assert len(remote.files()) == 2
+    # Slice 003, R3: the force is recorded in the commit message, and the file gains no field.
+    assert remote.log() == [
+        f"post {forced} (mcp, forced): uv",
+        f"post {first} (mcp): uv",
+    ]
+    assert "forced" not in remote.file(observation_path(forced))
+
+
+def test_a_forced_post_is_marked_with_nothing_to_match(start, auth, remote):
+    """A forced post skips matching, so it is marked whether or not anything would match."""
+    with start() as api:
+        id_ = post(api, auth, force=True).json()["id"]
+    assert remote.log() == [f"post {id_} (mcp, forced): uv"]
 
 
 def test_a_closed_observation_still_matches(start, auth, remote, pull):

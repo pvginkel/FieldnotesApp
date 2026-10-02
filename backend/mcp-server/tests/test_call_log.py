@@ -240,6 +240,12 @@ async def _post(app, body: bytes, headers: dict[str, str]) -> httpx.Response:
             r"protocol-version=2024-01-01 method=tools/list reason=Bad Request: Unsupported "
             r"protocol version: 2024-01-01\. Supported versions: .+",
         ),
+        # The one 400 whose body is plain text, not a JSON-RPC error.
+        (
+            json.dumps(TOOLS_LIST).encode(),
+            {"Content-Type": "text/plain"},
+            r"protocol-version=none method=tools/list reason=Invalid Content-Type header",
+        ),
     ],
 )
 async def test_each_400_is_logged_and_answered_as_the_sdk_answers_it(

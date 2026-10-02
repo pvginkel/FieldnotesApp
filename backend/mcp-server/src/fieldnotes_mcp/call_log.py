@@ -8,7 +8,7 @@ dispatches the call, so a call refused before any tool body runs, on its argumen
 tool name, leaves its line too; the SDK logs neither.
 
 The SDK logs none of its 400s either. Their line carries the request's `mcp-protocol-version`
-header, its JSON-RPC method and the reason from the 400's JSON-RPC error body.
+header, its JSON-RPC method and the reason the 400's body gives.
 
 No line quotes what a caller sent: pydantic quotes the refused value in a validation error's text
 (`input_value=…`), and that is removed from every reason logged.
@@ -122,6 +122,15 @@ def _method_of(message: Any) -> str:
     return "none" if method is None else str(method)
 
 
+def _reason(body: bytes) -> str:
+    """The reason a 400's body gives: its JSON-RPC error's message, or the body itself for the one
+    400 the SDK answers in plain text, a POST without a JSON Content-Type."""
+    try:
+        return str(json.loads(body)["error"]["message"])
+    except ValueError:
+        return body.decode()
+
+
 class BadRequestLogMiddleware:
     """Logs each POST to `path` answered 400, from a copy of the request and response bodies as
     they pass; both pass on unchanged."""
@@ -168,5 +177,5 @@ class BadRequestLogMiddleware:
             scope["path"],
             "none" if version is None else version.decode("latin-1"),
             _method(request_body),
-            _unquoted(json.loads(response_body)["error"]["message"]),
+            _unquoted(_reason(response_body)),
         )

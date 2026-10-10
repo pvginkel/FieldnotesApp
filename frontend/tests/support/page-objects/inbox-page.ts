@@ -74,9 +74,11 @@ export class InboxPage {
     await expect(this.opening).toBeVisible();
   }
 
-  /** The operator's answer typed and sent with Enter. */
+  /** The operator's answer typed and sent with Enter, once Send is offered: an Enter while the
+   * page still shows the last turn in flight is ignored. */
   async send(text: string): Promise<void> {
     await this.field.fill(text);
+    await expect(this.sendButton).toBeEnabled();
     await this.field.press('Enter');
     await expect(this.operatorMessages.last()).toContainText(text);
   }

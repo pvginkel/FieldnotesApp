@@ -10,9 +10,11 @@ import threading
 from datetime import timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.fieldnotes.actioner import ActionerFailure, Hold
+from app.fieldnotes.controller import ControllerSettings, HttpController
 from app.fieldnotes.runtime import ACTIONER_HOLD
 from app.fieldnotes.triage import item_path
 from tests.fieldnotes.test_triage import (
@@ -575,6 +577,68 @@ def test_a_refused_start_is_the_last_failure_until_the_next_run_starts(
         "state": "running",
         "run": "run-1",
         "since": "2026-09-19T10:01:00Z",
+    }
+
+
+def test_a_late_success_keeps_the_refusal_until_the_next_run_starts(
+    start, remote, kubecoder, eventually, clock
+):
+    """The expired run's late success releases its hold and keeps the refusal recorded beside
+    it: only the next run started clears it, not the start that asks for it."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.answers = [500, 202]
+    gate = threading.Event()
+    with start() as api:
+        api.runtime.actioner.hold.take("run-0", clock() - timedelta(minutes=30))
+        submit(api)
+        eventually(lambda: not api.runtime.actioner.pending, "the refusal")
+        # The next start waits at the controller while the state between is read.
+        kubecoder.on_run = gate.wait
+        clock.tick()
+        try:
+            ended(api, kubecoder, "run-0")
+            eventually(lambda: len(kubecoder.runs) == 2, "the next start")
+            between = state(api)
+        finally:
+            gate.set()
+        eventually(lambda: held(api) == "run-1", "the next run")
+        cleared = state(api)
+
+    assert between == IDLE | {
+        "state": "starting",
+        "failure": failure("2026-09-19T10:00:00Z", "refused", "the controller failed"),
+    }
+    assert cleared == IDLE | {
+        "state": "running",
+        "run": "run-1",
+        "since": "2026-09-19T10:01:00Z",
+    }
+
+
+def test_a_refusal_without_a_problem_title_is_recorded_by_its_status(
+    start, remote, kubecoder, eventually
+):
+    """A refusal that carries no problem, as a proxy before the controller answers one, is the
+    last failure by the status /prompt-runs answered."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    url = "http://kubecoder.example.invalid"
+    proxy = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(502, text="<html>Bad Gateway</html>")
+        ),
+        base_url=url,
+    )
+    settings = ControllerSettings(url=url, token=kubecoder.token, repo=kubecoder.repo)
+    with start() as api:
+        api.runtime.actioner.controller = HttpController(proxy, settings)
+        submit(api)
+        eventually(lambda: not api.runtime.actioner.pending, "the refusal")
+        refused = state(api)
+
+    assert refused == IDLE | {
+        "failure": failure(
+            "2026-09-19T10:00:00Z", "refused", "/prompt-runs answered 502"
+        )
     }
 
 

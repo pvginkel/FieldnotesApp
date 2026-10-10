@@ -186,10 +186,14 @@ class Sitting(_Model):
     """The sitting as its file holds it. `status` is `starting` until the session has taken its
     first turn, `busy` while a turn is in flight, `idle` between turns and `lost` once the
     sitting is lost. `moved` is the last send or result. `offset` is the session log's byte
-    offset after the last line read, where the next read of the response stream begins."""
+    offset after the last line read, where the next read of the response stream begins.
+    `subject` is the OIDC subject of the operator whose request began the last turn: its task's
+    events, the session's lines and message, reach only their SSE connections (NFR-4); None,
+    with OIDC off, reaches every connection."""
 
     id: str
     status: Status
+    subject: str | None = None
     environment: str | None = None
     started_environment: bool = False
     session: str | None = None
@@ -333,7 +337,9 @@ class Inbox:
 
     # The operator's requests.
 
-    def start(self, scope: str, tasks: TaskService) -> tuple[InboxState, bool]:
+    def start(
+        self, scope: str, tasks: TaskService, subject: str | None
+    ) -> tuple[InboxState, bool]:
         """FR-29: begin a sitting, off the request; the sitting and whether it began. A live
         sitting is answered as it is; a lost one is cleared as End clears it, first."""
         _, settings = self._configured()
@@ -352,10 +358,13 @@ class Inbox:
             if current is not None:
                 return (current, False), current
             sitting_id = new_ulid(self.clock())
-            task = tasks.start_task(_Follow(self, sitting_id, self._open))
+            task = tasks.start_task(
+                _Follow(self, sitting_id, self._open), caller_subject=subject
+            )
             sitting = Sitting(
                 id=sitting_id,
                 status="starting",
+                subject=subject,
                 began=now,
                 moved=now,
                 turn=InboxTurn(task=task.task_id, began=now, log=None),
@@ -368,7 +377,7 @@ class Inbox:
             logger.info("inbox sitting %s started (operator): %s", sitting.id, prompt)
         return self._state(sitting), began
 
-    def send(self, message: str, tasks: TaskService) -> InboxState:
+    def send(self, message: str, tasks: TaskService, subject: str | None) -> InboxState:
         """FR-30: the operator's message as the session's next turn, sent and followed off the
         request."""
         self._configured()
@@ -379,11 +388,14 @@ class Inbox:
                 raise _no_sitting()
             if current.turn is not None:
                 raise _busy()
-            task = tasks.start_task(_Follow(self, current.id, self._turn))
+            task = tasks.start_task(
+                _Follow(self, current.id, self._turn), caller_subject=subject
+            )
             sent = InboxMessage(author=Author.operator, text=message, at=now)
             sitting = current.model_copy(
                 update={
                     "status": "busy",
+                    "subject": subject,
                     "moved": now,
                     "turn": InboxTurn(task=task.task_id, began=now, log=None),
                     "transcript": [*current.transcript, sent],

@@ -703,6 +703,44 @@ def test_the_inbox_refuses_all_but_the_editor(
     assert kubecoder.calls == []
 
 
+def test_a_tasks_events_reach_only_the_connections_of_the_editor_who_began_it(
+    start, oidc_app, generate_test_jwt, kubecoder, eventually, environ, monkeypatch
+):
+    """NFR-4 on the task channel: a Start's and a turn's events carry the session's log lines and
+    its messages, so they go to the SSE connections bound to the editor whose request began them,
+    not to one bound to no one or to another user."""
+    kubecoder.add_environment(ENV)
+    heard: dict[str, list[dict]] = {"editor": [], "anonymous": [], "other": []}
+    with start(app=oidc_app) as api:
+        manager = api.app.container.sse_connection_manager()
+
+        def sent(token, event_data, event_name, service_type, request_id=None):
+            if event_name == "task_event":
+                heard[token].append(event_data)
+            return True
+
+        monkeypatch.setattr(manager, "_send_event_to_token", sent)
+        for name in heard:
+            manager.on_connect(name, name, f"http://sse.invalid/?request_id={name}")
+        manager.bind_identity("editor", "inbox-editor")
+        manager.bind_identity("other", "inbox-viewer")
+        api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
+        opened(api, eventually, kubecoder)
+        kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
+        task_id = send(api, "close EX-7").json()["sitting"]["turn"]["task"]
+        finished(api, eventually, task_id)
+
+    assert heard["anonymous"] == heard["other"] == []
+    assert [
+        e["data"]["message"]["text"]
+        for e in heard["editor"]
+        if e["event_type"] == "task_completed"
+    ] == [WRITE_UP, ANSWER]
+    held = sitting_file(environ)
+    assert held is not None
+    assert held.subject == "inbox-editor"
+
+
 def test_the_inbox_endpoints_are_in_the_openapi_document_behind_the_editor_gate():
     document = openapi_document()
     paths = document["paths"]

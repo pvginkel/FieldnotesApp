@@ -25,7 +25,7 @@ from app.fieldnotes.inbox import Inbox, InboxState, StartRequest, TurnRequest
 from app.services.container import ServiceContainer
 from app.services.fieldnotes_service import FieldnotesService
 from app.services.task_service import TaskService
-from app.utils.auth import allow_roles
+from app.utils.auth import allow_roles, get_auth_context
 from app.utils.spectree_config import api
 from fieldnotes_contracts import Problem
 
@@ -41,6 +41,12 @@ def _inbox(service: FieldnotesService) -> Inbox:
     service.ready_observations()
     assert service.runtime is not None
     return service.runtime.inbox
+
+
+def _subject() -> str | None:
+    """The signed-in editor's subject, which scopes a task's events to their connections."""
+    auth = get_auth_context()
+    return auth.subject if auth is not None else None
 
 
 def _refused_body(
@@ -89,7 +95,7 @@ def start(
     tasks: TaskService = Provide[ServiceContainer.task_service],
 ) -> tuple[InboxState, int]:
     """FR-29: a sitting begun, off the request (202); a live one answers as it is (200)."""
-    state, began = _inbox(service).start(json.scope, tasks)
+    state, began = _inbox(service).start(json.scope, tasks, _subject())
     return state, 202 if began else 200
 
 
@@ -107,7 +113,7 @@ def turn(
     tasks: TaskService = Provide[ServiceContainer.task_service],
 ) -> tuple[InboxState, int]:
     """FR-30: the operator's message sent as the session's next turn, off the request."""
-    return _inbox(service).send(json.message, tasks), 202
+    return _inbox(service).send(json.message, tasks, _subject()), 202
 
 
 @inbox_bp.route("/end", methods=["POST"])

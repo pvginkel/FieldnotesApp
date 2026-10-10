@@ -10,6 +10,7 @@ A pod retired mid-turn is the file it left behind: a follow whose last heartbeat
 old. Against the fake controller; every environment, line and message is invented."""
 
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -82,6 +83,13 @@ def second():
     yield make
     for other in made:
         other.stop()
+
+
+@pytest.fixture
+def swept(monkeypatch) -> float:
+    """The app's own timer sweeping every 20 ms, in the API the test starts after; the interval."""
+    monkeypatch.setattr("app.fieldnotes.inbox.SWEEP", 0.02)
+    return 0.02
 
 
 def quick(inbox_: Inbox) -> None:
@@ -717,16 +725,16 @@ def test_both_pods_sweeping_end_the_sitting_once(
 
 
 def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires(
-    start, kubecoder, eventually, environ, clock, second
+    start, kubecoder, eventually, environ, clock, swept
 ):
-    """R9 through a rollout: the follow's pod retired mid-turn and no page reads the sitting."""
+    """R9 through a rollout: the follow's pod retired mid-turn and no page reads the sitting; the
+    timer the serving pod's runtime started finishes the turn, then ends the sitting."""
     kubecoder.add_environment(ENV, "stopped")
     with start() as api:
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], ANSWER))
         api.runtime.controller.send(ENV, "claude", "close EX-7")
         retired_turn(environ, clock, "close EX-7")
-        second(api, clock, sweep_every=0.02).watch(tasks(api))
         eventually(lambda: held(environ).turn is None, "the turn finished")
         answered = held(environ)
         clock.tick(30 * 60)
@@ -736,3 +744,31 @@ def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires
     assert answered.lost is None
     assert kubecoder.environments[ENV].sessions == {}
     assert kubecoder.environments[ENV].status == "stopped"
+
+
+def test_a_stopped_pod_sweeps_no_more_and_leaves_its_turn_to_the_next(
+    start, kubecoder, eventually, environ, clock, second, swept
+):
+    """A pod a rollout retires: its runtime's stop ends its timer and releases its follow, which
+    writes nothing more, so the turn is the next pod's to take over."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
+        task_id = send(api, "go").json()["sitting"]["turn"]["task"]
+        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+    result = finished(api, eventually, task_id)
+    kubecoder.finish(ENV, "claude", ANSWER)
+    clock.tick(30 * 60)
+    time.sleep(10 * swept)
+    left = held(environ)
+    second(api, clock).state(tasks(api))
+    eventually(lambda: held(environ).turn is None, "the turn finished")
+    answered = held(environ)
+
+    assert result == {"message": None}
+    assert left.turn is not None
+    assert left.follower is not None
+    assert left.follower.pod == api.runtime.inbox.pod
+    assert [m.text for m in left.transcript][-1] == "go"
+    assert [m.text for m in answered.transcript][-2:] == ["go", ANSWER]

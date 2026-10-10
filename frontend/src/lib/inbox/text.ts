@@ -1,0 +1,40 @@
+// The session's text as the inbox screen reads it (FR-28): the card ids a line names, where a
+// wrapped line continues, a code fence, and the time of day a message carries.
+
+/** A card id: a project key and a number. Requirement numbers and the like are not cards. */
+const CARD = /\b([A-Z][A-Z0-9]{1,9})-(\d+)\b/g;
+const NOT_CARDS = new Set(['FR', 'NFR', 'UTF', 'SHA', 'ISO', 'RFC', 'HTTP', 'TLS', 'CVE']);
+
+type Piece = { text: string; card?: string };
+
+export function pieces(line: string): Piece[] {
+  const out: Piece[] = [];
+  let at = 0;
+  for (const match of line.matchAll(CARD)) {
+    if (NOT_CARDS.has(match[1])) continue;
+    const index = match.index;
+    if (index > at) out.push({ text: line.slice(at, index) });
+    out.push({ text: match[0], card: match[0] });
+    at = index + match[0].length;
+  }
+  if (at < line.length) out.push({ text: line.slice(at) });
+  return out;
+}
+
+/** Where a wrapped line continues: under a card line's text (`  Slice:   FN-44  The ask…`), else
+ * under its own indentation. */
+export function hang(line: string): number {
+  const card = /^\s*(?:[A-Za-z][A-Za-z ]*:\s+)?[A-Z][A-Z0-9]+-\d+\s+/.exec(line);
+  if (card) return card[0].length;
+  return /^\s*/.exec(line)![0].length;
+}
+
+export const isFence = (line: string): boolean => /^\s*```/.test(line);
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** The local time of day: `16:42`. */
+export const clock = (iso: string): string => {
+  const d = new Date(iso);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};

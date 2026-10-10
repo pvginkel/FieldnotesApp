@@ -35,6 +35,15 @@ interface ControllerLayout {
   runs?: (number | null)[];
 }
 
+interface ControllerReading {
+  environments: {
+    env_id: string;
+    status: string;
+    sessions: { name: string; mode: string; cwd: string; status: string; messages: string[] }[];
+  }[];
+  runs: string[];
+}
+
 export class Controller {
   constructor(
     private readonly request: APIRequestContext,
@@ -51,9 +60,22 @@ export class Controller {
     return this.call('put', '', layout);
   }
 
+  /** A line of the sitting's turn in flight, as the session's condensed log writes it. */
+  emit(line: string): Promise<void> {
+    return this.call('post', '/emit', { line });
+  }
+
   /** The sitting's turn in flight ends with this result. */
   finish(result = 'done'): Promise<void> {
     return this.call('post', '/finish', { result });
+  }
+
+  /** What the controller holds: each environment's status and its sessions, with the messages
+   *  each was sent. */
+  async read(): Promise<ControllerReading> {
+    const response = await this.request.get(`${this.backendUrl}/api/testing/controller`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as ControllerReading;
   }
 
   /** The sitting lost under the API: its worker forgets its session, or its environment stops. */

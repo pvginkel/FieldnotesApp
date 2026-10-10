@@ -1,0 +1,149 @@
+/* The inbox screen (FR-28), in triage.css's idiom: its tokens, its buttons; the app bar's styles
+   are shell.css's. Unlayered, so it wins over Tailwind's preflight. */
+
+/* ---- The transcript ------------------------------------------------------------------ */
+
+/* Wider than the triage card's column: the skill's lines are long, and wrap only past this. */
+.inbox { --column: 1080px; }
+.inbox-column { padding-top: 20px; padding-bottom: 24px; }
+
+.transcript { display: flex; flex-direction: column; gap: 20px; }
+
+.opening {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.opening .rule { flex: 1; border-top: 1px solid hsl(var(--border)); }
+/* The prompt on code's muted background: in the muted colour it misses 4.5:1. */
+.opening code { color: hsl(var(--foreground)); }
+
+.msg { display: flex; flex-direction: column; }
+.msg-time { margin-top: 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+
+/* The session's text, as the skill writes it (markdown.tsx). */
+.session-md {
+  padding: 14px 18px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+
+.fenced {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.fenced .line { min-height: 1.6em; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.md > *, .md ul, .md ol { margin: 0; }
+.md > * + * { margin-top: 12px; }
+.md > p + ul, .md > p + ol { margin-top: 2px; }
+.md .heading { font-weight: 600; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md ul { list-style: disc; }
+.md ul ul { list-style: circle; }
+.md ol { list-style: decimal; }
+.md li + li, .md li > ul, .md li > ol { margin-top: 2px; }
+.md .fenced { padding: 12px 14px; border-radius: 6px; background: hsl(var(--muted) / 0.6); }
+
+.msg.operator { align-self: flex-end; max-width: 75%; }
+.msg.operator .msg-time { align-self: flex-end; }
+.operator-text {
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--primary-muted-foreground) / 0.2);
+  border-radius: var(--radius);
+  background: hsl(var(--primary-muted));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The turn in flight: the last line of the session's condensed log. */
+.working {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px dashed hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.working .spin { flex: none; font-size: 16px; color: hsl(var(--primary)); animation: spin 1s linear infinite; }
+.working-log {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.lost {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--warning) / 0.45);
+  border-radius: var(--radius);
+  background: hsl(var(--warning) / 0.08);
+  color: hsl(var(--warning-text));
+  font-size: 14px;
+}
+.lost .icon { flex: none; margin-top: 4px; }
+.lost strong { font-weight: 600; }
+
+/* ---- The composer, under the scrolling area ---------------------------------------- */
+
+.composer {
+  flex: none;
+  padding: 12px 0 16px;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  scrollbar-gutter: stable both-edges;
+  overflow: hidden;
+}
+.composer-row { display: flex; align-items: flex-end; gap: 10px; }
+.composer textarea {
+  flex: 1;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  line-height: 22px;
+  resize: none;
+}
+.composer textarea:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+.composer textarea::placeholder { color: hsl(var(--muted-foreground)); }
+.composer .send { height: 40px; }
+.lost-bar .composer-row { align-items: center; justify-content: space-between; }
+.lost-note { font-size: 14px; color: hsl(var(--muted-foreground)); }
+
+/* ---- No sitting ---------------------------------------------------------------------- */
+
+.inbox-mark { width: 88px; height: 88px; stroke-width: 1.25; color: hsl(var(--primary)); }
+.center .scope {
+  width: min(440px, 100%);
+  height: 40px;
+  margin-top: 24px;
+  padding: 0 12px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+.center .scope:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+.center .scope::placeholder { color: hsl(var(--muted-foreground)); }
+.center .scope + .btn-big { margin-top: 16px; }
+
+/* ---- End -------------------------------------------------------------------------------- */
+
+.end-dialog { max-width: 460px; }
+.end-dialog p { margin: 0 0 18px; font-size: 14px; color: hsl(var(--muted-foreground)); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }

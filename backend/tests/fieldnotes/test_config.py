@@ -8,6 +8,8 @@ import pytest
 
 from app.fieldnotes.actioner import ActionerSettings
 from app.fieldnotes.config import SettingsError, load_settings
+from app.fieldnotes.controller import ControllerSettings
+from app.fieldnotes.inbox import InboxSettings
 from app.fieldnotes.ulid import is_ulid, new_ulid
 
 BASE = {"FIELDNOTES_STORE_URL": "https://github.com/pvginkel/Fieldnotes.git"}
@@ -28,7 +30,9 @@ def test_defaults():
     assert settings.github is None
     assert settings.board is None
     assert settings.youtrack_hook is None
+    assert settings.controller is None
     assert settings.actioner is None
+    assert settings.inbox is None
     assert (settings.host, settings.port) == ("0.0.0.0", 8080)
 
 
@@ -83,15 +87,35 @@ def test_match_settings_are_read():
             "set together or not at all",
         ),
         ({"FIELDNOTES_YOUTRACK_URL": "https://yt"}, "set together or not at all"),
-        ({"FIELDNOTES_KUBECODER_URL": "http://kc"}, "set together or not at all"),
+        (
+            {
+                "FIELDNOTES_KUBECODER_URL": "http://kc",
+                "FIELDNOTES_KUBECODER_TOKEN": "t",
+            },
+            "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN, FIELDNOTES_KUBECODER_REPO "
+            "are set together or not at all",
+        ),
+        (
+            {"FIELDNOTES_KUBECODER_WEBHOOK_URL": "http://api/api/hooks/kubecoder"},
+            "FIELDNOTES_KUBECODER_WEBHOOK_URL is set without FIELDNOTES_KUBECODER_URL",
+        ),
         (
             {
                 "FIELDNOTES_KUBECODER_URL": "http://kc",
                 "FIELDNOTES_KUBECODER_TOKEN": "t",
                 "FIELDNOTES_KUBECODER_REPO": "pvginkel/Fieldnotes",
+                "FIELDNOTES_KUBECODER_INBOX_IDLE": "half an hour",
             },
-            "FIELDNOTES_KUBECODER_URL, FIELDNOTES_KUBECODER_TOKEN, FIELDNOTES_KUBECODER_REPO, "
-            "FIELDNOTES_KUBECODER_WEBHOOK_URL are set together or not at all",
+            "FIELDNOTES_KUBECODER_INBOX_IDLE is not a number",
+        ),
+        (
+            {
+                "FIELDNOTES_KUBECODER_URL": "http://kc",
+                "FIELDNOTES_KUBECODER_TOKEN": "t",
+                "FIELDNOTES_KUBECODER_REPO": "pvginkel/Fieldnotes",
+                "FIELDNOTES_KUBECODER_INBOX_IDLE": "0",
+            },
+            "FIELDNOTES_KUBECODER_INBOX_IDLE is not positive",
         ),
         (
             {
@@ -132,14 +156,60 @@ def test_the_actioner_start_reads_kubecoders_four_and_its_token_is_no_client():
     settings = load_settings(
         BASE | KUBECODER | {"FIELDNOTES_KUBECODER_ACTIONER_TIMER": "f3c603f9"}
     )
-    assert settings.actioner == ActionerSettings(
+    assert settings.controller == ControllerSettings(
         url="http://kubecoder-controller.example.invalid:8080",
         token="kubecoder-token",
         repo="pvginkel/Fieldnotes",
+    )
+    assert settings.actioner == ActionerSettings(
         webhook_url="http://fieldnotes-api.example.invalid/api/hooks/kubecoder",
     )
     assert "load skill actioner" in settings.actioner.prompt
     assert settings.clients.names == ()
+
+
+def test_the_inbox_is_configured_by_the_controller_the_token_and_the_project():
+    """FR-29: the inbox needs the controller's three and not the actioner's webhook, which the
+    actioner still needs. The prompt, the working directory, the idle time and the tracker
+    default in code; the model and the effort are the engine's."""
+    three = {k: v for k, v in KUBECODER.items() if not k.endswith("WEBHOOK_URL")}
+    settings = load_settings(BASE | three)
+    assert settings.controller is not None
+    assert settings.controller.repo == "pvginkel/Fieldnotes"
+    assert settings.actioner is None
+    assert settings.inbox == InboxSettings(
+        prompt="/dev:inbox",
+        cwd="Fieldnotes/inbox",
+        idle=timedelta(minutes=30),
+        model=None,
+        reasoning_effort=None,
+        tracker="https://issues.webathome.org/issue/",
+    )
+    unconfigured = load_settings(BASE)
+    assert (unconfigured.controller, unconfigured.inbox) == (None, None)
+
+
+def test_the_inboxs_prompt_directory_idle_time_model_effort_and_tracker_are_settings():
+    settings = load_settings(
+        BASE
+        | KUBECODER
+        | {
+            "FIELDNOTES_KUBECODER_INBOX_PROMPT": "/dev:inbox --dry-run",
+            "FIELDNOTES_KUBECODER_INBOX_CWD": "/work/Fieldnotes/sitting",
+            "FIELDNOTES_KUBECODER_INBOX_IDLE": "7.5",
+            "FIELDNOTES_KUBECODER_INBOX_MODEL": "opus",
+            "FIELDNOTES_KUBECODER_INBOX_EFFORT": "high",
+            "FIELDNOTES_KUBECODER_INBOX_TRACKER": "https://tracker.example.invalid/issue/",
+        }
+    )
+    assert settings.inbox == InboxSettings(
+        prompt="/dev:inbox --dry-run",
+        cwd="/work/Fieldnotes/sitting",
+        idle=timedelta(minutes=7.5),
+        model="opus",
+        reasoning_effort="high",
+        tracker="https://tracker.example.invalid/issue/",
+    )
 
 
 def test_the_actioners_prompt_model_and_effort_are_settings():

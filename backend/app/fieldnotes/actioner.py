@@ -39,9 +39,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.fieldnotes.controller import ControllerError
 from app.fieldnotes.metrics import Metrics
 from app.fieldnotes.triage import TriageIndex, stamp
 from app.services.base_task import BaseTask, ProgressHandle
@@ -69,20 +69,8 @@ DEFAULT_PROMPT = (
 Outcome = Literal["started", "in_flight", "failed", "nothing_waiting"]
 
 
-class ControllerError(RuntimeError):
-    """The controller could not be reached or refused the run; `reason` says why, as the
-    controller's problem titles it or as the transport failed."""
-
-    def __init__(self, message: str, reason: str) -> None:
-        super().__init__(message)
-        self.reason = reason
-
-
 @dataclass(frozen=True)
 class ActionerSettings:
-    url: str  # the KubeCoder controller
-    token: str  # the API's client token there
-    repo: str  # the store's KubeCoder project, `owner/Name`
     webhook_url: str  # where the controller reaches this API's `/api/hooks/kubecoder`
     prompt: str = DEFAULT_PROMPT
     model: str | None = None  # None: the engine's default
@@ -90,58 +78,8 @@ class ActionerSettings:
 
 
 class Controller(Protocol):
-    def run(self) -> str:
+    def run(self, actioner: ActionerSettings) -> str:
         """Start a prompt run of the actioner; its run id."""
-
-
-def _problem(response: httpx.Response) -> dict[str, Any]:
-    """The JSON body, or an empty one when the body is not a JSON object."""
-    try:
-        body = response.json()
-    except ValueError:
-        return {}
-    return body if isinstance(body, dict) else {}
-
-
-class HttpController:
-    """The KubeCoder controller's REST API."""
-
-    def __init__(self, client: httpx.Client, settings: ActionerSettings) -> None:
-        self._client = client
-        self._settings = settings
-
-    def run(self) -> str:
-        settings = self._settings
-        body: dict[str, str] = {
-            "repo": settings.repo,
-            "prompt": settings.prompt,
-            "webhookUrl": settings.webhook_url,
-        }
-        if settings.model is not None:
-            body["model"] = settings.model
-        if settings.reasoning_effort is not None:
-            body["reasoningEffort"] = settings.reasoning_effort
-        try:
-            response = self._client.post(
-                "/prompt-runs",
-                json=body,
-                headers={"Authorization": f"Bearer {settings.token}"},
-            )
-        except httpx.HTTPError as exc:
-            raise ControllerError(
-                f"the controller could not be reached: {exc!r}", repr(exc)
-            ) from exc
-        body = _problem(response)
-        run_id = body.get("runId")
-        if response.status_code == 202 and isinstance(run_id, str) and run_id:
-            return run_id
-        title = body.get("title")
-        raise ControllerError(
-            f"/prompt-runs answered {response.status_code}: {response.text[:200]}",
-            title
-            if isinstance(title, str) and title
-            else f"/prompt-runs answered {response.status_code}",
-        )
 
 
 @dataclass(frozen=True)
@@ -279,13 +217,16 @@ class Actioner:
     def __init__(
         self,
         controller: Controller | None,
+        settings: ActionerSettings | None,
         triage: TriageIndex,
         metrics: Metrics,
         hold: Hold,
         clock: Callable[[], datetime],
     ) -> None:
-        """Without `controller`, its settings unset, a start is skipped and logged."""
+        """Without `controller` or `settings`, their variables unset, a start is skipped and
+        logged."""
         self.controller = controller
+        self.settings = settings
         self.triage = triage
         self.metrics = metrics
         self.hold = hold
@@ -325,7 +266,7 @@ class Actioner:
 
     def _begin(self) -> bool:
         """Make a start pending; whether the caller is to run it."""
-        if self.controller is None:
+        if self.controller is None or self.settings is None:
             logger.warning(
                 "the actioner is not started: FIELDNOTES_KUBECODER_* are unset"
             )
@@ -342,7 +283,7 @@ class Actioner:
     def attempt(self) -> Outcome:
         """Start a run while submitted items wait and no run is held; a live hold is tried again
         `retry` seconds later."""
-        assert self.controller is not None
+        assert self.controller is not None and self.settings is not None
         waiting = [item.observation for item in self.triage.items() if item.submitted]
         if not waiting:
             logger.info("no submitted item waits; the actioner is not started")
@@ -366,7 +307,7 @@ class Actioner:
                 self.expiry,
             )
         try:
-            run_id = self.controller.run()
+            run_id = self.controller.run(self.settings)
         except ControllerError as exc:
             self.metrics.actioner_starts.labels("failed").inc()
             logger.error("actioner start failed: %s; the next submit is the retry", exc)

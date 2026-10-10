@@ -233,8 +233,11 @@ def start(
             store = replace(settings.store, pull_interval=pull_interval)
             settings = replace(settings, store=store)
         board = youtrack.board(settings.board) if settings.board is not None else None
-        actioner = settings.actioner
-        controller = kubecoder.controller(actioner) if actioner is not None else None
+        controller = (
+            kubecoder.controller(settings.controller)
+            if settings.controller is not None
+            else None
+        )
         runtime = Runtime(
             settings,
             models=models,

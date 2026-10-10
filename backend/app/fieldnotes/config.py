@@ -24,20 +24,26 @@
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN` | none | the YouTrack webhook's shared token (secret) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | `X-YouTrack-Token` | the header it arrives in |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | `5` | seconds a delivery waits before its card is read |
-| `FIELDNOTES_KUBECODER_URL` | none | the KubeCoder controller, for starting the actioner |
+| `FIELDNOTES_KUBECODER_URL` | none | the KubeCoder controller: the actioner and the inbox |
 | `FIELDNOTES_KUBECODER_TOKEN` | none | the API's client token at the controller (secret) |
 | `FIELDNOTES_KUBECODER_REPO` | none | the store's KubeCoder project, `owner/Name` |
 | `FIELDNOTES_KUBECODER_WEBHOOK_URL` | none | where the controller reaches `/api/hooks/kubecoder` |
 | `FIELDNOTES_KUBECODER_ACTIONER_PROMPT` | the store's | the actioner's prompt |
 | `FIELDNOTES_KUBECODER_ACTIONER_MODEL`, `_EFFORT` | the engine's | its model and reasoning effort |
+| `FIELDNOTES_KUBECODER_INBOX_PROMPT` | `/dev:inbox` | the inbox sitting's first turn, the scope appended |
+| `FIELDNOTES_KUBECODER_INBOX_CWD` | `Fieldnotes/inbox` | its session's working directory |
+| `FIELDNOTES_KUBECODER_INBOX_MODEL`, `_EFFORT` | the engine's | its model and reasoning effort |
+| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes without a turn before a sitting is ended |
+| `FIELDNOTES_KUBECODER_INBOX_TRACKER` | the tracker's | the issue address a browser opens, a card id appended |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |
 
 Tokens are never in code or config files, only in environment variables materialised from
 secrets. A malformed value fails startup and names its variable. The GitHub webhook's two
 variables are set together or not at all, and so are YouTrack's URL and token, and KubeCoder's
-first four. Without the webhooks' secrets every delivery is refused, without YouTrack no card can be
-synced, and without KubeCoder a submit starts no actioner.
+first three; KubeCoder's webhook needs those three. Without the webhooks' secrets every delivery is
+refused, and without YouTrack no card can be synced. Without KubeCoder's three the inbox is not
+configured, and without them or its webhook a submit starts no actioner.
 """
 
 from __future__ import annotations
@@ -46,11 +52,14 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
+from app.fieldnotes import inbox
 from app.fieldnotes.actioner import DEFAULT_PROMPT, ActionerSettings
 from app.fieldnotes.auth import ClientRegistry
 from app.fieldnotes.board import BoardSettings
+from app.fieldnotes.controller import ControllerSettings
 from app.fieldnotes.hooks import GithubSettings, YouTrackHookSettings
 from app.fieldnotes.matching import MatchSettings
 from app.fieldnotes.store import StoreSettings
@@ -98,7 +107,9 @@ class Settings:
     github: GithubSettings | None
     board: BoardSettings | None
     youtrack_hook: YouTrackHookSettings | None
+    controller: ControllerSettings | None
     actioner: ActionerSettings | None
+    inbox: inbox.InboxSettings | None
     host: str
     port: int
     log_level: str
@@ -224,27 +235,33 @@ def _youtrack_hook(environ: Mapping[str, str]) -> YouTrackHookSettings | None:
     return YouTrackHookSettings(token=token, header=header, settle=settle)
 
 
-def _actioner(environ: Mapping[str, str]) -> ActionerSettings | None:
-    names = (
-        "KUBECODER_URL",
-        "KUBECODER_TOKEN",
-        "KUBECODER_REPO",
-        "KUBECODER_WEBHOOK_URL",
-    )
-    url, token, repo, webhook_url = (_optional(environ, name) for name in names)
-    if url is None and token is None and repo is None and webhook_url is None:
+def _controller(environ: Mapping[str, str]) -> ControllerSettings | None:
+    names = ("KUBECODER_URL", "KUBECODER_TOKEN", "KUBECODER_REPO")
+    url, token, repo = (_optional(environ, name) for name in names)
+    if url is None and token is None and repo is None:
         return None
-    if url is None or token is None or repo is None or webhook_url is None:
+    if url is None or token is None or repo is None:
         raise SettingsError(
             ", ".join(PREFIX + name for name in names)
             + " are set together or not at all"
         )
     if not REPO.fullmatch(repo):
         raise SettingsError(f"{PREFIX}KUBECODER_REPO is not owner/Name: {repo!r}")
+    return ControllerSettings(url=url, token=token, repo=repo)
+
+
+def _actioner(
+    environ: Mapping[str, str], controller: ControllerSettings | None
+) -> ActionerSettings | None:
+    webhook_url = _optional(environ, "KUBECODER_WEBHOOK_URL")
+    if webhook_url is None:
+        return None
+    if controller is None:
+        raise SettingsError(
+            f"{PREFIX}KUBECODER_WEBHOOK_URL is set without {PREFIX}KUBECODER_URL, "
+            f"{PREFIX}KUBECODER_TOKEN and {PREFIX}KUBECODER_REPO"
+        )
     return ActionerSettings(
-        url=url,
-        token=token,
-        repo=repo,
         webhook_url=webhook_url,
         prompt=_get(environ, "KUBECODER_ACTIONER_PROMPT", DEFAULT_PROMPT),
         model=_optional(environ, "KUBECODER_ACTIONER_MODEL"),
@@ -252,8 +269,29 @@ def _actioner(environ: Mapping[str, str]) -> ActionerSettings | None:
     )
 
 
+def _inbox(
+    environ: Mapping[str, str], controller: ControllerSettings | None
+) -> inbox.InboxSettings | None:
+    if controller is None:
+        return None
+    idle = _number(
+        environ, "KUBECODER_INBOX_IDLE", float, inbox.DEFAULT_IDLE.total_seconds() / 60
+    )
+    if idle <= 0:
+        raise SettingsError(f"{PREFIX}KUBECODER_INBOX_IDLE is not positive: {idle:g}")
+    return inbox.InboxSettings(
+        prompt=_get(environ, "KUBECODER_INBOX_PROMPT", inbox.DEFAULT_PROMPT),
+        cwd=_get(environ, "KUBECODER_INBOX_CWD", inbox.DEFAULT_CWD),
+        idle=timedelta(minutes=idle),
+        model=_optional(environ, "KUBECODER_INBOX_MODEL"),
+        reasoning_effort=_optional(environ, "KUBECODER_INBOX_EFFORT"),
+        tracker=_get(environ, "KUBECODER_INBOX_TRACKER", inbox.DEFAULT_TRACKER),
+    )
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     environ = os.environ if environ is None else environ
+    controller = _controller(environ)
     return Settings(
         store=StoreSettings(
             url=_required(environ, "STORE_URL"),
@@ -273,7 +311,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         github=_github(environ),
         board=_board(environ),
         youtrack_hook=_youtrack_hook(environ),
-        actioner=_actioner(environ),
+        controller=controller,
+        actioner=_actioner(environ, controller),
+        inbox=_inbox(environ, controller),
         host=_get(environ, "API_HOST", "0.0.0.0"),
         port=_number(environ, "API_PORT", int, 8080),
         log_level=_get(environ, "LOG_LEVEL", "INFO").upper(),

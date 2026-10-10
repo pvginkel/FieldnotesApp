@@ -18,9 +18,10 @@ from datetime import UTC, datetime
 
 import httpx
 
-from app.fieldnotes.actioner import Actioner, Controller, Hold, HttpController
+from app.fieldnotes.actioner import Actioner, Hold
 from app.fieldnotes.board import Board, HttpBoard
 from app.fieldnotes.config import Settings
+from app.fieldnotes.controller import HttpController
 from app.fieldnotes.errors import not_ready
 from app.fieldnotes.index import EmbeddingCache, Index
 from app.fieldnotes.matching import Matcher
@@ -36,7 +37,6 @@ logger = logging.getLogger(__name__)
 # A cold start embeds the whole store in batches; one batch on the shared node can take seconds.
 MODELS_TIMEOUT = 60.0
 BOARD_TIMEOUT = 30.0
-CONTROLLER_TIMEOUT = 30.0
 # The actioner's hold, on the volume both pods mount (FR-27).
 ACTIONER_HOLD = "actioner-run.json"
 
@@ -52,7 +52,7 @@ class Runtime:
         *,
         models: Models | None = None,
         board: Board | None = None,
-        controller: Controller | None = None,
+        controller: HttpController | None = None,
         clock: Clock = utcnow,
         environ: Mapping[str, str] | None = None,
         on_failure: Callable[[], None] | None = None,
@@ -71,11 +71,11 @@ class Runtime:
                 httpx.Client(base_url=settings.board.url, timeout=BOARD_TIMEOUT)
             )
             board = HttpBoard(self._clients[-1], settings.board)
-        if controller is None and settings.actioner is not None:
-            self._clients.append(
-                httpx.Client(base_url=settings.actioner.url, timeout=CONTROLLER_TIMEOUT)
-            )
-            controller = HttpController(self._clients[-1], settings.actioner)
+        if controller is None and settings.controller is not None:
+            # Each call carries its own timeout.
+            self._clients.append(httpx.Client(base_url=settings.controller.url))
+            controller = HttpController(self._clients[-1], settings.controller)
+        self.controller = controller
         outcomes = settings.board.outcomes if settings.board is not None else {}
         self.store = Store(settings.store, os.environ if environ is None else environ)
         self.index = Index(
@@ -92,6 +92,7 @@ class Runtime:
         self.rulings = Rulings(self.store, clock, self.metrics)
         self.actioner = Actioner(
             controller,
+            settings.actioner,
             self.triage,
             self.metrics,
             Hold(settings.cache_dir / ACTIONER_HOLD),

@@ -646,33 +646,45 @@ capability is involved.
 The sitting's file lies beside the actioner's hold on the shared volume and is written whole through
 a rename, as the hold is: the environment, the session's name, the conversation id, whether the API
 started the environment, when the sitting began and last moved, its status (`starting`, `busy`,
-`idle`, `lost`), the turn in flight (its task id, the last log offset and the last log line) and the
-transcript, a list of `{at, from, text}` with `from` the operator or the session. Both pods read it;
-the pod following a turn writes it.
+`idle`, `lost`), the log offset the next read of the response stream begins at, the number of the
+last turn whose result the transcript holds, the subject of the editor whose request began the last
+turn, the turn in flight (its task id, when it began and the last log line), the follow holding that
+turn (its pod, its id and its heartbeat) and the transcript, a list of `{author, text, at}` with
+`author` `operator` or `session`. Both pods read and write it, taking turns on a lock beside it,
+and only the follow the file names writes a turn's result. The wire carries the environment, null
+until Start has picked one, whether the API started it, when the sitting began and last moved, the
+turn in flight, the loss and the transcript.
 
 The surface, `/api/inbox`, gated and typed as the triage surface is:
 
 - `GET /inbox`: the sitting as the file holds it, with the tracker's issue address, or no sitting.
   The page's one read, fetched again on focus and after each task event.
-- `POST /inbox/start {scope?}`: `202` with the sitting; the start runs as a task that picks or starts
-  the environment, creates the session, sends the first turn and follows it. A live sitting is
-  answered as it is, `200`.
-- `POST /inbox/turns {message}`: `202` with the sitting, the turn's task id in it; `409 session-busy`
-  with a turn in flight, `409 conflict` with no live sitting.
+- `POST /inbox/start {scope?, sse_request_id?}`: `202` with the sitting; the start runs as a task
+  that picks or starts the environment, creates the session, sends the first turn and follows it. A
+  live sitting is answered as it is, `200`.
+- `POST /inbox/turns {message, sse_request_id?}`: `202` with the sitting, the turn's task id in it;
+  `409 session-busy` with a turn in flight, `409 conflict` with no live sitting.
 - `POST /inbox/end`: `204`, idempotent.
+
+`sse_request_id` names the page's SSE connection: a task's events carry the session's words, so
+they reach only the connections bound to the editor whose request began it, and the request binds
+the page's connection to that editor when the gateway left it bound to no one, as it does for a
+page that connected before its token was refreshed.
 
 A turn is a task of the template's task service, so the page takes its progress, the log lines, and
 its completion, the result, over the SSE gateway it already uses, by task id; a page that joins
 mid-turn takes the id from `GET /inbox`. The prompt, model and reasoning effort are
 `FIELDNOTES_KUBECODER_INBOX_PROMPT`, `_INBOX_MODEL` and `_INBOX_EFFORT`, the working directory
-`_INBOX_CWD`, `Fieldnotes/inbox` by default, and the idle time `_INBOX_IDLE`, 30 minutes by default;
-the controller's address, token and project are the actioner's. Each pod runs the expiry on a timer
-over the file; End being idempotent, both may. The screen is the route `/inbox`, reached by the app
-bar's tabs (FR-33): Start, the transcript, a text field with Send, End, and the status line. It was
-designed with the operator on 2026-10-10 against a fake of these endpoints that plays real sittings
-recorded in the spec repo (`mockups/inbox-ui/`), and the screen as designed is the one built, the
-fake going when the API follows; the Playwright suite drives it against the backend with the
-controller faked, as the backend's own tests fake it.
+`_INBOX_CWD`, `Fieldnotes/inbox` by default, the idle time `_INBOX_IDLE`, in minutes, 30 by
+default, and the issue address the screen links a card id to `_INBOX_TRACKER`,
+`https://issues.webathome.org/issue/` by default; the controller's address, token and project are
+the actioner's. Each pod runs the expiry on a timer over the file; End being idempotent, both may.
+The screen is the route `/inbox`, reached by the app bar's tabs (FR-33): Start, the transcript, a
+text field with Send, End, and the status line. It was designed with the operator on 2026-10-10
+against a fake of these endpoints that plays real sittings recorded in the spec repo
+(`mockups/inbox-ui/`), and the screen as designed is the one built, the fake going when the API
+follows; the Playwright suite drives it against the backend with the controller faked, as the
+backend's own tests fake it.
 
 ### Security and config
 

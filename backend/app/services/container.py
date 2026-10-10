@@ -108,6 +108,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         config=config,
         health_service=health_service,
         lifecycle_coordinator=lifecycle_coordinator,
+        task_service=task_service,
     )
     register_for_background_startup(lambda c: c.fieldnotes_service().start())
 

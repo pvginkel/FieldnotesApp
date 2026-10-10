@@ -84,9 +84,11 @@ def _unhandled(exc: Exception) -> Response:
 @inject
 def state(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+    tasks: TaskService = Provide[ServiceContainer.task_service],
 ) -> InboxState:
-    """FR-28: the sitting the API holds, if any, with its transcript and the turn in flight."""
-    return _inbox(service).state()
+    """FR-28: the sitting the API holds, if any, with its transcript and the turn in flight; a turn
+    whose follow is gone taken over first (FR-30)."""
+    return _inbox(service).state(tasks)
 
 
 @inbox_bp.route("/start", methods=["POST"])

@@ -15,6 +15,7 @@ import os
 import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -32,6 +33,9 @@ from app.fieldnotes.observations import Clock, Observations
 from app.fieldnotes.rulings import Rulings
 from app.fieldnotes.store import Store
 from app.fieldnotes.triage import TriageIndex
+
+if TYPE_CHECKING:
+    from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +116,10 @@ class Runtime:
         self._on_failure = on_failure
         self._starting: threading.Thread | None = None
 
-    def start(self) -> None:
-        """Clone and index on a thread of its own, and return at once."""
+    def start(self, tasks: TaskService) -> None:
+        """Clone and index on a thread of its own, start the inbox's timer, which runs its
+        takeovers on `tasks`, and return at once."""
+        self.inbox.watch(tasks)
         self._starting = threading.Thread(
             target=self._start, name="store-startup", daemon=True
         )
@@ -141,6 +147,7 @@ class Runtime:
         )
 
     def stop(self) -> None:
+        self.inbox.stop()
         self.actioner.stop()
         self.observations.stop()
         self.store.stop()

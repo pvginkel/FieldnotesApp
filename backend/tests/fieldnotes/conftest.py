@@ -255,7 +255,7 @@ def start(
             )
         app.container.fieldnotes_service().use(runtime)
         runtime.metrics.register(REGISTRY)
-        runtime.start()
+        runtime.start(app.container.task_service())
         if ready:
             runtime.wait_started(20)
             assert runtime.ready, "the API did not become ready"

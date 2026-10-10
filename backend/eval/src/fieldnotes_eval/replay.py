@@ -340,7 +340,7 @@ def replay(
     app = create_app(AppSettings(), skip_background_services=True)
     app.container.fieldnotes_service().use(runtime)
     records: list[dict[str, Any]] = []
-    runtime.start()
+    runtime.start(app.container.task_service())
     try:
         runtime.wait_started(READY_TIMEOUT)
         if runtime.failed:

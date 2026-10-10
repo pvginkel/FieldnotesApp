@@ -31,6 +31,7 @@ from app.fieldnotes.observations import Observations
 from app.fieldnotes.runtime import Runtime
 from app.fieldnotes.testing import FakeModels
 from app.services.health_service import HealthService
+from app.services.task_service import TaskService
 from app.utils.lifecycle_coordinator import LifecycleCoordinatorProtocol, LifecycleEvent
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,10 @@ class FieldnotesService:
         config: Settings,
         health_service: HealthService,
         lifecycle_coordinator: LifecycleCoordinatorProtocol,
+        task_service: TaskService,
     ) -> None:
         self.runtime: Runtime | None = None
+        self._tasks = task_service
         self._empty_store = (
             config.is_testing
         )  # the Playwright backend's, built on start
@@ -77,7 +80,7 @@ class FieldnotesService:
             self.runtime = self._empty_runtime()
         if self.runtime is not None:
             self.runtime.metrics.register(REGISTRY)
-            self.runtime.start()
+            self.runtime.start(self._tasks)
 
     def _empty_runtime(self) -> Runtime:
         self._scratch = Path(tempfile.mkdtemp(prefix="fieldnotes-store-"))

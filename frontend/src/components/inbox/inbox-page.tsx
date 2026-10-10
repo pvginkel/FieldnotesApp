@@ -70,7 +70,8 @@ export function InboxPage() {
 
   const content = (() => {
     if (query.isPending) return <CenterCard title="" testId="inbox.loading" />;
-    if (query.isError || !state) {
+    // Only before anything has loaded: a background refetch that fails keeps the sitting shown.
+    if (!state) {
       return (
         <CenterCard title="The inbox did not load" testId="inbox.error">
           <div className="tally">{query.error?.message}</div>

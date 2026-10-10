@@ -279,6 +279,44 @@ def test_without_a_turn_in_flight_the_session_cannot_be_played(backend, monkeypa
         assert reply.json()["type"] == "conflict"
 
 
+def test_emit_and_finish_straight_after_a_start_wait_for_its_turn(backend, eventually):
+    """A Start creates its session off the request, so a spec that emits straight after it
+    finds the turn not yet at the controller: emit and finish wait for it. Here the Start's
+    first call fails and its session comes a retry later."""
+    lay_out(backend, environments=[{"env_id": ENV}], turns=[{"held": True}])
+    backend.runtime.inbox.retry = 1.0
+    fake(backend).faults = [503]
+
+    assert begin(backend).status_code == 202
+    emitted = play(backend, "emit", line=LINES[0])
+    finished = play(backend, "finish", result=WRITE_UP)
+
+    assert (emitted.status_code, finished.status_code) == (204, 204)
+    eventually(lambda: sitting(backend)["turn"] is None, "the turn's result")
+    assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
+
+
+def test_after_the_turns_result_the_session_cannot_be_played(
+    backend, eventually, monkeypatch
+):
+    """emit and finish play only a turn in flight: after the result, an emitted line would be
+    the next turn's first status line."""
+    monkeypatch.setattr("app.api.testing_controller.TURN_WAIT", 0.1)
+    lay_out(
+        backend,
+        environments=[{"env_id": ENV}],
+        turns=[{"lines": LINES[:1], "result": WRITE_UP}],
+    )
+    assert begin(backend).status_code == 202
+    eventually(lambda: sitting(backend)["turn"] is None, "the turn's result")
+
+    for verb, body in [("emit", {"line": LINES[1]}), ("finish", {})]:
+        reply = play(backend, verb, **body)
+        assert reply.status_code == 409, verb
+        assert reply.json()["type"] == "conflict"
+    assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
+
+
 @pytest.mark.parametrize(
     "layout",
     [

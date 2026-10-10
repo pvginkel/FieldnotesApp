@@ -53,12 +53,18 @@ def inbox(api, **kwargs):
     return reply.json()
 
 
-def begin(api, scope=None):
-    return api.post("/api/inbox/start", json={} if scope is None else {"scope": scope})
+def begin(api, scope=None, connection=None):
+    body = {} if scope is None else {"scope": scope}
+    if connection is not None:
+        body["sse_request_id"] = connection
+    return api.post("/api/inbox/start", json=body)
 
 
-def send(api, message):
-    return api.post("/api/inbox/turns", json={"message": message})
+def send(api, message, connection=None):
+    body = {"message": message}
+    if connection is not None:
+        body["sse_request_id"] = connection
+    return api.post("/api/inbox/turns", json=body)
 
 
 def end(api):
@@ -112,10 +118,10 @@ def message(author, text, at=AT):
     return {"author": author, "text": text, "at": at}
 
 
-def opened(api, eventually, kubecoder, scope=None):
+def opened(api, eventually, kubecoder, scope=None, connection=None):
     """A sitting begun and its first turn answered; the reply to its Start."""
     kubecoder.turns.append(FakeTurn(LINES, WRITE_UP))
-    reply = begin(api, scope)
+    reply = begin(api, scope, connection)
     assert reply.status_code == 202, reply.text
     finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
     return reply
@@ -741,6 +747,85 @@ def test_a_tasks_events_reach_only_the_connections_of_the_editor_who_began_it(
     assert held.subject == "inbox-editor"
 
 
+def connected(api, monkeypatch, *names) -> dict[str, list[dict]]:
+    """SSE connections the gateway registered, bound to no one, as when a page connects before its
+    token is refreshed; the task events each one hears."""
+    heard: dict[str, list[dict]] = {name: [] for name in names}
+    manager = api.app.container.sse_connection_manager()
+
+    def sent(token, event_data, event_name, service_type, request_id=None):
+        if event_name == "task_event":
+            heard[token].append(event_data)
+        return True
+
+    monkeypatch.setattr(manager, "_send_event_to_token", sent)
+    for name in names:
+        manager.on_connect(name, name, f"http://sse.invalid/?request_id={name}")
+    return heard
+
+
+def bound(api, connection):
+    return (
+        api.app.container.sse_connection_manager()
+        .get_connection_info(connection)
+        .subject
+    )
+
+
+def test_a_page_whose_connection_is_bound_to_no_one_hears_the_tasks_it_begins(
+    start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
+):
+    """FR-29, FR-30 under NFR-4: the gateway binds a connection only at connect, from the access
+    cookie, so a page that connected before its token was refreshed is bound to no one; its Start
+    and its turns name its connection, which is bound to the editor before the task begins."""
+    kubecoder.add_environment(ENV)
+    with start(app=oidc_app) as api:
+        heard = connected(api, monkeypatch, "editor", "anonymous")
+        api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
+        opened(api, eventually, kubecoder, connection="editor")
+        kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
+        task_id = send(api, "close EX-7", connection="editor").json()["sitting"][
+            "turn"
+        ]["task"]
+        finished(api, eventually, task_id)
+
+        assert bound(api, "editor") == "inbox-editor"
+        assert bound(api, "anonymous") is None
+    assert heard["anonymous"] == []
+    assert [
+        e["data"]["message"]["text"]
+        for e in heard["editor"]
+        if e["event_type"] == "task_completed"
+    ] == [WRITE_UP, ANSWER]
+    assert progress(heard["editor"], task_id) == ["[3s] [tool_use: update] EX-7"]
+
+
+def test_a_request_binds_no_connection_bound_to_another_user_nor_one_it_is_refused_for(
+    start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
+):
+    """A connection a request names is bound only by an editor's accepted request and only when
+    no one holds it: another user's stays theirs and hears none of the editor's tasks."""
+    kubecoder.add_environment(ENV)
+    with start(app=oidc_app) as api:
+        heard = connected(api, monkeypatch, "other", "viewer", "anonymous")
+        api.app.container.sse_connection_manager().bind_identity("other", "inbox-other")
+        refused = [begin(api, connection="anonymous")]
+        api.sign_in(generate_test_jwt(subject="inbox-viewer", roles=["viewer"]))
+        refused.append(begin(api, connection="viewer"))
+        api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
+        opened(api, eventually, kubecoder, connection="other")
+        kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
+        reply = send(api, "close EX-7", connection="nowhere")
+        assert reply.status_code == 202, reply.text
+        finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
+
+        assert [r.status_code for r in refused] == [401, 403]
+        assert bound(api, "other") == "inbox-other"
+        assert bound(api, "viewer") is None
+        assert bound(api, "anonymous") is None
+    assert heard == {"other": [], "viewer": [], "anonymous": []}
+
+
 def test_the_inbox_endpoints_are_in_the_openapi_document_behind_the_editor_gate():
     document = openapi_document()
     paths = document["paths"]
@@ -775,5 +860,5 @@ def test_the_inbox_endpoints_are_in_the_openapi_document_behind_the_editor_gate(
     assert {"200", "202", "409", "422"} <= set(operations["start"]["responses"])
     assert {"202", "409", "422"} <= set(operations["turn"]["responses"])
     assert "204" in operations["end"]["responses"]
-    assert set(request("start")["properties"]) == {"scope"}
-    assert set(request("turn")["properties"]) == {"message"}
+    assert set(request("start")["properties"]) == {"scope", "sse_request_id"}
+    assert set(request("turn")["properties"]) == {"message", "sse_request_id"}

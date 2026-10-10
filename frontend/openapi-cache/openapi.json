@@ -687,11 +687,16 @@
         "type": "object"
       },
       "TriageItem.b288cbf.Ruling": {
-        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on.",
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the reconciler's draft, its bet on the item, and the operator's once they submit it\nuntouched; a ruling of their own replaces it. A ruling from before the flag has none.",
         "properties": {
           "at": {
             "title": "At",
             "type": "string"
+          },
+          "guessed": {
+            "default": false,
+            "title": "Guessed",
+            "type": "boolean"
           },
           "note": {
             "title": "Note",
@@ -948,11 +953,16 @@
         "type": "object"
       },
       "TriageQueue.b288cbf.Ruling": {
-        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on.",
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the reconciler's draft, its bet on the item, and the operator's once they submit it\nuntouched; a ruling of their own replaces it. A ruling from before the flag has none.",
         "properties": {
           "at": {
             "title": "At",
             "type": "string"
+          },
+          "guessed": {
+            "default": false,
+            "title": "Guessed",
+            "type": "boolean"
           },
           "note": {
             "title": "Note",

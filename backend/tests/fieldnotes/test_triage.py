@@ -71,8 +71,16 @@ def item(id_, written=WRITTEN, **fields):
     } | fields
 
 
-def ruling(verb="yes", note="", at="2026-09-21T08:00:00Z", submitted=None):
-    return {"verb": verb, "note": note, "at": at, "submitted": submitted}
+def ruling(
+    verb="yes", note="", at="2026-09-21T08:00:00Z", submitted=None, guessed=False
+):
+    return {
+        "verb": verb,
+        "note": note,
+        "at": at,
+        "submitted": submitted,
+        "guessed": guessed,
+    }
 
 
 def spelled(value) -> str:
@@ -191,6 +199,15 @@ def test_an_item_comes_as_the_store_holds_it(start, remote):
     assert list(served) == list(ITEM_KEYS)
 
 
+def test_a_ruling_from_before_the_flag_is_not_guessed(start, remote):
+    old = {"verb": "no", "note": "not ours", "at": "2026-09-21T08:00:00Z"}
+    seed(remote, item(IDS[0], ruling=old | {"submitted": None}))
+    with start() as api:
+        [served] = queue(api)["items"]
+
+    assert served["ruling"] == ruling("no", "not ours")
+
+
 def test_the_observations_are_as_the_store_has_them_now(
     start, auth, remote, clock, pull
 ):
@@ -229,6 +246,7 @@ def test_a_bad_item_is_left_out_and_logged(start, remote, caplog):
     seed(
         remote,
         item(IDS[1], ruling=ruling("maybe")),
+        item(IDS[7], ruling=ruling(guessed="yes")),
         item(IDS[2], actioned={"at": "2026-09-22T09:00:00Z", "done": "closed"}),
         broken,
         item(IDS[6]),
@@ -242,9 +260,10 @@ def test_a_bad_item_is_left_out_and_logged(start, remote, caplog):
 
     assert ids(reply) == [IDS[6]]
     logged = "\n".join(caplog.messages)
-    for id_ in (IDS[0], IDS[1], IDS[2], IDS[3], IDS[5]):
+    for id_ in (IDS[0], IDS[1], IDS[2], IDS[3], IDS[5], IDS[7]):
         assert f"{item_path(id_)} is left out of the triage queue" in logged
     assert "the ruling's verb is not one of yes, no, later" in logged
+    assert "the ruling's guessed is neither true nor false" in logged
     assert "a stamped item is still open" in logged
     assert f"the file name is not {IDS[4]}.json" in logged
 
@@ -478,6 +497,20 @@ def test_a_ruling_replaces_a_draft_and_a_returned_item_keeps_its_question(
     assert stored(remote, IDS[0]) == response.json()
 
 
+def test_a_ruling_over_the_reconcilers_guessed_draft_is_the_operators(
+    start, remote, clock
+):
+    seed(remote, item(IDS[0], ruling=ruling("no", "a duplicate", guessed=True)))
+    clock.now = NOW
+    with start() as api:
+        guessed = queue(api)["items"][0]["ruling"]
+        response = rule(api, IDS[0], "no", "a duplicate")
+
+    assert guessed == ruling("no", "a duplicate", guessed=True)
+    assert response.json()["ruling"] == ruling("no", "a duplicate", at=AT)
+    assert stored(remote, IDS[0]) == response.json()
+
+
 @pytest.mark.parametrize("verb", ["no", "later"])
 @pytest.mark.parametrize("note", ["", "   "])
 def test_a_no_or_a_later_without_a_note_is_refused(start, remote, verb, note):
@@ -633,8 +666,10 @@ def test_submit_marks_every_ruled_item_submitted_in_one_commit(start, remote, cl
         ),
         # Returned, and ruled again after its question.
         item(IDS[5], ruling=again, question=QUESTION),
+        # The reconciler's draft, untouched: ruled, and still guessed once submitted.
+        item(IDS[6], ruling=ruling("no", "a duplicate", guessed=True)),
     ]
-    seed(remote, *seeded, **{item_path(IDS[6]): "{"})
+    seed(remote, *seeded, **{item_path(IDS[7]): "{"})
     clock.now = NOW
     with start() as api:
         before = remote.log()
@@ -642,12 +677,12 @@ def test_submit_marks_every_ruled_item_submitted_in_one_commit(start, remote, cl
         left = ids(queue(api))
 
     assert response.status_code == 200, response.text
-    assert response.json() == [IDS[1], IDS[2], IDS[5]]
-    assert remote.log() == ["submit 3 (operator)", *before]
-    assert touched(remote) == [item_path(IDS[n]) for n in (1, 2, 5)]
+    assert response.json() == [IDS[1], IDS[2], IDS[5], IDS[6]]
+    assert remote.log() == ["submit 4 (operator)", *before]
+    assert touched(remote) == [item_path(IDS[n]) for n in (1, 2, 5, 6)]
     for n, original in enumerate(seeded):
         expected = original
-        if n in (1, 2, 5):
+        if n in (1, 2, 5, 6):
             expected = original | {"ruling": original["ruling"] | {"submitted": AT}}
         assert remote.file(item_path(IDS[n])) == spelled(expected)
         assert item_faults(f"{IDS[n]}.json", expected) == []

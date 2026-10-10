@@ -10,6 +10,7 @@ export class TriagePage {
   readonly pane: Locator;
   readonly note: Locator;
   readonly noteClear: Locator;
+  readonly guessed: Locator;
   readonly previousButton: Locator;
   readonly nextButton: Locator;
   readonly segments: Locator;
@@ -35,6 +36,8 @@ export class TriagePage {
     this.pane = page.getByTestId('triage.pane');
     this.note = page.getByTestId('triage.note');
     this.noteClear = page.getByTestId('triage.note.clear');
+    // The robot on the verb of the reconciler's draft, untouched.
+    this.guessed = page.getByTestId('triage.guessed');
     this.previousButton = page.getByTestId('triage.previous');
     this.nextButton = page.getByTestId('triage.next');
     this.segments = page.getByTestId('triage.progress.segment');

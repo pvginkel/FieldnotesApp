@@ -4,6 +4,7 @@ import { Info } from 'lucide-react';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
+import { Guessed } from './ruling-pane';
 
 interface TriageCardProps {
   item: Item;
@@ -67,6 +68,7 @@ export function TriageCard({ item, live }: TriageCardProps) {
             {item.ruling && (
               <div className="was">
                 Your ruling was <strong>{item.ruling.verb}</strong>
+                {item.ruling.guessed && <> <Guessed /></>}
                 {item.ruling.note ? <>: <Inline text={item.ruling.note} /></> : null}
               </div>
             )}

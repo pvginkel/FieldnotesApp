@@ -150,6 +150,7 @@ export function TriagePage() {
           noteRef={noteRef}
           verbsRef={triage.verbsRef}
           draft={triage.draft}
+          guessed={triage.guessed}
           message={triage.message}
           canGoBack={triage.idx > 0}
           onPrevious={triage.previous}

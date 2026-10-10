@@ -85,6 +85,41 @@ test.describe('the finish card', () => {
   });
 });
 
+test.describe("the reconciler's draft", () => {
+  test('shows a robot on its verb; → leaves it as drafted, a submit takes it, and an edit saved over it is the operator\'s', async ({ store, triage }) => {
+    const drafted = (note: string) => ({ verb: 'no' as const, note, at: minutesAgo(60), submitted: null, guessed: true });
+    const { observations, items, ids } = stack(2, (i) => ({ ruling: drafted(`A duplicate (${i}).`) }));
+    await store.layOut({ observations, items });
+    await triage.open();
+
+    await triage.expectCard(ids[0]);
+    await triage.expectVerb('no');
+    await expect(triage.note).toHaveValue('A duplicate (0).');
+    await expect(triage.pane.getByTestId('triage.verb.no').getByTestId('triage.guessed')).toBeVisible();
+    await triage.expectSegments(['ruled', 'ruled']);
+    await triage.press('ArrowRight');
+
+    // An edit takes the robot off at once, and → saves it as the operator's.
+    await triage.expectCard(ids[1]);
+    await expect(triage.guessed).toBeVisible();
+    await triage.press('Tab');
+    await triage.note.press('End');
+    await triage.note.pressSequentially(' Merge it.');
+    await expect(triage.guessed).toHaveCount(0);
+    await triage.press('Escape');
+    await triage.press('ArrowRight');
+    await expect.poll(() => store.ruling(ids[1])).toMatchObject({ note: 'A duplicate (1). Merge it.', guessed: false });
+
+    await expect(triage.finishSubmit).toHaveText('Submit 2');
+    await triage.finishSubmit.click();
+    await expect(triage.toasts).toContainText('2 rulings submitted.');
+    // The untouched draft went as the reconciler wrote it, still marked guessed.
+    const untouched = await store.ruling(ids[0]);
+    expect(untouched).toMatchObject({ verb: 'no', note: 'A duplicate (0).', guessed: true });
+    expect(untouched?.submitted).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+  });
+});
+
 test.describe('a returned item', () => {
   test('comes first, shows the question and the old ruling, and is unruled until ruled again', async ({ store, triage }) => {
     const question = { at: minutesAgo(30), text: 'Which runner should keep the cache?' };

@@ -271,7 +271,7 @@ export function useTriage() {
     const id = item.observation;
     write(
       item,
-      { verb, note: text, at: storeNow(), submitted: null },
+      { verb, note: text, at: storeNow(), submitted: null, guessed: false },
       () =>
         api.PUT('/api/triage/items/{id}/ruling', {
           params: { path: { id } },
@@ -291,6 +291,10 @@ export function useTriage() {
     if (!isRuled(item)) return true;
     return draft.verb !== item.ruling!.verb || draft.note.trim() !== item.ruling!.note;
   };
+
+  // The pane shows the reconciler's draft as it wrote it: a submit takes it as ruled (FR-26), and
+  // an edit saved over it is the operator's.
+  const guessed = (item: Item) => isRuled(item) && item.ruling!.guessed && !edited(item);
 
   // → is `next` while the pane shows a verb: it saves an edit, as Ctrl+Enter does, and moves on.
   // Without a verb it is `skip`: the card goes to the back of the stack next time. A ruled card
@@ -371,6 +375,7 @@ export function useTriage() {
     ruledCount,
     submitting,
     draft: current ? draftOf(current) : { verb: null, note: '' },
+    guessed: current ? guessed(current) : false,
     message,
     skipped: browser.skipped,
     prefs: browser.prefs,

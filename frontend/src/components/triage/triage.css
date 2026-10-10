@@ -473,6 +473,9 @@ kbd {
   font-weight: 500;
   cursor: pointer;
 }
+/* The reconciler's draft: a small robot after the verb it drafted. */
+.guessed { display: inline-flex; margin-left: -2px; opacity: 0.75; }
+.returned .was .guessed { margin-left: 0; vertical-align: -0.1em; }
 .verbs.shake { animation: shake 300ms; }
 @keyframes shake {
   25% { transform: translateX(-4px); }

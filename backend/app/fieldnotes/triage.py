@@ -149,6 +149,8 @@ def item_faults(name: str, item: dict[str, Any]) -> list[str]:
             str(ruling["submitted"])
         ):
             found.append("the ruling's submitted is neither null nor a UTC timestamp")
+        elif not isinstance(ruling.get("guessed", False), bool):
+            found.append("the ruling's guessed is neither true nor false")
     question = item.get("question")
     if question is not None and (
         not isinstance(question, dict)
@@ -203,12 +205,15 @@ class Report(_Model):
 
 
 class Ruling(_Model):
-    """The operator's: a draft until `submitted` is set, the actioner's from then on."""
+    """The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`
+    one is the reconciler's draft, its bet on the item, and the operator's once they submit it
+    untouched; a ruling of their own replaces it. A ruling from before the flag has none."""
 
     verb: Verb
     note: str
     at: str
     submitted: str | None
+    guessed: bool = False
 
 
 class Question(_Model):

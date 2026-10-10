@@ -44,6 +44,7 @@ interface Ruling {
   note: string;
   at: string;
   submitted: string | null;
+  guessed?: boolean; // the reconciler's draft; a ruling from before the flag has none
 }
 
 interface Item {

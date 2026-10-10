@@ -423,6 +423,38 @@ def test_a_follow_never_writes_into_the_sitting_a_start_on_the_other_pod_began(
     ]
 
 
+def test_a_send_whose_write_fails_sends_the_session_nothing(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """The turn's follow is begun before its write; a write the volume refuses never names it, so
+    it finds the turn is not its own and sends nothing."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        heard = listen(api, monkeypatch)
+        file = api.runtime.inbox.file
+        write = file._write
+
+        def refused(sitting):
+            if sitting is not None and sitting.status == "busy":
+                raise OSError("the volume refused the write")
+            write(sitting)
+
+        monkeypatch.setattr(file, "_write", refused)
+        reply = send(api, "go")
+        eventually(
+            lambda: any(e["event_type"] == "task_completed" for e in heard),
+            "the follow's end",
+        )
+
+    assert reply.status_code == 500
+    assert [e["data"] for e in heard if e["event_type"] == "task_completed"] == [
+        {"message": None}
+    ]
+    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox"]
+    assert held(environ).status == "idle"
+
+
 # -- lost, or tried again ------------------------------------------------------------------------
 
 

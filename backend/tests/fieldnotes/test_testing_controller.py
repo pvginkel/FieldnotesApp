@@ -3,6 +3,7 @@ inbox and the actioner over a fake KubeCoder controller (FR-27 to FR-33), which 
 plays the sitting's turns on, loses the sitting at and ends the actioner's runs through. Every
 environment, line and message is invented."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,47 @@ def test_a_layout_ends_the_last_sitting_and_starts_the_actioner_afresh(
     hold = Path(backend.runtime.settings.cache_dir) / ACTIONER_HOLD
     assert not hold.exists()
     assert controller(backend) == {"environments": [], "runs": []}
+
+
+def test_a_layout_stops_the_replaced_inbox_sweeping(backend, eventually, monkeypatch):
+    """The inbox a layout replaces no longer sweeps the sitting file the new one shares, with
+    the old controller and settings."""
+    monkeypatch.setattr("app.fieldnotes.inbox.SWEEP", 0.05)
+    lay_out(backend)
+    replaced = backend.runtime.inbox
+    swept: list[float] = []
+    monkeypatch.setattr(replaced, "sweep", lambda tasks: swept.append(time.monotonic()))
+    eventually(lambda: swept, "the inbox's sweep")
+
+    lay_out(backend)
+    time.sleep(0.3)  # a round in flight at the layout ends
+    after = len(swept)
+    time.sleep(0.3)
+
+    assert len(swept) == after
+
+
+def test_a_layout_drops_the_replaced_actioners_waiting_retry(backend, eventually):
+    """A retry the replaced actioner had waiting, a skipped run's, never fires: it would start a
+    run at the old controller and hold it in the hold the new actioner shares."""
+    lay_out(backend)
+    submitted(backend, eventually)
+    backend.runtime.actioner.skipped_retry = 0.2
+    assert (
+        play(backend, "run-end", outcome="skipped", reason="in-use").status_code == 204
+    )
+    last = fake(backend)
+
+    lay_out(backend)
+    time.sleep(0.6)
+
+    assert last.ids == ["run-1"]
+    assert actioner(backend) == {
+        "state": "idle",
+        "run": None,
+        "since": None,
+        "failure": None,
+    }
 
 
 @pytest.mark.parametrize(

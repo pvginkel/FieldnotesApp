@@ -25,7 +25,7 @@ export function EndDialog({ sitting, onCancel, onEnd }: EndDialogProps) {
         <p>
           The session ends and the transcript goes with it. What the session recorded stays on the cards.
           {sitting.turn && ' The turn in flight gets no answer.'}
-          {sitting.started_environment && !sitting.lost && ` ${sitting.environment} was started for this sitting and is stopped.`}
+          {sitting.started_environment && !sitting.lost && ` ${sitting.environment} was started for this sitting and is stopped, unless another session is working in it.`}
         </p>
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onCancel} autoFocus>

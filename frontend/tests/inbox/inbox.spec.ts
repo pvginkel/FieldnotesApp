@@ -352,7 +352,7 @@ test.describe('End', () => {
 
     await inbox.end.click();
     await expect(inbox.endDialog).toContainText('the transcript goes with it');
-    await expect(inbox.endDialog).toContainText('env-1 was started for this sitting and is stopped.');
+    await expect(inbox.endDialog).toContainText('env-1 was started for this sitting and is stopped, unless another session is working in it.');
     await page.keyboard.press('Escape');
     await expect(inbox.endDialog).toHaveCount(0);
     await expect(inbox.sessionMessages).toHaveCount(1);

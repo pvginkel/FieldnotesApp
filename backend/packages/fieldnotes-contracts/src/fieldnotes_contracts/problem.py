@@ -20,6 +20,9 @@ class ProblemType(StrEnum):
     # The request is well-formed and names a known observation, but it is in the wrong state for
     # the operation: a board sync of an observation with no card.
     conflict = "conflict"
+    # The inbox sitting's turn is in flight: a send is refused, never queued (the KubeCoder
+    # controller's own slug for it).
+    session_busy = "session-busy"
     validation_error = "validation-error"
     # The store is not cloned or the index not built yet; retry shortly.
     not_ready = "not-ready"

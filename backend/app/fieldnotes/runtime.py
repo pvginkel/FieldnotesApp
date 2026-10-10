@@ -1,6 +1,6 @@
 """The running store: its checkout and queue, the index, the triage index, the matcher, the
-observations, the operator's rulings, the actioner start and the metrics, built from the settings,
-and started in the background (design, "Services").
+observations, the operator's rulings, the actioner start, the inbox sitting and the metrics, built
+from the settings, and started in the background (design, "Services").
 
 Cloning the store and building the index can take minutes on a cold cache, and the health checks
 have to answer meanwhile, so `start` runs on its own thread. Until it is done every endpoint that
@@ -23,6 +23,7 @@ from app.fieldnotes.board import Board, HttpBoard
 from app.fieldnotes.config import Settings
 from app.fieldnotes.controller import HttpController
 from app.fieldnotes.errors import not_ready
+from app.fieldnotes.inbox import Inbox, SittingFile
 from app.fieldnotes.index import EmbeddingCache, Index
 from app.fieldnotes.matching import Matcher
 from app.fieldnotes.metrics import Metrics
@@ -39,6 +40,8 @@ MODELS_TIMEOUT = 60.0
 BOARD_TIMEOUT = 30.0
 # The actioner's hold, on the volume both pods mount (FR-27).
 ACTIONER_HOLD = "actioner-run.json"
+# The inbox sitting, beside it (FR-29).
+INBOX_SITTING = "inbox-sitting.json"
 
 
 def utcnow() -> datetime:
@@ -96,6 +99,12 @@ class Runtime:
             self.triage,
             self.metrics,
             Hold(settings.cache_dir / ACTIONER_HOLD),
+            clock,
+        )
+        self.inbox = Inbox(
+            controller,
+            settings.inbox,
+            SittingFile(settings.cache_dir / INBOX_SITTING),
             clock,
         )
         self.ready = False

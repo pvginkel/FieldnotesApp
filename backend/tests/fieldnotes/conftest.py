@@ -188,10 +188,11 @@ class Reply:
 
 class Api:
     """Flask's test client, taking `content=` for a raw body as the suites pass it, and the
-    runtime it serves."""
+    app and the runtime it serves."""
 
     def __init__(self, client: FlaskClient, runtime: Runtime) -> None:
         self._client = client
+        self.app = client.application
         self.runtime = runtime
 
     def get(self, url: str, **kwargs: Any) -> Reply:

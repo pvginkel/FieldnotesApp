@@ -229,6 +229,11 @@ class HttpController:
         self._settings = settings
         self._headers = {"Authorization": f"Bearer {settings.token}"}
 
+    @property
+    def repo(self) -> str:
+        """The store's project, whose environments `environments` lists."""
+        return self._settings.repo
+
     def _call(
         self,
         method: str,

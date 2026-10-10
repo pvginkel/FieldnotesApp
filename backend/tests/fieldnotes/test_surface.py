@@ -126,6 +126,7 @@ ENUMS = {
         "unauthenticated",
         "not-found",
         "conflict",
+        "session-busy",
         "validation-error",
         "not-ready",
         "models-unreachable",

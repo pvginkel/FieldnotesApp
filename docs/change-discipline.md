@@ -12,12 +12,13 @@ implementation's to assume.
 ## The server stays dumb
 
 The value of Fieldnotes sits in the reconciler and in the post-time duplicate response; capture is
-plumbing. All judgment lives in versioned skills that live with the store, not in this repo. The API
-commits, indexes, matches, verifies webhooks, and carries the operator's triage rulings to the store.
-It holds no judgment: which observations matter, what a triage item asks and what a ruling means are
-the skills'. It starts a skill only when the operator asks for it (a submit starts the actioner),
-never on a schedule of its own. A change that moves judgment into a service is the wrong change,
-however convenient.
+plumbing. All judgment lives in versioned skills, the ones that live with the store and, for the
+inbox sitting, the `dev` plugin's, not in this repo. The API commits, indexes, matches, verifies
+webhooks, carries the operator's triage rulings to the store, and relays the operator's inbox
+sitting to a headless session. It holds no judgment: which observations matter, what a triage item
+asks, what a ruling means and what a card needs are the skills'. It starts a skill only when the
+operator asks for it (a submit starts the actioner, Start the inbox sitting), never on a schedule of
+its own. A change that moves judgment into a service is the wrong change, however convenient.
 
 `fieldnotes-mcp` is thinner still: three tools mapped 1:1 onto the API, and nothing the API does not
 already do.
@@ -57,8 +58,11 @@ parameter.
 One markdown file per observation; every server write is a commit on `main`; the embedding cache is a
 content-addressed directory, on a volume the API's pods share, that only the API writes. There is
 no database, and no state that matters lives only in the API's memory or on its disks: the index is
-rebuilt from the repository, and deleting the cache must cost a reindex and nothing else. The file format (FR-8) is a storage layout that
-skills and people edit by hand, so it changes as deliberately as a surface does.
+rebuilt from the repository, and deleting the embedding cache must cost a reindex and nothing else.
+Beside it on that volume lies only the operator's work in flight, the actioner's hold and the inbox
+sitting, each a file both pods read; what either comes to is recorded in the store or on the
+tracker. The file format (FR-8) is a storage layout that skills and people edit by hand, so it
+changes as deliberately as a surface does.
 
 Merged-away files are removed and history is the record. The same holds for this repo.
 

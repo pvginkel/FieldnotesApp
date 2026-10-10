@@ -39,9 +39,10 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
 - **`backend/`**: the Flask backend, a uv workspace, and the only component with logic. The
   Fieldnotes domain is `app/fieldnotes/` (each pod's git checkout, its write queue and timed pull,
   the file model, the in-memory index and its embedding cache, the match pipeline, the GitHub and
-  YouTrack webhooks, the triage index, the operator's rulings and the actioner start), its surfaces
-  under `/api` `app/api/fieldnotes.py`, the agents', and `app/api/triage.py`, the triage UI's, and
-  its wiring `app/services/fieldnotes_service.py`.
+  YouTrack webhooks, the triage index, the operator's rulings, the actioner start and the inbox
+  sitting's relay to KubeCoder), its surfaces under `/api` `app/api/fieldnotes.py`, the agents', and
+  `app/api/triage.py` and `app/api/inbox.py`, the UI's, and its wiring
+  `app/services/fieldnotes_service.py`.
   The workspace members: **`packages/fieldnotes-contracts/`**, the pydantic wire models the API and
   the MCP server share; **`mcp-server/`**, `fieldnotes-mcp`, the thin MCP server with exactly three
   tools, `post`, `react` and `get`, mapped 1:1 onto the API, shipped as the image's second entry
@@ -49,11 +50,14 @@ too (see "Template ownership" below). `kc project` runs `root`, `backend` and `f
   image. All their suites run in the backend's pytest: `cexec modern-app sh -c 'cd backend && uv
   run pytest'`.
 - **`frontend/`**: the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
-  OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker. Its one
-  screen is the triage stack (`src/components/triage/`, the logic in `src/hooks/use-triage.ts`),
-  ported from the operator's mockup (`../FieldnotesAppSpecs/mockups/triage-ui/`). Its specs,
-  `tests/triage/`, lay out the worker backend's store with invented items through
-  `/api/testing/store` (`tests/support/triage-store.ts`).
+  OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker. Two
+  screens share the app bar (`src/components/shell/`, the tabs and the Inbox and Actioner pills):
+  the triage stack (`src/components/triage/`, the logic in `src/hooks/use-triage.ts`), ported from
+  the operator's mockup (`../FieldnotesAppSpecs/mockups/triage-ui/`), and the inbox sitting's chat
+  (`src/components/inbox/`, `src/hooks/use-inbox.ts`). Its specs (`tests/triage/`, `tests/inbox/`,
+  `tests/shell/`) lay out the worker backend's store and its fake KubeCoder controller, with
+  invented data, through `/api/testing/store` and `/api/testing/controller`
+  (`tests/support/triage-store.ts`, `controller.ts`).
 
 The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod (two
 while a rollout overlaps them), next to a `webhook-relay` container that is the only

@@ -118,9 +118,10 @@ rest.
 The delivery carries no signature, secret or token. The API acts on it only when `runId` is the run
 its hold names, and answers every other delivery 200 `{"action": "ignored"}`, so a delivery forged
 without the run's id changes nothing. The held run's delivery releases the hold and answers 200
-`{"action": "queued"}`; what it starts runs off the request, as
-[rest-api.md](rest-api.md#the-actioner-start) describes. A body without a `runId` is a 422
-`validation-error`, and until the API is ready a delivery is a 503 `not-ready`; the controller
-retries both, with backoff, for up to an hour. Either pod may receive it: the hold is on the volume
-both mount.
+`{"action": "queued"}`; a run that did not succeed is recorded in the same write as the actioner's
+last failure, which [`GET /api/triage/actioner`](rest-api.md#the-actioners-state) answers; what the
+delivery starts runs off the request, as [rest-api.md](rest-api.md#the-actioner-start) describes. A
+body without a `runId` is a 422 `validation-error`, and until the API is ready a delivery is a 503
+`not-ready`; the controller retries both, with backoff, for up to an hour. Either pod may receive
+it: the hold is on the volume both mount.
 

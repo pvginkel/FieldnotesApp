@@ -111,7 +111,9 @@ Drive it with `curl` at `localhost:3401/api`, `Authorization: Bearer live-mcp-to
    …/ruling?written=…`), rule it again, then `POST /triage/submit`: each write is one commit on the
    remote before its reply (`rule <id> <verb> (operator)`, `unrule <id> (operator)`,
    `submit 2 (operator)`), a second submit answers `[]` and commits nothing, and the log says the
-   actioner is not started, since this env sets no `FIELDNOTES_KUBECODER_*`. Last, the store's own
+   actioner is not started, since this env sets no `FIELDNOTES_KUBECODER_*`. For the same reason
+   `GET /inbox` answers `configured: false` and `POST /inbox/start` a `409 conflict`: the sitting's
+   behaviour is the suites', with the controller faked. Last, the store's own
    rules over what the API wrote:
    `python3 /work/Fieldnotes/skills/reconciler/reconcile.py --store .run/live/checkout check`
    finds every file valid.
@@ -322,15 +324,16 @@ step, the webhook's settle time ([webhooks.md](webhooks.md)):
 
 Every sync is a commit on the store and a line in the API's log, so both are read from there.
 
-**The triage endpoints**, when the slice changes them, the image or the chart. Reads only: a
-ruling on prd is the operator's real ruling, so the writes are proved in step 2 and never here, and
-no agent holds an `editor` session, so what the queue lists is the operator's to confirm.
-`GET https://fieldnotes-api.home/api/triage/queue` with no session, and with an agent's bearer,
-answers `401`. On `https://fieldnotes-api.home/metrics`, `fieldnotes_triage_queue` equals the
-store's open items (the `triage/*.json` on `pvginkel/Fieldnotes`'s `origin/main` whose ruling is
-absent or not submitted), and `fieldnotes_triage_rulings_total`,
-`fieldnotes_actioner_starts_total` and `fieldnotes_actioner_runs_total{outcome="success"}` carry
-every label from zero.
+**The triage and inbox endpoints**, when the slice changes them, the image or the chart. Reads only:
+a ruling on prd is the operator's real ruling and a sitting a real session in the store's
+environment, so the writes are proved in steps 1 and 2 and never here, and no agent holds an
+`editor` session, so what the queue lists and a first real sitting are the operator's to confirm.
+`GET https://fieldnotes-api.home/api/triage/queue`, `/api/triage/actioner` and `/api/inbox` with no
+session, and with an agent's bearer, answer `401`. On `https://fieldnotes-api.home/metrics`,
+`fieldnotes_triage_queue` equals the store's open items (the `triage/*.json` on
+`pvginkel/Fieldnotes`'s `origin/main` whose ruling is absent or not submitted), and
+`fieldnotes_triage_rulings_total`, `fieldnotes_actioner_starts_total` and
+`fieldnotes_actioner_runs_total{outcome="success"}` carry every label from zero.
 
 **The dashboard**, when the slice changes `grafana/dashboard.py` or the metrics its panels read.
 Upload it once the roll is confirmed:

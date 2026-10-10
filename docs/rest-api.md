@@ -10,20 +10,21 @@ The surface is the ModernAppTemplate backend's (`backend/`, Flask under waitress
 (`backend/app/api/fieldnotes.py`), and the domain behind them is `backend/app/fieldnotes/`. The
 UI's nginx in the same pod proxies `/api/` to it.
 
-Every endpoint except the health checks, `GET /metrics`, the three webhooks and the triage endpoints
-requires `Authorization: Bearer <token>` (NFR-4). These are `@public` to the template's OIDC hook,
-which gates only the UI's own endpoints on the operator's session: the agents' surface checks its
-client tokens itself. A token resolves to a named client configured as
-`FIELDNOTES_CLIENT_TOKEN_<NAME>`, the name being the suffix lowercased (`mcp`, `skills`).
-Resolution compares digests in constant time against every configured client. With no client
-configured, every bearer is refused. The resolved client's name goes into the commit message of any
-write, onto the reactions it writes (`client`), and into the log. The webhooks verify their own
-secrets, but for KubeCoder's, which carries none and is acted on only for the run the actioner
-holds; see [webhooks.md](webhooks.md).
+Every endpoint except the health checks, `GET /metrics`, the three webhooks and the triage and inbox
+endpoints requires `Authorization: Bearer <token>` (NFR-4). These are `@public` to the template's
+OIDC hook, which gates only the UI's own endpoints on the operator's session: the agents' surface
+checks its client tokens itself. A token resolves to a named client configured as
+`FIELDNOTES_CLIENT_TOKEN_<NAME>`, the name being the suffix lowercased (`mcp`, `skills`). Resolution
+compares digests in constant time against every configured client. With no client configured, every
+bearer is refused. The resolved client's name goes into the commit message of any write, onto the
+reactions it writes (`client`), and into the log. The webhooks verify their own secrets, but for
+KubeCoder's, which carries none and is acted on only for the run the actioner holds; see
+[webhooks.md](webhooks.md).
 
-The triage endpoints (`/api/triage/…`, `backend/app/api/triage.py`) are the triage UI's, and take
-the operator's OIDC session instead (NFR-4): the template's, gated on the `editor` client role for
-every method, a GET included. A request with no session, or with an agent's bearer token, is
+The triage endpoints (`/api/triage/…`, `backend/app/api/triage.py`) and the inbox endpoints
+(`/api/inbox…`, `backend/app/api/inbox.py`) are the operator's UI's, and take the operator's OIDC
+session instead (NFR-4): the template's, gated on the `editor` client role for every method, a GET
+included. A request with no session, or with an agent's bearer token, is
 refused with 401, and a signed-in user without the role with 403, both in the template's own
 `{error}` body rather than problem+json.
 
@@ -46,6 +47,11 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `PUT /api/triage/items/{id}/ruling` | `RulingRequest` | 200 the item as it now stands |
 | `DELETE /api/triage/items/{id}/ruling?written=…` | `written` | 200 the item as it now stands |
 | `POST /api/triage/submit` | | 200 the ids submitted, a list, empty when nothing was ruled |
+| `GET /api/triage/actioner` | | 200 `{state, run, since, failure}` |
+| `GET /api/inbox` | | 200 `{configured, tracker, sitting}`, the sitting null when none is held |
+| `POST /api/inbox/start` | `StartRequest` | 202 the inbox's state with the sitting begun; 200 with the live sitting, starting nothing |
+| `POST /api/inbox/turns` | `TurnRequest` | 202 the inbox's state, the turn in flight in it |
+| `POST /api/inbox/end` | | 204, also when no sitting is held |
 | `GET /health/healthz`, `GET /health/readyz` | | the template's health checks; readiness carries a `store` entry, `{ok, failed}` |
 | `GET /metrics` | | 200 the Prometheus text exposition |
 
@@ -63,6 +69,10 @@ unknown fields are refused.
 - `RulingRequest`: `verb` (`yes`, `no` or `later`), `note` (≤10,000; blank is allowed on a `yes`
   only), `written` (the item's `written` as the operator's page saw it, `YYYY-MM-DDTHH:MM:SSZ`). The
   take-back's `written` query parameter is the same.
+- `StartRequest`: `scope` (optional, ≤500, appended to the inbox prompt; empty for the whole
+  inbox), `sse_request_id` (optional, ≤64: the request id of the page's SSE connection, see
+  [The inbox sitting](#the-inbox-sitting)).
+- `TurnRequest`: `message` (1–20,000, the operator's words), `sse_request_id` (as above).
 
 ## What each endpoint does
 
@@ -123,6 +133,10 @@ unknown fields are refused.
   its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`. A submit
   that submitted something then starts the actioner, off the request: see
   [The actioner start](#the-actioner-start).
+- **Actioner state** (FR-33): the actioner as the app bar's Actioner pill shows it: a start
+  pending, the run held, and the last failure. See [The actioner's state](#the-actioners-state).
+- **Inbox** (FR-28 to FR-32): the operator's inbox sitting, a headless KubeCoder session the API
+  relays: its state, Start, a turn and End. See [The inbox sitting](#the-inbox-sitting).
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
   annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard
   reads them. See [Metrics](#metrics).
@@ -214,8 +228,9 @@ A live hold means a run is in flight, and the attempt is tried again 60 seconds 
 after that for as long as items wait. A hold 30 minutes old has expired, since its webhook will not
 come, and is logged at WARNING and passed over. The controller's `202` and its `runId` start the
 run, and the API takes the hold for it. Any other answer, a refused token included, or a
-controller that cannot be reached is logged at ERROR and not retried. Each call, and each attempt
-that found a live hold, is counted in `fieldnotes_actioner_starts_total`.
+controller that cannot be reached is logged at ERROR, recorded as the actioner's last failure, and
+not retried. Each call, and each attempt that found a live hold, is counted in
+`fieldnotes_actioner_starts_total`.
 
 The run's outcome comes back to `POST /api/hooks/kubecoder` (see
 [webhooks.md](webhooks.md#kubecoder-post-apihookskubecoder)), which releases the hold:
@@ -228,7 +243,8 @@ The run's outcome comes back to `POST /api/hooks/kubecoder` (see
   the tail of the session's answer, and not retried: the next submit, or a session in the store's
   environment asked to action the triage, is the retry.
 
-Each is counted in `fieldnotes_actioner_runs_total`.
+Each is counted in `fieldnotes_actioner_runs_total`, and a skip or a failure, a retried skip
+included, is recorded as the actioner's last failure.
 
 At most one start is pending in a pod, from the submit that asked for it until the run starts, a
 call fails or nothing waits; a submit through that pod meanwhile starts nothing, since the pending
@@ -236,6 +252,106 @@ start covers it. The pending start lives in the process alone: shutdown cancels 
 a retired pod's included, and a pod that starts resumes none, so the items wait for the next submit
 or the held run's webhook. The hold outlives the pod, and either pod may receive the webhook. Without
 the four settings a submit still writes, and the start is skipped with a warning in the log.
+
+### The actioner's state
+
+`GET /api/triage/actioner` answers what the app bar's Actioner pill shows (FR-33):
+
+- `state`: `running` while a live hold names a run, with `run` its id and `since` when the API
+  started it; `starting` while the answering pod has a start pending, a call under way or a retry
+  waiting, a retried skip's included; `idle` otherwise. A hold 30 minutes old counts as no run
+  held. A pending start is the answering pod's alone, so through a rollout's overlap the other pod
+  answers `idle` for it.
+- `failure`: the last failure, `{at, outcome, reason}`, or null. A run's comes from its webhook,
+  `outcome` `failed` or `skipped` with the controller's `reason` (null when it gave none) and `at`
+  the API's clock at the delivery. A start the controller refused or could not be reached is
+  `refused`, its `reason` the controller's problem title, else `/prompt-runs answered <status>`, or
+  the transport error. It is kept in the hold's file, `"failure"` beside `"runId"` and `"at"`, so
+  both pods answer it, until the next run started clears it in the same write that takes the hold.
+
+The times are in the store's spelling, `YYYY-MM-DDTHH:MM:SSZ`.
+
+## The inbox sitting
+
+The inbox sitting is the `dev` plugin's `/dev:inbox` skill in a KubeCoder headless session in an
+environment of the store's project, held by the operator from the app's inbox screen (FR-28 to
+FR-32). The API is its relay: it picks or starts the environment, creates the session, sends each
+turn, follows the session's response stream and ends the session, through the controller at
+`FIELDNOTES_KUBECODER_URL` with the actioner's token and project. The sitting needs those three
+settings and not the webhook's; without them `GET` answers `configured: false` and Start and a turn
+are refused (`conflict`).
+
+`GET /api/inbox` answers `configured`, `tracker` (the issue address a card id is appended to, for
+the screen's links) and `sitting`, the one sitting the API holds, or null:
+
+- `environment`: the environment the sitting runs in, null until Start has picked one;
+  `started_environment`: whether the API started it.
+- `began`, and `moved`: the last send or result.
+- `turn`: the turn in flight, a Start's included, or null: `task`, the id of the task-service task
+  the page follows for it; `began`; and `log`, the last condensed log line read.
+- `lost`: `{at, reason}` once the sitting is lost, else null.
+- `transcript`: every message, `{author, text, at}`, `author` being `operator` or `session`. The
+  first is the prompt the API sent.
+
+**Start** with a live sitting answers it, `200`, and starts nothing; a lost one it clears first, as
+End does. Otherwise it writes a new sitting whose first message is
+`FIELDNOTES_KUBECODER_INBOX_PROMPT` (`/dev:inbox`) with the operator's scope appended after a space,
+answers `202`, and runs a task that lists the project's environments in `normal` mode and takes a
+running one, else starts a stopped one, records that the API started it, and waits up to 15 minutes
+for it to settle. In it, the task creates a headless session in `FIELDNOTES_KUBECODER_INBOX_CWD`
+(`Fieldnotes/inbox`, under `/work`, the store's `inbox/`) with the configured model and reasoning
+effort, sends the first message, and follows the turn. The task's progress texts are its steps
+(`Picking an environment of <project>`, `Taking <env>, which is running` or `Starting <env>, which
+was stopped`, `Creating the session`), then the turn's log lines.
+
+**A turn** appends the operator's message and answers `202`, the turn in flight in the sitting; its
+task sends the message and follows it. While a turn is in flight, a Start's included, a turn is
+refused with `session-busy`, and without a live sitting, none or a lost one, with `conflict`.
+
+**Following** a turn reads the session's response stream from the log offset the sitting last
+read: each condensed log line becomes the task's progress text and the turn's `log`, and the
+turn's result is appended to the transcript as the session's message, which clears the turn. The
+task completes with `{message}`, null when the sitting was ended, lost or taken over under it.
+
+**The page's events.** A task's events carry the session's words, so they reach only the SSE
+connections bound to the editor whose request began the turn (with OIDC off, every connection).
+The gateway binds a connection at connect, from the access cookie; a page whose connect came before
+its token's refresh stays unbound, so Start and a turn name the page's connection in
+`sse_request_id` and the request binds it to the editor when it is bound to no one. A connection
+bound to someone stays theirs. A page that hears nothing still gets the result by fetching
+`GET /api/inbox` again.
+
+**Both pods.** The sitting is `inbox-sitting.json` in `FIELDNOTES_CACHE_DIR`, beside the actioner's
+hold, written whole through a rename. Its writers, on either pod, take turns on an exclusive
+`flock` of a lock file beside it, and each write a task makes is checked against the sitting it was
+made for, so a task never brings back a sitting End cleared or writes into a newer one. Beyond the
+wire, the file holds the session's name, the conversation id once known, the log offset, the
+number of the last turn whose result it holds, and the follow holding the turn in flight: its pod
+and a heartbeat it refreshes every 15 seconds. A turn whose heartbeat is a minute old, its pod
+retired or gone, is taken over by whichever pod notices first, on a `GET /api/inbox` or on the
+sweep each pod runs every 15 seconds, as a new task (`turn.task` changes) that goes on from the
+file: a message the session has not taken is sent, once, and the stream is read from the last
+offset. Only the follow the file names writes the result, so it lands once. Through a rollout's
+overlap a page on the pod not following the turn gets no progress, and its next read brings the
+result.
+
+**Failures.** A controller answer that it does not know the environment or the session (`404
+not-found`), or that the environment is not running (`409 conflict`), loses the sitting: `lost` is
+set, the turn cleared with no result, and the transcript kept. A Start also loses it when the
+project has no running or stopped environment, or the one it started did not settle. Any other
+failure, a `5xx`, an unreachable controller or a dropped stream, is tried again after 2 seconds,
+the wait doubling up to 60, for as long as the follow holds the turn.
+
+**End** clears the file first, then ends the session and stops the environment, but only one the
+API started and only while no other session is working in it. What the controller no longer knows,
+or no longer runs, counts as closed; any other failure there is logged and left, so End always
+answers `204`.
+
+**The idle expiry.** The same sweep ends, as End does, a sitting with no turn in flight whose
+`moved` is `FIELDNOTES_KUBECODER_INBOX_IDLE` minutes old (30), a lost one included. Both pods
+sweep; End being idempotent, either may.
+
+The log names each Start with its prompt and each turn by its length, not its text.
 
 ## Errors
 
@@ -247,7 +363,8 @@ Every non-2xx response is RFC 9457 `application/problem+json`: `type` (a slug fr
 | --- | --- | --- |
 | `unauthenticated` | 401 | no bearer, or one that resolves to no client; a webhook delivery whose signature or token does not verify |
 | `not-found` | 404 | no observation by that id; it may have been merged into another, so the detail suggests posting again; no triage item by that id in `triage/` |
-| `conflict` | 409 | the observation's file no longer parses (the detail names the fault); a board sync of an observation with no card; a card YouTrack does not have; a ruling or take-back on a triage item that is submitted, rewritten since the page loaded, or not valid |
+| `conflict` | 409 | the observation's file no longer parses (the detail names the fault); a board sync of an observation with no card; a card YouTrack does not have; a ruling or take-back on a triage item that is submitted, rewritten since the page loaded, or not valid; an inbox Start or turn with the inbox not configured; a turn without a live sitting |
+| `session-busy` | 409 | an inbox turn while a turn, a Start's included, is in flight: refused, never queued |
 | `validation-error` | 422 | a request that does not validate, a malformed id; a `no` or `later` ruling without a note |
 | `not-ready` | 503 | the store is still being cloned or the index built |
 | `models-unreachable` | 502 | the models pod did not answer the embedding a match needs: a post without `force`, match and neighbors |
@@ -268,12 +385,26 @@ answers 200. The GitHub webhook queues its pull even before startup is done.
 Outside production a backend without `FIELDNOTES_STORE_URL` runs without a store, so the dev stack
 boots: its Fieldnotes endpoints answer `not-ready`. The frontend's Playwright backend, in testing
 mode, always serves an empty store of its own, a bare repo in a temporary directory indexed with
-the fake models, so the triage queue it opens on answers empty; any `FIELDNOTES_*` in its
-environment, such as the dev instance's `.env`, is ignored. A Playwright test lays that store out
-for itself through `/api/testing/store`, which answers only in testing mode and is not in the
-OpenAPI document: `PUT {"files": {path: text}}` makes `observations/` and `triage/` those files, in
-one commit through the write queue, indexed before the `204`; `GET` answers them as the store holds
-them, for a test to read what the UI wrote.
+the fake models, so the triage queue it opens on answers empty, and serves its inbox configured and
+its actioner startable over a fake KubeCoder controller; any `FIELDNOTES_*` in its environment,
+such as the dev instance's `.env`, is ignored. A Playwright test lays out what it needs through two
+surfaces that answer only in testing mode, outside it `400`, and are listed in the OpenAPI document
+untyped, as the template's testing endpoints are:
+
+- `/api/testing/store`: `PUT {"files": {path: text}}` makes `observations/` and `triage/` those
+  files, in one commit through the write queue, indexed before the `204`; `GET` answers them as the
+  store holds them, for a test to read what the UI wrote.
+- `/api/testing/controller`: `PUT {inbox, environments, turns, runs}` replaces the fake controller
+  with one holding those environments of the store's project, the turns the session's next sends
+  play (their log lines, their result, a pace between them, or held until `finish`) and the answers
+  to the actioner's prompt runs, the inbox configured or not; the sitting the old one held is ended
+  as End ends it, and the actioner starts afresh, with no hold and no failure. The backend starts
+  with no environment, so a test that opens the inbox lays one out. `POST …/emit {line}` and
+  `POST …/finish {result, is_error}` play the log and the result of the sitting's turn in flight,
+  `POST …/lose {what: session|environment}` loses the sitting at the controller, and
+  `POST …/run-end {outcome, reason}` delivers the webhook of the last run the fake accepted; `GET`
+  answers the environments, their sessions and the messages sent to each, and the runs accepted. A
+  body that does not validate is `422 validation-error`, nothing to play `409 conflict`.
 
 ## The pinned surface
 
@@ -285,9 +416,11 @@ are in the template's OpenAPI document as well, since Spectree in its default mo
 no other Spectree instance decorated, but untyped: they are not decorated, so the document carries
 neither their bodies nor a role.
 
-The triage endpoints are not part of the pinned surface. They are the UI's, typed in the OpenAPI
-document with the app's own models (`backend/app/fieldnotes/triage.py`) and marked with their
-`editor` gate (`x-required-role`); the UI generates its client from that document.
+The triage and inbox endpoints are not part of the pinned surface. They are the UI's, typed in the
+OpenAPI document with the app's own models (`backend/app/fieldnotes/triage.py`, `actioner.py` and
+`inbox.py`) and marked with their `editor` gate (`x-required-role`); the UI generates its client
+from that document. Their problem slugs are the closed set's, `session-busy` among them, which only
+an inbox turn answers.
 
 ## Settings
 
@@ -301,7 +434,7 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_STORE_DIR` | `/data/store` | the checkout |
 | `FIELDNOTES_STORE_BRANCH` | `main` | |
 | `FIELDNOTES_GIT_AUTHOR_NAME`, `FIELDNOTES_GIT_AUTHOR_EMAIL` | `Fieldnotes API`, `fieldnotes-api@noreply.localhost` | the author of the API's commits |
-| `FIELDNOTES_CACHE_DIR` | `/data/cache` | the embedding cache |
+| `FIELDNOTES_CACHE_DIR` | `/data/cache` | the embedding cache, the actioner's hold and the inbox sitting |
 | `FIELDNOTES_MODELS_URL` | `http://models.models-prd.svc.cluster.local` | the models pod |
 | `FIELDNOTES_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | the embedding model's name, the cache's key |
 | `FIELDNOTES_MATCH_*` | | see [match-pipeline.md](match-pipeline.md) |
@@ -311,6 +444,12 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_YOUTRACK_RESOLUTION_FIELD`, `FIELDNOTES_YOUTRACK_OUTCOMES` | see webhooks.md | |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_TOKEN`, `FIELDNOTES_YOUTRACK_WEBHOOK_HEADER` | none, `X-YouTrack-Token` | see [webhooks.md](webhooks.md) |
 | `FIELDNOTES_YOUTRACK_WEBHOOK_SETTLE` | 5 | seconds between a YouTrack delivery and the read of its card; see [webhooks.md](webhooks.md) |
-| `FIELDNOTES_KUBECODER_URL`, `FIELDNOTES_KUBECODER_TOKEN`, `FIELDNOTES_KUBECODER_REPO`, `FIELDNOTES_KUBECODER_WEBHOOK_URL` | none | the KubeCoder controller, the API's client token there (secret), the store's KubeCoder project (`owner/Name`) and the address the controller reaches `/api/hooks/kubecoder` at; set together or not at all; see [The actioner start](#the-actioner-start) |
+| `FIELDNOTES_KUBECODER_URL`, `FIELDNOTES_KUBECODER_TOKEN`, `FIELDNOTES_KUBECODER_REPO` | none | the KubeCoder controller, the API's client token there (secret) and the store's KubeCoder project (`owner/Name`); set together or not at all; the actioner and the inbox sitting both need them |
+| `FIELDNOTES_KUBECODER_WEBHOOK_URL` | none | the address the controller reaches `/api/hooks/kubecoder` at; it needs the three above, and without it a submit starts no actioner; see [The actioner start](#the-actioner-start) |
 | `FIELDNOTES_KUBECODER_ACTIONER_PROMPT`, `FIELDNOTES_KUBECODER_ACTIONER_MODEL`, `FIELDNOTES_KUBECODER_ACTIONER_EFFORT` | the store's prompt, the engine's defaults | the actioner's prompt, model and reasoning effort |
+| `FIELDNOTES_KUBECODER_INBOX_PROMPT` | `/dev:inbox` | the inbox sitting's first message, the operator's scope appended; see [The inbox sitting](#the-inbox-sitting) |
+| `FIELDNOTES_KUBECODER_INBOX_CWD` | `Fieldnotes/inbox` | the sitting's session's working directory, `/work`-relative or absolute |
+| `FIELDNOTES_KUBECODER_INBOX_MODEL`, `FIELDNOTES_KUBECODER_INBOX_EFFORT` | the engine's defaults | the sitting's model and reasoning effort |
+| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved before the API ends it; a positive number |
+| `FIELDNOTES_KUBECODER_INBOX_TRACKER` | `https://issues.webathome.org/issue/` | the issue address the inbox screen appends a card id to |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |

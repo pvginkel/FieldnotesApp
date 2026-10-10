@@ -14,6 +14,11 @@ A scheduled reconciler session curates the store, researches selected observatio
 worth a ruling in a triage queue. A human rules on it in the app's triage UI; an actioner session,
 which Submit starts, turns the rulings into tracker issues and recorded decisions. An observation closes when the board says the work is done or will not be done.
 
+The app is also where the operator holds the issue tracker's inbox sitting: a chat with an agent
+session, run headless in the store's KubeCoder environment, that sorts the tracker's new cards with
+the operator in one exchange and records the rulings on them. The API relays it; nothing of it
+enters the store.
+
 **Status: a proof of concept, built and in use.** The design is
 [`docs/design.md`](docs/design.md); the first version is deployed, agents post to it, and a
 reconciler session curates the store every morning. What it has to show now is whether the idea
@@ -27,9 +32,9 @@ own (one markdown file per observation, every write a commit):
 
 | Part | What it is |
 | --- | --- |
-| `backend/` | The Flask backend and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, the GitHub and YouTrack webhooks, and the triage UI's queue and rulings, under `/api`. A uv workspace whose members are the MCP server, the wire models it shares with the API, and the eval harness. |
+| `backend/` | The Flask backend and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, the GitHub and YouTrack webhooks, the triage UI's queue and rulings, the actioner start, and the inbox sitting's relay to KubeCoder, under `/api`. A uv workspace whose members are the MCP server, the wire models it shares with the API, and the eval harness. |
 | `backend/mcp-server/` | `fieldnotes-mcp`, a thin MCP server with exactly three tools, `post`, `react` and `get`, mapped 1:1 onto the API; the backend image's second entry point. |
-| `frontend/` | The operator's UI, behind the Keycloak sign-in. |
+| `frontend/` | The operator's UI, behind the Keycloak sign-in: the triage stack and the inbox sitting's chat, with an app bar that shows a sitting or an actioner run in progress. |
 
 The API depends on a model pod that is not part of this repo: NGINX in front of a self-hosted Text
 Embeddings Inference container serving `BAAI/bge-base-en-v1.5`. A post comes back with candidates
@@ -37,8 +42,8 @@ only when a stored observation's similarity to it clears a threshold, so the usu
 observation is none.
 
 The reconciler and the actioner are not server features. They are skills that live with the store and
-run as scheduled or manual agent sessions, so all judgment stays in versioned prose and the server
-stays dumb.
+run as scheduled or manual agent sessions, as the inbox sitting runs a skill of the `dev` plugin, so
+all judgment stays in versioned prose and the server stays dumb.
 
 ## Development
 

@@ -38,7 +38,9 @@ export function InboxPage() {
   const inbox = useInbox();
   const { query, state, sitting } = inbox;
   const { prefs, setPref } = usePrefs();
-  const [ending, setEnding] = useState(false);
+  // A pending End names the sitting it was asked for (by its start), so it lapses with that sitting.
+  const [endingFor, setEndingFor] = useState<string | null>(null);
+  const ending = sitting !== null && endingFor === sitting.began;
   const mainRef = useRef<HTMLElement>(null);
 
   // A new message is scrolled to its top, so a long answer is read from its start; the working
@@ -97,7 +99,7 @@ export function InboxPage() {
 
   return (
     <>
-      <InboxHeader sitting={sitting} prefs={prefs} onEnd={() => setEnding(true)} onPref={setPref} />
+      <InboxHeader sitting={sitting} prefs={prefs} onEnd={() => setEndingFor(sitting?.began ?? null)} onPref={setPref} />
       <div className="stage inbox">
         <main className="main" ref={mainRef} data-testid="inbox.main">
           {content}
@@ -131,9 +133,9 @@ export function InboxPage() {
       {ending && sitting && (
         <EndDialog
           sitting={sitting}
-          onCancel={() => setEnding(false)}
+          onCancel={() => setEndingFor(null)}
           onEnd={() => {
-            setEnding(false);
+            setEndingFor(null);
             void inbox.end();
           }}
         />

@@ -33,6 +33,13 @@ The tool exists to take work off the operator that the operator does not want to
 observations with potential value are not lost when a project's close-out pile is cleared in one
 sweep.
 
+The app is also where the operator holds the tracker's inbox sitting (ruled 2026-10-10, FN-34): the
+`dev` plugin's `/dev:inbox` skill, which sorts every project's new cards, hand-backs and operator
+actions with the operator in one exchange, runs as a headless session in the store's environment,
+and the operator holds that exchange on a second screen of the app, a chat. The sitting is the
+tracker's, not Fieldnotes': the app lends it the screen and the session, and nothing of it enters
+the store.
+
 Working names: the store is Fieldnotes, an item is an observation.
 
 ## Decisions
@@ -51,7 +58,7 @@ Everything below follows from that.
 | Vetting | The reconciler writes only the triage items, and on each item it would bet on, a draft of the ruling, marked guessed and shown with a robot icon; the operator still reviews every item and submits it. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. Ruled 2026-10-10 (FN-33), from the ruling history: safe bets come drafted, the operator still sees and submits every one, and an untouched draft goes with Submit with no check that they looked, which is theirs to own. |
 | Output | Triage items in the store, one file per observation listed (ask, evidence, recommendation, impact, every report on it → ruling), plus a Telegram message with the size of the operator's queue and the triage UI's address. No cap, no threshold. An item stays in the queue until it is ruled; the reconciler lists an observation again only when it has something new to say. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. Ruled 2026-09-26 with the triage UI: records instead of documents, so that nothing is ruled in an old document or lost in one; the document's summary and its second half, every new report word for word, went with it, the operator having read the raw reports for the while they asked for. |
 | Rulings | A verb, `yes`, `no` or `later`, and a note written as the operator would say it: the reason for a `no`, the revisit trigger for a `later`, and whatever else the actioner should know, a merge included. The actioner reads a ruling; it does not parse one. When it cannot read one with confidence it asks back on the item, and the operator answers in the queue. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the ruling is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. The verb and one note field were ruled with the triage UI. |
-| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; the reconciler's draft, if the item carries one, preset with a small robot icon; previous, skip and progress; a finish card whose Submit starts the actioner as a KubeCoder prompt run. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. Triage only: no browsing observations, no dashboard, nothing about the actioner's runs. | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
+| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; the reconciler's draft, if the item carries one, preset with a small robot icon; previous, skip and progress; a finish card whose Submit starts the actioner as a KubeCoder prompt run. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. On this screen triage only: no browsing observations, no dashboard, nothing about the actioner's runs; the inbox sitting has a screen of its own (Inbox). | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
 | Retirement | An observation is deleted once what it says is better learned elsewhere: the friction was fixed, or the hint went into documentation agents read anyway. The reconciler decides that on its own, as a rule when the card closes as done; the actioner does it for a ruling that says the work is already delivered. What was ruled and never carded stays for good. | The store is for what an agent cannot learn any other way. A recurrence after a deletion arrives as a fresh post, which is the signal that the fix did not hold. Git history is the record. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
@@ -60,6 +67,7 @@ Everything below follows from that.
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
 | Actioner start | Submit has the API ask the KubeCoder controller for a prompt run of the actioner's prompt in the store's project, and the run's outcome comes back as the controller's webhook. The API holds one run at a time, in a file on the volume both pods mount; a hold whose webhook does not come expires after 30 minutes. A run skipped for want of a free environment is tried again five minutes later; a failure is logged and counted. | Ruled 2026-10-01 (FN-26): the actioner depends on no timer. The controller refuses no second prompt run, so the API keeps it to one; the file outlives a pod and is shared through a rollout's overlap. Runs take minutes (1.5 to 4.5 from submit to the last stamp, measured), and a lost webhook almost always means a lost run. A prompt run's failure sends no Telegram message and has no **Run now**: the log and the metrics are enough, and a session in the store's environment is the retry. |
+| Inbox | The tracker's inbox sitting, the `dev` plugin's `/dev:inbox`, runs as a KubeCoder headless session in the store's environment, and the operator holds it from a second screen of the app, a chat: Start sends the skill its first turn, the sorted inbox and its questions arrive as one message, the operator answers in their own words, and the session records the rulings on the tracker as it does today. The API is the relay: it picks or starts the environment, creates the session, sends each turn, follows the response stream and ends the session, one sitting at a time, held with its transcript in a file on the volume both pods mount. The skill, the tracker convention and the store do not change. | Ruled 2026-10-10 (FN-34). The sitting is a write-up with a few questions, answered in a message or two, and the shape to keep is that exchange. Two other shapes were set aside: inbox items run through the triage pipeline as a second kind of item, which turns one message into a stack of cards and multiplies the operator's work; and a live tracker view in the UI, with or without a clerk session's annotations, which puts the tracker's conventions and a write credential into the API. A headless session keeps the judgment in the plugin's versioned skill, and the API decides nothing about a card. The controller streams a turn's condensed log, not its text, so the answer arrives whole, with what the session is doing shown meanwhile. |
 | Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
@@ -269,14 +277,63 @@ scope here.
     webhook's address the API still starts and submit still writes; the start is skipped and
     logged.
 
+**Inbox**
+
+28. FR-28 The inbox screen is a second screen of the app, beside the triage stack and gated as its
+    endpoints are (NFR-4): Start, the transcript, a text field with Send, and End. It shows the one
+    sitting the API holds (FR-29), whichever pod or device began it: a page that opens while a
+    sitting is live shows its transcript and joins it, so a reload, a second browser or a rollout
+    loses nothing. The session's messages are shown in a monospace block that keeps the skill's
+    alignment, with every card id they name linked to its issue on the tracker, whose address the
+    API serves with the sitting; the operator's messages as they typed them. While a turn is in
+    flight Send is withheld and the last line of the session's condensed log is shown under the
+    transcript, as what the session is doing. The screen knows nothing of the triage queue and the
+    triage screen nothing of the sitting.
+29. FR-29 Start begins a sitting, off the request: the reply carries the sitting as it stands, and
+    the page follows the start as it follows a turn (FR-30). The API picks an environment of the
+    configured project, the store's: a running one, else a stopped one it starts and waits for, and
+    records as its own. In it the API creates a headless session with the configured model and
+    reasoning effort and sends the first turn: the configured inbox prompt, with the scope the
+    operator typed appended when they typed one. One sitting is held at a time, in a file on the
+    volume both pods mount, naming the environment, the session, the conversation id once the
+    controller reports it, whether the API started the environment, when the sitting began and
+    last moved, the turn in flight, and the transcript so far: every message sent and every answer
+    received, each with its time. A Start while a sitting is live starts nothing and answers the
+    live sitting. Without the controller's address, the token and the project the sitting is not
+    configured: the screen says so and Start is refused.
+30. FR-30 A turn: Send posts the operator's message to the session as its next turn, and the API
+    follows the session's response stream to the turn's result, which it appends to the transcript
+    as the session's message. The stream's condensed log lines reach the page as the turn's
+    progress and the result as its completion, over the template's task channel, and a page that
+    joins a sitting mid-turn subscribes to the turn in flight, which the sitting names. A send
+    while a turn is in flight is refused (`session-busy`), and so is one without a live sitting
+    (`conflict`); the page offers neither. The pod that took a send follows its stream and writes
+    the file, which carries the last offset the follower read, so when that pod is retired mid-turn
+    the pod that next serves the page re-opens the stream from there and finishes the turn. A
+    stream that drops is re-opened the same way; a session or an environment the controller no
+    longer knows is the sitting lost (FR-32).
+31. FR-31 End ends the session and, when the API started the environment, stops it; the file is
+    cleared and the transcript with it. The app keeps no history of sittings: the tracker holds the
+    rulings, as `Inbox <date>:` comments on the cards, and the skill's closing notification holds
+    the summary. The API ends a sitting itself once it has not moved for the configured idle time,
+    an hour by default: no turn in flight and no send since the last result. The skill's own close
+    is unchanged, its notification included; the session then waits idle for End or the expiry.
+32. FR-32 A sitting is lost when the controller no longer knows its session, because the worker
+    restarted or the environment stopped or is gone, or when a call for it fails for want of the
+    environment. The transcript is kept and shown with a line saying so, Send is withdrawn, and
+    Start begins a new sitting, clearing the lost one as End does. A turn in flight when the sitting
+    is lost gets no result; what the session had written on the tracker stands, and the next
+    sitting reads it there, as the skill always has. Resuming the conversation by its id is
+    deferred.
+
 **Non-functional**
 
-28. NFR-1 `post` p95 under 2 s.
-29. NFR-2 200 actions per week; 10,000 observations without redesign.
-30. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
-31. NFR-4 The agents' and the skills' REST endpoints and the MCP server authenticated the way the
-    KubeCoder MCP server is: a static bearer token on each boundary. The operator's triage
-    endpoints (FR-23 to FR-27) take the template's OIDC session with the `editor` client role
+33. NFR-1 `post` p95 under 2 s.
+34. NFR-2 200 actions per week; 10,000 observations without redesign.
+35. NFR-3 English only. No runtime dependency outside the cluster, GitHub and YouTrack excepted.
+36. NFR-4 The agents' and the skills' REST endpoints and the MCP server authenticated the way the
+    KubeCoder MCP server is: a static bearer token on each boundary. The operator's triage and
+    inbox endpoints (FR-23 to FR-32) take the template's OIDC session with the `editor` client role
     instead: a request without a session, or with an agent's bearer token, is refused as
     unauthenticated, and a signed-in user without the role as forbidden, reads and writes alike.
     Webhook secrets verified on every request.
@@ -284,7 +341,8 @@ scope here.
 ## Technical design
 
 One pod with logic (two while a rollout overlaps them), one model pod, one git repo on GitHub, three
-skills. The REST API is the only component that decides anything; everything else is off the shelf
+skills in the store and one of the `dev` plugin's, the inbox, which the API drives as a headless
+session. The REST API is the only component that decides anything; everything else is off the shelf
 or thin.
 
 ```mermaid
@@ -304,14 +362,21 @@ flowchart LR
   X[Actioner session] -->|MCP: create issues| Y
   X <-->|edit / push| G
   O[Operator] -->|triage UI, OIDC| R
+  O -->|inbox screen, OIDC| R
   R -->|actioner prompt run| K[KubeCoder controller]
+  R -->|headless session: create, turn, response stream, end| K
   K -->|starts| X
+  K -->|runs| I[Inbox session: /dev:inbox]
+  I -->|MCP: rulings on cards| Y
   K -->|run outcome webhook| R
 ```
 
 Agents talk only to the MCP server; the skills talk to the store, the API and the board. GitHub and
 the board talk back to the API alone. The operator rules in the UI, and a submit makes the API ask
-the KubeCoder controller for the actioner's prompt run, whose outcome the controller posts back.
+the KubeCoder controller for the actioner's prompt run, whose outcome the controller posts back. The
+inbox sitting runs the other way: the operator's words go through the API to a headless session the
+controller runs for it, the session's answers come back the same way, and the session writes to the
+tracker itself.
 
 ### This repo
 
@@ -321,14 +386,15 @@ workspace:
 
 | Path | Content |
 | --- | --- |
-| `backend/app/fieldnotes/` | The domain: the store (the pod's own checkout, its write queue on one worker thread, and the timed pull), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the metrics, and the `Runtime` that builds them from the settings. |
+| `backend/app/fieldnotes/` | The domain: the store (the pod's own checkout, its write queue on one worker thread, and the timed pull), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the inbox sitting (the controller's headless session, the sitting's file and the turn relay), the metrics, and the `Runtime` that builds them from the settings. |
 | `backend/app/api/fieldnotes.py` | The agents' REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
 | `backend/app/api/triage.py` | The triage UI's REST surface, a blueprint at `/api/triage`. Its endpoints are gated on the operator's OIDC session with the `editor` client role and typed in the template's OpenAPI document. |
+| `backend/app/api/inbox.py` | The inbox screen's REST surface, a blueprint at `/api/inbox`, gated and typed as the triage surface is (FR-28 to FR-32). |
 | `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
 | `backend/packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; the API validates with them directly. |
 | `backend/mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
 | `backend/eval/` | The replay and eval harness. Code and invented fixtures only: the mined dataset is private and is passed in by path. |
-| `frontend/` | The operator's UI: React, TanStack Router and Query, a client generated from the backend's OpenAPI document, OIDC sign-in through the backend. The one screen is the triage stack, `src/components/triage/`, with its logic in `src/hooks/use-triage.ts`: a port of the operator's mockup (`FieldnotesAppSpecs/mockups/triage-ui/`), its styles in `src/components/triage/triage.css` and its colours in `src/styles/app-theme.css`. |
+| `frontend/` | The operator's UI: React, TanStack Router and Query, a client generated from the backend's OpenAPI document, OIDC sign-in through the backend. Two screens: the triage stack, `src/components/triage/`, with its logic in `src/hooks/use-triage.ts`, a port of the operator's mockup (`FieldnotesAppSpecs/mockups/triage-ui/`), its styles in `src/components/triage/triage.css` and its colours in `src/styles/app-theme.css`; and the inbox, `src/components/inbox/`, a chat over the sitting, with its logic in `src/hooks/use-inbox.ts`. |
 | `backend/Dockerfile`, `frontend/Dockerfile`, `Jenkinsfile` | Two images: the backend carries both entry points, the frontend serves the SPA. Built by kaniko on push. |
 
 Conventions: settings read once at startup from `FIELDNOTES_*` environment variables into a frozen
@@ -350,13 +416,15 @@ API endpoints, under `/api`: `POST /observations`, `POST /observations/{id}/reac
 `GET /observations/{id}`, `POST /observations/{id}/board-sync`, `POST /match`,
 `GET /observations/{id}/neighbors`, `POST /hooks/github`, `POST /hooks/youtrack`, and the operator's
 triage endpoints, `GET /triage/queue`, `PUT` and `DELETE /triage/items/{id}/ruling` and
-`POST /triage/submit` (FR-23 to FR-27), typed in the template's OpenAPI document, from which the UI
-generates its client. Beside them the template's `GET /health/healthz`, `GET /health/readyz` and
-`GET /metrics`.
+`POST /triage/submit` (FR-23 to FR-27), and the inbox screen's, `GET /inbox`, `POST /inbox/start`,
+`POST /inbox/turns` and `POST /inbox/end` (FR-28 to FR-32), typed in the template's OpenAPI
+document, from which the UI generates its client. Beside them the template's `GET /health/healthz`,
+`GET /health/readyz` and `GET /metrics`.
 
 The agents' and the skills' callers authenticate with a bearer token that resolves to a named client
-(`mcp`, `skills`); the name is logged with each write. The triage endpoints take the operator's OIDC
-session instead (NFR-4), and their writes are logged and committed as the operator's. The MCP server
+(`mcp`, `skills`); the name is logged with each write. The triage and inbox endpoints take the
+operator's OIDC session instead (NFR-4); the triage writes are logged and committed as the
+operator's, and the inbox's turns are logged. The MCP server
 takes its own inbound bearer token from agents and holds the `mcp` client token outbound.
 
 ### The store repo
@@ -369,7 +437,7 @@ takes its own inbound bearer token from agents and holds the `mcp` client token 
 | `skills/install/` | `SKILL.md`: pull `main` into the session's checkout, then load the skill named in the prompt |
 | `skills/reconciler/` | `SKILL.md` plus Python helpers |
 | `skills/actioner/` | `SKILL.md` plus Python helpers |
-| `.kubecoder/` | Makes the store a KubeCoder project, so its timer can run the reconciler, and the API's prompt runs the actioner, in an environment of it |
+| `.kubecoder/` | Makes the store a KubeCoder project, so its timer can run the reconciler, the API's prompt runs the actioner, and the API's headless session holds the inbox sitting (FR-29), in an environment of it |
 
 Embedded text is `area + ": " + canonical`. Comments and reactions never change it, so they never
 trigger a re-embed; a reconciler rewrite of `canonical` does.
@@ -523,15 +591,64 @@ writes the `reason` of a `no` for the agent who will be shown it, not as a copy 
 wrote to the actioner. Each item is stamped and moved to `triage/done/` as it is finished, or handed
 back with a question, and the run commits and pushes as it goes. A stamped item is skipped.
 
+**Inbox.** Not a store skill: the `dev` plugin's `/dev:inbox`, installed in every environment through
+the shared home, run as a headless session in the store's environment (FR-29). Nothing in it
+changes: it reads the tracker, puts the sorted inbox to the operator in one message, takes their
+answers in their words, records the rulings and notifies. What changes is where the operator types:
+the app's inbox screen, instead of a session they attend.
+
+### The inbox sitting
+
+The sitting is the `dev` plugin's `/dev:inbox` skill, unchanged, in a KubeCoder headless session; the
+API is its relay and the inbox screen its chat (FR-28 to FR-32). The controller's headless routes
+carry all of it: a session is created on one environment and answers its status; a turn is sent and
+answers `202`, or `409 session-busy` while one is in flight; the response stream carries `log`
+events, each a condensed log line with the byte offset after it, and one `result` event with the
+turn's whole text; a session is ended by name. A headless session is per environment where a prompt
+run is per project, so the API does the picking the controller does for a prompt run: list the
+project's environments, take a running one, else start a stopped one with the controller's wait and
+record that it did, so that End stops it again. The client credential the API holds for the
+actioner's runs covers every route; no fleet capability is involved.
+
+The sitting's file lies beside the actioner's hold on the shared volume and is written whole through
+a rename, as the hold is: the environment, the session's name, the conversation id, whether the API
+started the environment, when the sitting began and last moved, its status (`starting`, `busy`,
+`idle`, `lost`), the turn in flight (its task id, the last log offset and the last log line) and the
+transcript, a list of `{at, from, text}` with `from` the operator or the session. Both pods read it;
+the pod following a turn writes it.
+
+The surface, `/api/inbox`, gated and typed as the triage surface is:
+
+- `GET /inbox`: the sitting as the file holds it, with the tracker's issue address, or no sitting.
+  The page's one read, fetched again on focus and after each task event.
+- `POST /inbox/start {scope?}`: `202` with the sitting; the start runs as a task that picks or starts
+  the environment, creates the session, sends the first turn and follows it. A live sitting is
+  answered as it is, `200`.
+- `POST /inbox/turns {message}`: `202` with the sitting, the turn's task id in it; `409 session-busy`
+  with a turn in flight, `409 conflict` with no live sitting.
+- `POST /inbox/end`: `204`, idempotent.
+
+A turn is a task of the template's task service, so the page takes its progress, the log lines, and
+its completion, the result, over the SSE gateway it already uses, by task id; a page that joins
+mid-turn takes the id from `GET /inbox`. The prompt, model and reasoning effort are
+`FIELDNOTES_KUBECODER_INBOX_PROMPT`, `_INBOX_MODEL` and `_INBOX_EFFORT`, the idle time
+`_INBOX_IDLE`; the controller's address, token and project are the actioner's. Each pod runs the
+expiry on a timer over the file; End being idempotent, both may. The screen is the route `/inbox`,
+reached from the triage screen's header and back: Start, the transcript, a text field with Send,
+End, and the status line. It is built first, interactively with the operator against a fake of these
+four endpoints, and the API follows; the Playwright suite drives it against the backend with the
+controller faked, as the backend's own tests fake it.
+
 ### Security and config
 
 Bearer tokens on the agents' API and the MCP server, and the template's OIDC session with the
 `editor` client role on the operator's triage endpoints (NFR-4); the GitHub webhook secret and the
 YouTrack webhook token verified before any processing. The API holds a GitHub credential scoped to
 the store repo, a read-only YouTrack token and the token of its own KubeCoder client, which starts
-the actioner's prompt runs (FR-27); skills use the session's own credentials, provided by KubeCoder.
-Thresholds, model names, the resolution field and value map, the actioner's prompt and project, and
-endpoints are configuration, not code. Every secret is an OpenBao leaf materialised by External
+the actioner's prompt runs (FR-27) and drives the inbox sitting's headless session (FR-29 to
+FR-31); skills use the session's own credentials, provided by KubeCoder. Thresholds, model names,
+the resolution field and value map, the actioner's and the inbox's prompts, models and project, the
+inbox's idle time, and endpoints are configuration, not code. Every secret is an OpenBao leaf materialised by External
 Secrets and referenced by `secretKeyRef`; none is ever in a config file, an image or this repo.
 
 ## Validation
@@ -553,6 +670,8 @@ are issues, they'll surface soon enough").
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | Triage items the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
 | Actioner start | Rule an item in the triage UI on prd and submit | One prompt run starts; its webhook clears the hold; `fieldnotes_actioner_runs_total{outcome="success"}` counts it; the item is stamped |
 | Actioner idempotency | Submit rulings on items, run the actioner twice | Second run creates nothing and reports zero actions |
+| Inbox sitting | Start a sitting on prd, answer the write-up, End | One headless session in the store's environment; the write-up arrives as one message, the status line moving under it meanwhile; the rulings land on the cards as `Inbox <date>:` comments; End ends the session, and an environment the API started is stopped |
+| Inbox rejoin | Reload the page mid-turn, then open it in a second browser | Both show the transcript and the turn in flight, and the result when it lands |
 
 The suites behind `kc project test` are hermetic and cover none of the rows that need real models, a
 real board or a cluster; those are scripts in `eval/` or documented manual steps.
@@ -580,3 +699,8 @@ Each has a trigger that would justify it.
   knowledge base agents read.
 - Multilingual models — trigger: Dutch observations appear.
 - A vector database — trigger: none foreseeable at this scale.
+- Resuming a lost inbox sitting by its conversation id — trigger: a worker restart mid-sitting costs
+  more than Start again.
+- Interrupting an inbox turn — trigger: a turn that runs away; until then End covers it.
+- The inbox screen for a second skill, the close-out or the actioner by hand — trigger: the operator
+  asks for one; the code behind the screen is written so a second is configuration.

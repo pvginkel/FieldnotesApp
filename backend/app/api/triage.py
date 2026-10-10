@@ -1,4 +1,4 @@
-"""The triage UI's surface (design, "Services"; FR-23 to FR-27; docs/rest-api.md), under
+"""The triage UI's surface (design, "Services"; FR-23 to FR-27, FR-33; docs/rest-api.md), under
 /api/triage.
 
 The operator's, through the UI: the template's OIDC session with the `editor` client role (NFR-4).
@@ -19,6 +19,7 @@ from flask import Blueprint, Response
 from pydantic import Field, TypeAdapter, ValidationError
 from spectree import Response as SpectreeResponse
 
+from app.fieldnotes.actioner import ActionerState
 from app.fieldnotes.errors import (
     ProblemException,
     internal,
@@ -158,3 +159,15 @@ def submit(
     if ids:
         runtime.actioner.start(tasks)
     return SubmitReply(ids)
+
+
+@triage_bp.route("/actioner", methods=["GET"])
+@allow_roles(EDITOR)
+@api.validate(resp=SpectreeResponse(HTTP_200=ActionerState))
+@inject
+def actioner(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> ActionerState:
+    """FR-33: the actioner's state, for the app bar: a start pending, the run held, and the last
+    failure."""
+    return _runtime(service).actioner.state()

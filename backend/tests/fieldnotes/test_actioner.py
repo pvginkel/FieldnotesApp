@@ -1,8 +1,9 @@
 """The actioner start (FR-27): a submit that submitted something asks the KubeCoder controller for a
 prompt run of the actioner, off the request, and holds the run until its webhook comes. A live hold
 is tried again while submitted items wait, at most one start is pending, a run skipped for want of
-an environment is tried again, and any other failure is logged and counted. Against the fake
-controller; every item is invented."""
+an environment is tried again, and any other failure is logged and counted. The app bar's state
+(FR-33): a start pending, the run held, and the last failure, kept beside the hold until the next
+run starts. Against the fake controller; every item is invented."""
 
 import logging
 import threading
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app.fieldnotes.actioner import Hold
+from app.fieldnotes.actioner import ActionerFailure, Hold
 from app.fieldnotes.runtime import ACTIONER_HOLD
 from app.fieldnotes.triage import item_path
 from tests.fieldnotes.test_triage import (
@@ -34,6 +35,7 @@ UNSET = {
     "FIELDNOTES_KUBECODER_WEBHOOK_URL": "",
 }
 HOOK = "/api/hooks/kubecoder"
+IDLE = {"state": "idle", "run": None, "since": None, "failure": None}
 
 
 def starts(api, scrape) -> dict[str, float]:
@@ -52,6 +54,16 @@ def held(api) -> str | None:
 
 def ended(api, kubecoder, run_id, outcome=None, reason=None):
     return api.post(HOOK, json=kubecoder.report(run_id, outcome, reason))
+
+
+def state(api, **kwargs):
+    response = api.get("/api/triage/actioner", **kwargs)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def failure(at, outcome, reason) -> dict[str, str]:
+    return {"at": at, "outcome": outcome, "reason": reason}
 
 
 def test_a_submit_starts_the_actioner_off_the_request_and_holds_its_run(
@@ -130,6 +142,12 @@ def test_a_held_run_is_tried_again_a_minute_later_until_its_webhook_releases_it(
         submit(api)
         eventually(lambda: starts(api, scrape)["in_flight"] >= 2, "two retries")
         assert kubecoder.runs == []
+        # A start waits on the held run, which is what the app bar shows.
+        assert state(api) == IDLE | {
+            "state": "running",
+            "run": "run-0",
+            "since": "2026-09-19T10:00:00Z",
+        }
         # The held run ends; the retry that waits starts the next.
         reply = ended(api, kubecoder, "run-0")
         eventually(lambda: held(api) == "run-1", "the next run")
@@ -376,9 +394,13 @@ def test_a_token_the_controller_refuses_is_a_failure(
         submit(api)
         eventually(lambda: not api.runtime.actioner.pending, "the failure")
         after = starts(api, scrape)
+        refused = state(api)
 
     assert kubecoder.runs == []
     assert after == counted(failed=1)
+    assert refused == IDLE | {
+        "failure": failure("2026-09-19T10:00:00Z", "refused", "no valid bearer token")
+    }
 
 
 def test_without_its_settings_submit_writes_and_the_start_is_skipped_and_logged(
@@ -418,3 +440,167 @@ def test_a_pod_that_starts_resumes_no_start_but_honours_the_hold_on_the_volume(
     assert run == "run-0"
     assert reply.json() == {"action": "queued"}
     assert len(kubecoder.runs) == 1
+
+
+# -- the actioner's state, for the app bar (FR-33) -----------------------------------------------
+
+
+def test_the_state_is_idle_then_starting_then_running_until_the_webhook(
+    start, remote, kubecoder, eventually, pull
+):
+    seed(remote, item(IDS[0], ruling=ruling()))
+    answered = threading.Event()
+    kubecoder.on_run = lambda: answered.wait(20)
+    with start() as api:
+        before = state(api)
+        submit(api)
+        # The controller has not answered the run.
+        asked = state(api)
+        answered.set()
+        eventually(lambda: not api.runtime.actioner.pending, "the start")
+        running = state(api)
+        _stamped(remote)
+        pull(api)
+        ended(api, kubecoder, "run-1")
+        eventually(lambda: not api.runtime.actioner.pending, "the check")
+        after = state(api)
+
+    assert before == IDLE
+    assert asked == IDLE | {"state": "starting"}
+    assert running == IDLE | {
+        "state": "running",
+        "run": "run-1",
+        "since": "2026-09-19T10:00:00Z",
+    }
+    assert after == IDLE
+
+
+def test_a_hold_past_its_expiry_is_no_run_held(start, clock):
+    with start() as api:
+        api.runtime.actioner.hold.take("run-0", clock() - timedelta(minutes=30))
+        expired = state(api)
+        api.runtime.actioner.hold.take("run-0", clock() - timedelta(minutes=29))
+        live = state(api)
+
+    assert expired == IDLE
+    assert live["state"] == "running"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "reason"),
+    [("failed", "turn-error"), ("skipped", "no-environment"), ("failed", None)],
+)
+def test_a_run_that_did_not_succeed_is_the_last_failure_until_the_next_run_starts(
+    start, remote, kubecoder, eventually, clock, environ, outcome, reason
+):
+    seed(remote, item(IDS[0], ruling=ruling()), item(IDS[1]))
+    with start() as api:
+        submit(api)
+        eventually(lambda: held(api) == "run-1", "the run")
+        clock.tick(180)
+        ended(api, kubecoder, "run-1", outcome, reason)
+        failed = state(api)
+        # The other pod reads it on the volume both mount.
+        other = Hold(Path(environ["FIELDNOTES_CACHE_DIR"]) / ACTIONER_HOLD).load()
+        clock.tick()
+        assert rule(api, IDS[1]).status_code == 200
+        submit(api)
+        eventually(lambda: held(api) == "run-2", "the next run")
+        cleared = state(api)
+
+    recorded = failure("2026-09-19T10:03:00Z", outcome, reason)
+    assert failed == IDLE | {"failure": recorded}
+    assert other == (None, ActionerFailure.model_validate(recorded))
+    assert cleared == IDLE | {
+        "state": "running",
+        "run": "run-2",
+        "since": "2026-09-19T10:04:00Z",
+    }
+
+
+def test_a_skip_tried_again_is_starting_with_the_skip_until_the_next_run_starts(
+    start, remote, kubecoder, eventually, clock
+):
+    seed(remote, item(IDS[0], ruling=ruling()))
+    with start() as api:
+        submit(api)
+        eventually(lambda: held(api) == "run-1", "the run")
+        clock.tick(180)
+        ended(api, kubecoder, "run-1", "skipped", "in-use")
+        waiting = state(api)
+        # The retry, five minutes later.
+        clock.tick(300)
+        api.runtime.actioner.attempt()
+        tried = state(api)
+
+    assert waiting == IDLE | {
+        "state": "starting",
+        "failure": failure("2026-09-19T10:03:00Z", "skipped", "in-use"),
+    }
+    assert tried == IDLE | {
+        "state": "running",
+        "run": "run-2",
+        "since": "2026-09-19T10:08:00Z",
+    }
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [(500, "the controller failed"), (None, "ConnectError('connection refused')")],
+    ids=["error", "unreachable"],
+)
+def test_a_refused_start_is_the_last_failure_until_the_next_run_starts(
+    start, remote, kubecoder, eventually, clock, answer, reason
+):
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.answers = [answer, 202]
+    with start() as api:
+        api.runtime.actioner.hold.take("run-0", clock() - timedelta(minutes=30))
+        submit(api)
+        eventually(lambda: not api.runtime.actioner.pending, "the refusal")
+        refused = state(api)
+        expired = held(api)
+        # The expired run's late webhook still releases its hold, and starts the waiting item's.
+        clock.tick()
+        reply = ended(api, kubecoder, "run-0")
+        eventually(lambda: held(api) == "run-1", "the next run")
+        cleared = state(api)
+
+    assert refused == IDLE | {
+        "failure": failure("2026-09-19T10:00:00Z", "refused", reason)
+    }
+    assert expired == "run-0"
+    assert reply.json() == {"action": "queued"}
+    assert cleared == IDLE | {
+        "state": "running",
+        "run": "run-1",
+        "since": "2026-09-19T10:01:00Z",
+    }
+
+
+def test_the_state_admits_the_editor_session(start, oidc_app, generate_test_jwt):
+    with start(app=oidc_app) as api:
+        api.sign_in(generate_test_jwt(roles=["editor"]))
+        reply = state(api)
+
+    assert reply == IDLE
+
+
+@pytest.mark.parametrize(
+    ("roles", "headers", "status"),
+    [
+        (["viewer"], {}, 403),
+        (None, {}, 401),
+        (None, {"Authorization": "Bearer mcp-token"}, 401),
+    ],
+    ids=["no role", "no session", "an agent's bearer"],
+)
+def test_the_state_refuses_all_but_the_editor(
+    start, oidc_app, generate_test_jwt, roles, headers, status
+):
+    with start(app=oidc_app) as api:
+        if roles is not None:
+            api.sign_in(generate_test_jwt(roles=roles))
+        response = api.get("/api/triage/actioner", headers=headers)
+
+    assert response.status_code == status

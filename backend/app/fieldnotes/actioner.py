@@ -17,6 +17,11 @@ environment is tried again `RETRY_SKIPPED` seconds later; any other ending is lo
 not retried: the next submit, or a session in the store's environment, is its retry. A delivery for
 any other run is ignored.
 
+A run that ended without succeeding, failed or skipped, a retried skip included, and a start the
+controller refused are recorded as the last failure in the hold's file, so both pods answer it,
+until the next run started clears it. The app bar reads the actioner's state from the pending
+start, the hold and that failure (FR-33).
+
 At most one start is pending in a pod, from the submit that asks for it until the controller accepts
 the run, refuses it, or nothing waits: a submit meanwhile is covered by it. The pending start lives
 in this process alone, so a restarted API resumes none; the hold outlives it.
@@ -38,7 +43,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.fieldnotes.metrics import Metrics
-from app.fieldnotes.triage import TriageIndex
+from app.fieldnotes.triage import TriageIndex, stamp
 from app.services.base_task import BaseTask, ProgressHandle
 
 if TYPE_CHECKING:
@@ -65,7 +70,12 @@ Outcome = Literal["started", "in_flight", "failed", "nothing_waiting"]
 
 
 class ControllerError(RuntimeError):
-    """The controller could not be reached or refused the run."""
+    """The controller could not be reached or refused the run; `reason` says why, as the
+    controller's problem titles it or as the transport failed."""
+
+    def __init__(self, message: str, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -119,13 +129,18 @@ class HttpController:
             )
         except httpx.HTTPError as exc:
             raise ControllerError(
-                f"the controller could not be reached: {exc!r}"
+                f"the controller could not be reached: {exc!r}", repr(exc)
             ) from exc
-        run_id = _problem(response).get("runId")
+        body = _problem(response)
+        run_id = body.get("runId")
         if response.status_code == 202 and isinstance(run_id, str) and run_id:
             return run_id
+        title = body.get("title")
         raise ControllerError(
-            f"/prompt-runs answered {response.status_code}: {response.text[:200]}"
+            f"/prompt-runs answered {response.status_code}: {response.text[:200]}",
+            title
+            if isinstance(title, str) and title
+            else f"/prompt-runs answered {response.status_code}",
         )
 
 
@@ -135,39 +150,94 @@ class Held:
     at: datetime
 
 
+class ActionerFailure(BaseModel):
+    """How the last run ended when it did not succeed, or the start the controller refused."""
+
+    model_config = ConfigDict(frozen=True)
+
+    at: str
+    outcome: str  # failed or skipped, the run's ending; refused, the start's
+    reason: str | None
+
+
+class ActionerState(BaseModel):
+    """The actioner as the app bar shows it (FR-33): `running` while a run is held, `run` and
+    `since` naming it; `starting` while a start is pending, asked of the controller or waiting to
+    be tried again; `idle` otherwise. `failure` is the last failure, kept until the next run
+    starts."""
+
+    model_config = ConfigDict(frozen=True)
+
+    state: Literal["idle", "starting", "running"]
+    run: str | None
+    since: str | None
+    failure: ActionerFailure | None
+
+
 class Hold:
-    """The run held, `{"runId": …, "at": …}` in a file on the volume both pods mount, so it
-    outlives a pod and both see it through a rollout's overlap. A file that cannot be read holds
-    nothing."""
+    """The run held, `"runId"` and `"at"`, and the last failure, `"failure"`, in one file on the
+    volume both pods mount, written whole through a rename, so it outlives a pod and both see it
+    through a rollout's overlap. A file that cannot be read holds nothing."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def read(self) -> Held | None:
+    def load(self) -> tuple[Held | None, ActionerFailure | None]:
+        """The run held and the last failure."""
         try:
             body = json.loads(self.path.read_text(encoding="utf-8"))
-            return Held(str(body["runId"]), datetime.fromisoformat(body["at"]))
+            held = (
+                Held(str(body["runId"]), datetime.fromisoformat(body["at"]))
+                if "runId" in body
+                else None
+            )
+            failure = (
+                ActionerFailure.model_validate(body["failure"])
+                if "failure" in body
+                else None
+            )
         except FileNotFoundError:
-            return None
+            return None, None
         except (OSError, ValueError, KeyError, TypeError) as exc:
             logger.warning("the actioner's hold %s holds nothing: %r", self.path, exc)
-            return None
+            return None, None
+        return held, failure
+
+    def read(self) -> Held | None:
+        return self.load()[0]
 
     def take(self, run_id: str, at: datetime) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        written = self.path.with_name(f".{self.path.name}.{os.getpid()}")
-        written.write_text(
-            json.dumps({"runId": run_id, "at": at.isoformat()}), encoding="utf-8"
-        )
-        os.replace(written, self.path)
+        """Hold the run started, which clears the last failure."""
+        self._write(Held(run_id, at), None)
 
-    def release(self, run_id: str) -> bool:
-        """Release the hold if it names `run_id`; whether it did."""
-        held = self.read()
+    def release(self, run_id: str, failure: ActionerFailure | None = None) -> bool:
+        """Release the hold if it names `run_id`, recording `failure` when the run did not
+        succeed; whether it did."""
+        held, kept = self.load()
         if held is None or held.run_id != run_id:
             return False
-        self.path.unlink(missing_ok=True)
+        self._write(None, failure if failure is not None else kept)
         return True
+
+    def fail(self, failure: ActionerFailure) -> None:
+        """Record a start the controller refused, the hold as it is."""
+        self._write(self.read(), failure)
+
+    def _write(self, held: Held | None, failure: ActionerFailure | None) -> None:
+        body: dict[str, Any] = {}
+        if held is not None:
+            body |= {"runId": held.run_id, "at": held.at.isoformat()}
+        if failure is not None:
+            body["failure"] = failure.model_dump()
+        if not body:
+            self.path.unlink(missing_ok=True)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        written = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{threading.get_ident()}"
+        )
+        written.write_text(json.dumps(body), encoding="utf-8")
+        os.replace(written, self.path)
 
 
 class RunRecord(BaseModel):
@@ -233,6 +303,20 @@ class Actioner:
         with self._lock:
             return self._pending
 
+    def state(self) -> ActionerState:
+        """The actioner as the app bar shows it (FR-33). A pending start is this pod's alone."""
+        held, failure = self.hold.load()
+        if held is not None and self.clock() - held.at < self.expiry:
+            return ActionerState(
+                state="running", run=held.run_id, since=stamp(held.at), failure=failure
+            )
+        return ActionerState(
+            state="starting" if self.pending else "idle",
+            run=None,
+            since=None,
+            failure=failure,
+        )
+
     def start(self, tasks: TaskService) -> None:
         """Start the actioner on the task service and return at once, unless a start is pending
         already: that one covers the caller's submit."""
@@ -286,6 +370,11 @@ class Actioner:
         except ControllerError as exc:
             self.metrics.actioner_starts.labels("failed").inc()
             logger.error("actioner start failed: %s; the next submit is the retry", exc)
+            self.hold.fail(
+                ActionerFailure(
+                    at=stamp(self.clock()), outcome="refused", reason=exc.reason
+                )
+            )
             self._settle()
             return "failed"
         self.hold.take(run_id, self.clock())
@@ -301,8 +390,18 @@ class Actioner:
 
     def ended(self, report: RunReport, tasks: TaskService) -> bool:
         """The controller's webhook: release the hold if it names the run, and start again as the
-        run's ending asks. Whether the delivery was the held run's."""
-        if self.controller is None or not self.hold.release(report.run_id):
+        run's ending asks, recording it when it did not succeed. Whether the delivery was the held
+        run's."""
+        record = report.failure if report.failure is not None else RunRecord()
+        outcome = record.outcome or "failed"
+        failure = (
+            None
+            if report.success is not None
+            else ActionerFailure(
+                at=stamp(self.clock()), outcome=outcome, reason=record.reason
+            )
+        )
+        if self.controller is None or not self.hold.release(report.run_id, failure):
             logger.info(
                 "a prompt run's outcome for run %s, which is not held; ignored",
                 report.run_id,
@@ -313,9 +412,7 @@ class Actioner:
             logger.info("actioner run %s ended", report.run_id)
             self.start(tasks)
             return True
-        failure = report.failure if report.failure is not None else RunRecord()
-        outcome = failure.outcome or "failed"
-        reason = failure.reason or "unknown"
+        reason = record.reason or "unknown"
         self.metrics.actioner_runs.labels(outcome, reason).inc()
         if outcome == "skipped" and reason in RETRIED_SKIPS:
             logger.warning(
@@ -332,7 +429,7 @@ class Actioner:
             report.run_id,
             outcome,
             reason,
-            (failure.result or "")[-500:],
+            (record.result or "")[-500:],
         )
         return True
 

@@ -9,7 +9,8 @@ the store's write queue, so they never land between a write's fetch and its push
 the test's own and are not checked: an item the triage index refuses is logged and left out of the
 queue, as it is in production.
 
-Not in the OpenAPI document: it is no part of the app's surface.
+Listed in the OpenAPI document untyped, as the template's testing endpoints are: Spectree in its
+default mode lists every route, and nothing here is decorated.
 """
 
 from pathlib import Path

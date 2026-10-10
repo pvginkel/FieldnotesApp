@@ -93,7 +93,8 @@ unknown fields are refused.
   [webhooks.md](webhooks.md#board-sync).
 - **Triage queue** (FR-23): the operator's queue. `items` holds every open item in the store's
   `triage/` (not `done/`, not `archive/`) whose ruling is absent or not submitted, every field as
-  the item's file holds it. Returned items (a `question`, and not submitted since) come first, then
+  the item's file holds it, but for a ruling from before `guessed`, which is served with
+  `guessed: false`. Returned items (a `question`, and not submitted since) come first, then
   the rest, each group by `written`, oldest first. `observations` maps each item's observation id to
   its fields as the observation index holds them, which is as they stand now unless the index lags
   (see [match-pipeline.md](match-pipeline.md#the-index)): the ten fields of an item's `snapshot`,
@@ -103,9 +104,10 @@ unknown fields are refused.
   triage index, which reads `triage/*.json` at startup and after every pull and write. An item file
   that is not JSON, breaks the store's item rules (the app's own copy of the store's check) or does
   not parse is logged and left out.
-- **Ruling** (FR-25): sets the item's `ruling` to `{verb, note, at: now, submitted: null}` over any
-  draft. A returned item keeps its `question`; a ruling whose `at` is later than the question's is
-  its answer. A `no` or a `later` without a note is refused (`validation-error`).
+- **Ruling** (FR-25): sets the item's `ruling` to
+  `{verb, note, at: now, submitted: null, guessed: false}` over any draft, the reconciler's guessed
+  one included. A returned item keeps its `question`; a ruling whose `at` is later than the
+  question's is its answer. A `no` or a `later` without a note is refused (`validation-error`).
 - **Take-back** (FR-25): sets the item's `ruling` to null. On an item without a ruling it writes
   nothing.
 - **Refusals of a ruling and a take-back**, each decided on the item as the store holds it at the
@@ -116,9 +118,10 @@ unknown fields are refused.
   one the queue leaves out (not JSON, against the store's item rules, or not parsing), the fault
   named in the detail. A refusal writes nothing.
 - **Submit** (FR-26): marks every ruled, unsubmitted item in `triage/` submitted (`ruling.submitted:
-  now`) and answers with their ids. A returned item counts as ruled only once its ruling's `at` is
-  later than its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`.
-  A submit that submitted something then starts the actioner, off the request: see
+  now`) and answers with their ids. A guessed draft (the reconciler's, untouched) is ruled, and
+  keeps `guessed: true`. A returned item counts as ruled only once its ruling's `at` is later than
+  its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`. A submit
+  that submitted something then starts the actioner, off the request: see
   [The actioner start](#the-actioner-start).
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
   annotations. They hold counts and repo names only, never text. Grafana's "Fieldnotes" dashboard

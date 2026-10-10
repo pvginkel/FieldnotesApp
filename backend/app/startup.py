@@ -50,10 +50,13 @@ def register_root_blueprints(app: Flask) -> None:
     Use this for internal endpoints, WebSocket handlers, or other routes
     that should not be nested under the /api URL prefix.
     """
-    # The Playwright suite's store: testing mode only, as the template's testing endpoints are.
+    # The Playwright suite's store and controller: testing mode only, as the template's testing
+    # endpoints are.
+    from app.api.testing_controller import testing_controller_bp
     from app.api.testing_store import testing_store_bp
 
     app.register_blueprint(testing_store_bp)
+    app.register_blueprint(testing_controller_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

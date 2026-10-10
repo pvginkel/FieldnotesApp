@@ -277,6 +277,31 @@ def test_a_live_stream_carries_lines_as_they_come_and_keepalives_through_quiet(
     assert kubecoder.calls[-1].timeout["read"] > 20
 
 
+def test_a_paced_turn_stays_in_flight_while_its_lines_come_one_by_one(
+    kubecoder, controller
+):
+    """The Playwright suite's turns: each line and the result `pace` seconds after the one
+    before; a held one stays in flight after its lines."""
+    name = sitting(kubecoder, controller)
+    kubecoder.turns = [
+        FakeTurn(LINES, "Two cards wait.", pace=0.2),
+        FakeTurn(["[3s] noted"], held=True, pace=0.2),
+    ]
+
+    controller.send(ENV, name, "/dev:inbox")
+    sent = controller.session(ENV, name)
+    first = drain(controller.response(ENV, name))
+    controller.send(ENV, name, "Rule them.")
+    held = controller.response(ENV, name, offset=offsets(LINES)[-1])
+    line = next(held)
+    kubecoder.finish(ENV, name, "Both ruled.")
+
+    assert (sent.status, sent.turn) == ("busy", 0)
+    assert first == [*logs(LINES), TurnResult(turn=1, result="Two cards wait.")]
+    assert line == logs(["[3s] noted"], offsets(LINES)[-1])[0]
+    assert drain(held) == [TurnResult(turn=2, result="Both ruled.")]
+
+
 def test_a_turn_in_flight_refuses_another_send_as_busy(kubecoder, controller):
     name = sitting(kubecoder, controller)
     kubecoder.turns = [FakeTurn(held=True)]

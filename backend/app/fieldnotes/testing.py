@@ -163,12 +163,15 @@ _ENV = r"/environments/(?P<env_id>[^/]+)"
 @dataclass
 class FakeTurn:
     """A turn as a fake session plays it: its condensed log lines, then its result. A `held`
-    turn writes its lines and stays in flight until `FakeController.finish` ends it."""
+    turn writes its lines and stays in flight until `FakeController.finish` ends it. With a
+    `pace`, each line and the result come that many seconds after the one before, the send
+    included, off the request."""
 
     lines: list[str] = field(default_factory=list)
     result: str = "done"
     is_error: bool = False
     held: bool = False
+    pace: float = 0.0
 
 
 @dataclass
@@ -223,12 +226,12 @@ class FakeController:
     answered. `on_run` is called inside a run, before its answer.
 
     A test lays out `environments` with `add_environment` and scripts each turn sent, of any
-    session, with the next of `turns`: its log lines and its result, or a turn held in flight
-    until `finish`. Each request to the other routes takes the next of `faults` while any are
-    left: a status is the controller failing, `None` a connection that fails. Each response
-    stream opened takes the next of `drops`, if any: it carries that many events and then its
-    connection drops. A quiet stream carries a keepalive every `keepalive` seconds. `calls` holds
-    every request to those routes made with the token.
+    session, with the next of `turns`: its log lines and its result, at once or at a pace, or a
+    turn held in flight until `finish`. Each request to the other routes takes the next of
+    `faults` while any are left: a status is the controller failing, `None` a connection that
+    fails. Each response stream opened takes the next of `drops`, if any: it carries that many
+    events and then its connection drops. A quiet stream carries a keepalive every `keepalive`
+    seconds. `calls` holds every request to those routes made with the token.
 
     Where the documents are silent the fake follows the worker's code: a stream opened after its
     turn finished replays the log from its offset, then delivers that turn's result at once
@@ -642,12 +645,37 @@ class FakeController:
         session.status = "busy"
         session.terminal = False
         session.result = None
+        if turn.pace > 0:
+            threading.Thread(
+                target=self._play,
+                args=(session, session.turn, turn),
+                name="fake-turn",
+                daemon=True,
+            ).start()
+            return httpx.Response(202)
         for line in turn.lines:
             self._append(session, line)
         if not turn.held:
             self._finish(session, turn.result, turn.is_error)
         self._cond.notify_all()
         return httpx.Response(202)
+
+    def _play(self, session: FakeSession, finished: int, turn: FakeTurn) -> None:
+        """Play a paced turn for as long as it is in flight: the session neither ended nor past
+        the turn that follows its `finished` ones, which `finish` ends early."""
+
+        def gone() -> bool:
+            return session.status != "busy" or session.turn != finished
+
+        with self._cond:
+            for line in turn.lines:
+                if self._cond.wait_for(gone, turn.pace):
+                    return
+                self._append(session, line)
+                self._cond.notify_all()
+            if turn.held or self._cond.wait_for(gone, turn.pace):
+                return
+            self._finish(session, turn.result, turn.is_error)
 
     def _append(self, session: FakeSession, line: str) -> None:
         """A line of the log, which holds every turn's: its offset counts the line's bytes and

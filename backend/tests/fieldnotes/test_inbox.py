@@ -800,6 +800,32 @@ def test_a_page_whose_connection_is_bound_to_no_one_hears_the_tasks_it_begins(
     assert progress(heard["editor"], task_id) == ["[3s] [tool_use: update] EX-7"]
 
 
+def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
+    start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
+):
+    """FR-30 under NFR-4: a page reopened mid-sitting (a reload, a second browser) has a
+    connection of its own, bound to no one once the token has lapsed, which no Start named; its
+    Send binds it to the editor before the turn begins."""
+    kubecoder.add_environment(ENV)
+    with start(app=oidc_app) as api:
+        heard = connected(api, monkeypatch, "opener", "reopened")
+        api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
+        opened(api, eventually, kubecoder, connection="opener")
+        kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
+        task_id = send(api, "close EX-7", connection="reopened").json()["sitting"][
+            "turn"
+        ]["task"]
+        finished(api, eventually, task_id)
+
+        assert bound(api, "reopened") == "inbox-editor"
+    assert [
+        e["data"]["message"]["text"]
+        for e in heard["reopened"]
+        if e["event_type"] == "task_completed"
+    ] == [ANSWER]
+    assert progress(heard["reopened"], task_id) == ["[3s] [tool_use: update] EX-7"]
+
+
 def test_a_request_binds_no_connection_bound_to_another_user_nor_one_it_is_refused_for(
     start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
 ):

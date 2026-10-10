@@ -10,6 +10,7 @@
  * that differs from the system does not leave the template's own on the system's side.
  */
 @import "../components/triage/triage.css";
+@import "../components/shell/shell.css";
 
 :root {
   --background: 0 0% 100%;

@@ -1,0 +1,43 @@
+/* The app bar (FR-33), in both screens' headers: the screen tabs and the pills, in triage.css's
+   idiom. Unlayered, so it wins over Tailwind's preflight. White text meets WCAG AA on the header's
+   orange (3.1:1) only as large text, as the wordmark is: the tabs are large, and the pills' text
+   sits on a tint that takes it past 4.5:1. */
+
+.screens { display: flex; align-self: stretch; gap: 4px; margin-left: -4px; }
+.screens a {
+  display: flex;
+  align-items: center;
+  padding: 3px 12px 0;
+  border-bottom: 3px solid transparent;
+  color: #fff;
+  font-size: 19px;
+  font-weight: 700;
+}
+.screens a:hover { border-bottom-color: rgb(255 255 255 / 0.4); text-decoration: none; }
+.screens a.active { border-bottom-color: #fff; }
+
+.topbar-fill { flex: 1; }
+
+/* The dot breathes while either works; it is amber on a lost sitting and red on a failed run. */
+.app-pills { display: flex; align-items: center; gap: 8px; }
+.app-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.22);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: default;
+}
+a.app-pill { cursor: pointer; }
+a.app-pill:hover { background: rgb(0 0 0 / 0.3); text-decoration: none; }
+.app-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
+.app-pill[data-state="working"] .dot { animation: breathe 1.4s ease-in-out infinite; }
+.app-pill[data-state="lost"] .dot { background: hsl(48 95% 62%); }
+.app-pill[data-state="failed"] .dot { background: hsl(0 90% 72%); }
+.app-pill[data-state="lost"], .app-pill[data-state="failed"] { background: rgb(0 0 0 / 0.32); }
+@keyframes breathe { 50% { opacity: 0.25; } }

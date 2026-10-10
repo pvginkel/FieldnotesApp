@@ -355,6 +355,8 @@ export function useTriage() {
           : 'Nothing was submitted: no ruling had reached the store.',
       );
       void queryClient.invalidateQueries({ queryKey: QUEUE_KEY });
+      // The submit starts the actioner (FR-27): its pill in the app bar shows it at once.
+      void queryClient.invalidateQueries({ queryKey: ['getTriageActioner'] });
     } finally {
       setSubmitting(false);
     }

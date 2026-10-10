@@ -1,5 +1,7 @@
 import { CircleHelp } from 'lucide-react';
 import { isRuled, type Item } from '@/lib/triage/queue';
+import { AppPills } from '@/components/shell/app-pills';
+import { ScreenNav } from '@/components/shell/screen-nav';
 import { UserMenu } from './user-menu';
 import type { Prefs } from '@/lib/triage/browser-state';
 
@@ -22,6 +24,7 @@ export function TriageHeader(props: TriageHeaderProps) {
   return (
     <header className="topbar" data-testid="triage.header">
       <div className="brand"><img className="logo" src="/fieldnotes-alt.svg" alt="" />Fieldnotes</div>
+      <ScreenNav />
       <div className="progress" data-testid="triage.progress">
         {order.length > 0 && (
           // One segment per card, in the order they are visited: filled once it is ruled, darker
@@ -46,6 +49,7 @@ export function TriageHeader(props: TriageHeaderProps) {
           </div>
         )}
       </div>
+      <AppPills />
       {/* Goes to the finish card, whose Submit is the one that sends: the header's is hidden
           there, and on the empty page, which has nothing to submit. */}
       <button

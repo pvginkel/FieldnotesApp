@@ -1,6 +1,91 @@
 {
   "components": {
     "schemas": {
+      "ActionerState.0c09c4d": {
+        "description": "The actioner as the app bar shows it (FR-33): `running` while a run is held, `run` and\n`since` naming it; `starting` while a start is pending, asked of the controller or waiting to\nbe tried again; `idle` otherwise. `failure` is the last failure, kept until the next run\nstarts.",
+        "properties": {
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionerState.0c09c4d.ActionerFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "state": {
+            "enum": [
+              "idle",
+              "starting",
+              "running"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "run",
+          "since",
+          "failure"
+        ],
+        "title": "ActionerState",
+        "type": "object"
+      },
+      "ActionerState.0c09c4d.ActionerFailure": {
+        "description": "How the last run ended when it did not succeed, or the start the controller refused.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "at",
+          "outcome",
+          "reason"
+        ],
+        "title": "ActionerFailure",
+        "type": "object"
+      },
       "DeploymentTriggerRequestSchema.6b6ce9f": {
         "description": "Request schema for triggering version deployment events in testing mode.",
         "properties": {
@@ -122,6 +207,189 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InboxState.5430f38": {
+        "description": "The screen's state: `configured` false when the API lacks the controller's address, its\ntoken or the project; `tracker` the issue address a card id is appended to.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "sitting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxState.5430f38.InboxSitting"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tracker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracker"
+          }
+        },
+        "required": [
+          "configured",
+          "tracker",
+          "sitting"
+        ],
+        "title": "InboxState",
+        "type": "object"
+      },
+      "InboxState.5430f38.Author": {
+        "enum": [
+          "operator",
+          "session"
+        ],
+        "title": "Author",
+        "type": "string"
+      },
+      "InboxState.5430f38.InboxLoss": {
+        "description": "FR-32: why the sitting was lost, and when.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "reason"
+        ],
+        "title": "InboxLoss",
+        "type": "object"
+      },
+      "InboxState.5430f38.InboxMessage": {
+        "description": "A message of the sitting: one the API sent, the first being the inbox prompt with the\noperator's scope, or one the session answered.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "author": {
+            "$ref": "#/components/schemas/InboxState.5430f38.Author"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "author",
+          "text",
+          "at"
+        ],
+        "title": "InboxMessage",
+        "type": "object"
+      },
+      "InboxState.5430f38.InboxSitting": {
+        "properties": {
+          "began": {
+            "title": "Began",
+            "type": "string"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "lost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxState.5430f38.InboxLoss"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "moved": {
+            "title": "Moved",
+            "type": "string"
+          },
+          "started_environment": {
+            "title": "Started Environment",
+            "type": "boolean"
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/InboxState.5430f38.InboxMessage"
+            },
+            "title": "Transcript",
+            "type": "array"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxState.5430f38.InboxTurn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "environment",
+          "started_environment",
+          "began",
+          "moved",
+          "turn",
+          "lost",
+          "transcript"
+        ],
+        "title": "InboxSitting",
+        "type": "object"
+      },
+      "InboxState.5430f38.InboxTurn": {
+        "description": "The turn in flight, a Start's included: the task the page follows for its progress, and the\nlast condensed log line read so far, for a page that joins it mid-turn.",
+        "properties": {
+          "began": {
+            "title": "Began",
+            "type": "string"
+          },
+          "log": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "began",
+          "log"
+        ],
+        "title": "InboxTurn",
+        "type": "object"
+      },
       "Problem.c1eb724": {
         "additionalProperties": true,
         "description": "An RFC 9457 problem document. Extension members are allowed.",
@@ -193,6 +461,33 @@
         ],
         "title": "Verb",
         "type": "string"
+      },
+      "StartRequest.5430f38": {
+        "additionalProperties": false,
+        "description": "FR-29: the scope the operator typed, appended to the inbox prompt; empty for all of it.",
+        "properties": {
+          "scope": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Scope",
+            "type": "string"
+          },
+          "sse_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sse Request Id"
+          }
+        },
+        "title": "StartRequest",
+        "type": "object"
       },
       "SubmitReply.b288cbf": {
         "description": "The ids of the items submitted; empty when nothing was ruled.",
@@ -1173,6 +1468,36 @@
         "title": "Verb",
         "type": "string"
       },
+      "TurnRequest.5430f38": {
+        "additionalProperties": false,
+        "description": "FR-30: the operator's message, as they typed it.",
+        "properties": {
+          "message": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "sse_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sse Request Id"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "TurnRequest",
+        "type": "object"
+      },
       "UserInfoResponseSchema.a535b8c": {
         "description": "Response schema for current user information.",
         "properties": {
@@ -1349,6 +1674,16 @@
         "tags": []
       }
     },
+    "/api/hooks/kubecoder": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_hooks_kubecoder",
+        "parameters": [],
+        "responses": {},
+        "summary": "FR-27: a prompt run's outcome. The held run's releases the hold and starts the actioner again as its ending asks, off the request; a delivery for any other run is ignored.",
+        "tags": []
+      }
+    },
     "/api/hooks/youtrack": {
       "post": {
         "description": "",
@@ -1357,6 +1692,197 @@
         "responses": {},
         "summary": "FR-20, FR-21: an event naming an issue that is some observation's card queues a board sync of it; every other event is ignored without a call to YouTrack. The Webhook Triggers app waits for each answer, so nothing is read or written before it, and it sends the delivery before YouTrack commits the change, so the read waits `settle` seconds.",
         "tags": []
+      }
+    },
+    "/api/inbox": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_inbox",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxState.5430f38"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-28: the sitting the API holds, if any, with its transcript and the turn in flight; a turn whose follow is gone taken over first (FR-30).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/inbox/end": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_inbox_end",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-31: the session ended and the sitting cleared, transcript and all; idempotent.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/inbox/start": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_inbox_start",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRequest.5430f38"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxState.5430f38"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxState.5430f38"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-29: a sitting begun, off the request (202); a live one answers as it is (200).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/inbox/turns": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_inbox_turns",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnRequest.5430f38"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxState.5430f38"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-30: the operator's message sent as the session's next turn, off the request.",
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/match": {
@@ -1620,6 +2146,94 @@
         "tags": []
       }
     },
+    "/api/testing/controller": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_testing_controller",
+        "parameters": [],
+        "responses": {},
+        "summary": "The environments, each with its status and its sessions (the turns sent to each), and the ids of the prompt runs accepted.",
+        "tags": []
+      },
+      "put": {
+        "description": "",
+        "operationId": "put__api_testing_controller",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A `ControllerLayout`: the controller the API is served from now on.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/emit": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_emit",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "`{\"line\"}`: a log line of the sitting's turn in flight.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/finish": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_finish",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "`{\"result\", \"is_error\"}`: the sitting's turn in flight ends with this result.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/lose": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_lose",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A `LossBody`: the sitting lost at the controller, which the API finds on its next call.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/run-end": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_run-end",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A `RunEndBody`: the last prompt run the controller accepted ends so, as its webhook reports it; a conflict when that run is not the one the actioner holds.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/deployments/version": {
       "post": {
         "description": "",
@@ -1724,6 +2338,30 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/store": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_testing_store",
+        "parameters": [],
+        "responses": {},
+        "summary": "The files under `observations/` and `triage/`, by path.",
+        "tags": []
+      },
+      "put": {
+        "description": "",
+        "operationId": "put__api_testing_store",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "`{\"files\": {path: text}}`: the store's `observations/` and `triage/` become these files, in one commit, pushed and indexed before the reply.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/tasks/start": {
       "post": {
         "description": "",
@@ -1767,6 +2405,43 @@
           }
         ],
         "summary": "Start a demo or failing task for integration testing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/triage/actioner": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_triage_actioner",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionerState.0c09c4d"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-33: the actioner's state, for the app bar: a start pending, the run held, and the last failure.",
         "tags": [],
         "x-required-role": "editor"
       }

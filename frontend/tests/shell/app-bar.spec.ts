@@ -280,6 +280,8 @@ test.describe('the failed Actioner pill', () => {
   });
 
   test('Close clears only the failure it showed: one recorded meanwhile stays, and the pill shows it', async ({ store, controller, triage, appBar, request, backendUrl }) => {
+    // The dialog stays open past the pill's next fetch, 20 s apart while the actioner is idle.
+    test.slow();
     await controller.layOut();
     await store.layOut(ruled());
     await triage.open();
@@ -296,6 +298,8 @@ test.describe('the failed Actioner pill', () => {
     await expect.poll(() => actionerState(request, backendUrl)).toBe('running');
     await controller.runEnd('failed', 'the second run failed');
 
+    // The pill's fetch brings the newer failure in beneath the open dialog, which keeps its own.
+    await expect(appBar.actionerPill).toHaveAttribute('title', /: the second run failed$/, { timeout: 25_000 });
     await expect(appBar.failureReason).toHaveText('the first run failed');
     await appBar.failureClose.click();
     await expect(appBar.failure).toHaveCount(0);

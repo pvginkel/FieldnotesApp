@@ -19,7 +19,7 @@ from flask import Blueprint, Response
 from pydantic import Field, TypeAdapter, ValidationError
 from spectree import Response as SpectreeResponse
 
-from app.fieldnotes.actioner import ActionerState
+from app.fieldnotes.actioner import ActionerFailure, ActionerState
 from app.fieldnotes.errors import (
     ProblemException,
     internal,
@@ -171,3 +171,20 @@ def actioner(
     """FR-33: the actioner's state, for the app bar: a start pending, the run held, and the last
     failure."""
     return _runtime(service).actioner.state()
+
+
+@triage_bp.route("/actioner/clear", methods=["POST"])
+@allow_roles(EDITOR)
+@api.validate(
+    resp=SpectreeResponse(HTTP_200=ActionerState, HTTP_422=Problem),
+    before=_refused("body"),
+    validation_error_status=422,
+)
+@inject
+def clear(
+    json: ActionerFailure,
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> ActionerState:
+    """FR-33: the actioner's last failure cleared, if it is still the one the body names, as the
+    operator's page showed it; the actioner's state as it then stands."""
+    return _runtime(service).actioner.clear(json)

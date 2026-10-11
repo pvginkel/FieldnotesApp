@@ -3,17 +3,18 @@ prompt run of the actioner, off the request, and holds the run until its webhook
 is tried again while submitted items wait, at most one start is pending, a run skipped for want of
 an environment is tried again, and any other failure is logged and counted. The app bar's state
 (FR-33): a start pending, the run held, and the last failure, kept beside the hold until the next
-run starts. Against the fake controller; every item is invented."""
+run starts or an editor clears the failure their page showed. The hold's writers, on either pod,
+take turns. Against the fake controller; every item is invented."""
 
 import logging
 import threading
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
-from app.fieldnotes.actioner import ActionerFailure, Hold
+from app.fieldnotes.actioner import ActionerFailure, Held, Hold
 from app.fieldnotes.controller import ControllerSettings, HttpController
 from app.fieldnotes.runtime import ACTIONER_HOLD
 from app.fieldnotes.triage import item_path
@@ -37,6 +38,7 @@ UNSET = {
     "FIELDNOTES_KUBECODER_WEBHOOK_URL": "",
 }
 HOOK = "/api/hooks/kubecoder"
+CLEAR = "/api/triage/actioner/clear"
 IDLE = {"state": "idle", "run": None, "since": None, "failure": None}
 
 
@@ -66,6 +68,10 @@ def state(api, **kwargs):
 
 def failure(at, outcome, reason) -> dict[str, str]:
     return {"at": at, "outcome": outcome, "reason": reason}
+
+
+def clear(api, shown, **kwargs):
+    return api.post(CLEAR, json=shown, **kwargs)
 
 
 def test_a_submit_starts_the_actioner_off_the_request_and_holds_its_run(
@@ -668,3 +674,265 @@ def test_the_state_refuses_all_but_the_editor(
         response = api.get("/api/triage/actioner", headers=headers)
 
     assert response.status_code == status
+
+
+# -- an editor's clear of the last failure (FR-33) -----------------------------------------------
+
+
+def test_a_clear_clears_the_failure_it_names_for_both_pods(
+    start, remote, kubecoder, eventually, clock, environ, caplog
+):
+    seed(remote, item(IDS[0], ruling=ruling()))
+    with start() as api:
+        submit(api)
+        eventually(lambda: held(api) == "run-1", "the run")
+        clock.tick(180)
+        ended(api, kubecoder, "run-1", "failed", "turn-error")
+        shown = state(api)["failure"]
+        with caplog.at_level(logging.INFO, logger="app.fieldnotes.actioner"):
+            reply = clear(api, shown)
+        after = state(api)
+        other = Hold(Path(environ["FIELDNOTES_CACHE_DIR"]) / ACTIONER_HOLD).load()
+
+    assert shown == failure("2026-09-19T10:03:00Z", "failed", "turn-error")
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == IDLE
+    assert after == IDLE
+    assert other == (None, None)
+    assert (
+        "the actioner's last failure, failed at 2026-09-19T10:03:00Z, cleared (operator)"
+        in caplog.text
+    )
+
+
+@pytest.mark.parametrize("refused", [False, True], ids=["a run's", "a refused start's"])
+def test_a_clear_naming_a_failure_since_replaced_leaves_the_newer_one(
+    start, remote, kubecoder, eventually, clock, refused
+):
+    seed(remote, item(IDS[0], ruling=ruling()), item(IDS[1]))
+    kubecoder.answers = [202, 500] if refused else [202]
+    with start() as api:
+        submit(api)
+        eventually(lambda: held(api) == "run-1", "the run")
+        clock.tick(180)
+        ended(api, kubecoder, "run-1", "failed", "turn-error")
+        shown = state(api)["failure"]
+        # A newer failure lands while the operator's page shows that one.
+        clock.tick()
+        assert rule(api, IDS[1]).status_code == 200
+        submit(api)
+        if refused:
+            eventually(lambda: not api.runtime.actioner.pending, "the refusal")
+        else:
+            eventually(lambda: held(api) == "run-2", "the next run")
+            clock.tick()
+            ended(api, kubecoder, "run-2", "skipped", "no-environment")
+        reply = clear(api, shown)
+        after = state(api)
+
+    newer = (
+        failure("2026-09-19T10:04:00Z", "refused", "the controller failed")
+        if refused
+        else failure("2026-09-19T10:05:00Z", "skipped", "no-environment")
+    )
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == IDLE | {"failure": newer}
+    assert after == IDLE | {"failure": newer}
+
+
+def test_a_clear_once_the_next_run_started_leaves_that_run_held(
+    start, remote, kubecoder, eventually, clock
+):
+    seed(remote, item(IDS[0], ruling=ruling()), item(IDS[1]))
+    with start() as api:
+        submit(api)
+        eventually(lambda: held(api) == "run-1", "the run")
+        clock.tick(180)
+        ended(api, kubecoder, "run-1", "failed", "turn-error")
+        shown = state(api)["failure"]
+        clock.tick()
+        assert rule(api, IDS[1]).status_code == 200
+        submit(api)
+        eventually(lambda: held(api) == "run-2", "the next run")
+        reply = clear(api, shown)
+        run = held(api)
+
+    assert reply.json() == IDLE | {
+        "state": "running",
+        "run": "run-2",
+        "since": "2026-09-19T10:04:00Z",
+    }
+    assert run == "run-2"
+
+
+def test_a_clear_leaves_an_expired_hold_to_its_late_webhook(
+    start, remote, kubecoder, eventually, clock
+):
+    """A start refused past an expired hold records its failure beside that hold; the clear
+    takes the failure alone, and the expired run's late webhook still finds its hold."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.answers = [500, 202]
+    with start() as api:
+        api.runtime.actioner.hold.take("run-0", clock() - timedelta(minutes=30))
+        submit(api)
+        eventually(lambda: not api.runtime.actioner.pending, "the refusal")
+        reply = clear(api, state(api)["failure"])
+        kept = held(api)
+        clock.tick()
+        late = ended(api, kubecoder, "run-0")
+        eventually(lambda: held(api) == "run-1", "the next run")
+
+    assert reply.json() == IDLE
+    assert kept == "run-0"
+    assert late.json() == {"action": "queued"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"at": "2026-09-19T10:00:00Z", "outcome": "refused"},
+        {"at": "2026-09-19T10:00:00Z", "outcome": None, "reason": None},
+    ],
+    ids=["empty", "no reason", "no outcome"],
+)
+def test_a_clear_that_names_no_failure_is_refused_and_clears_nothing(
+    start, clock, body
+):
+    recorded = ActionerFailure(
+        at="2026-09-19T10:00:00Z", outcome="refused", reason=None
+    )
+    with start() as api:
+        api.runtime.actioner.hold.fail(recorded)
+        reply = clear(api, body)
+        kept = api.runtime.actioner.hold.load()
+
+    assert reply.status_code == 422
+    assert reply.json()["type"] == "validation-error"
+    assert kept == (None, recorded)
+
+
+def test_the_clear_admits_the_editor_session(start, oidc_app, generate_test_jwt):
+    shown = failure("2026-09-19T10:00:00Z", "refused", None)
+    with start(app=oidc_app) as api:
+        api.runtime.actioner.hold.fail(ActionerFailure.model_validate(shown))
+        api.sign_in(generate_test_jwt(roles=["editor"]))
+        reply = clear(api, shown)
+
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == IDLE
+
+
+@pytest.mark.parametrize(
+    ("roles", "headers", "status"),
+    [
+        (["viewer"], {}, 403),
+        (None, {}, 401),
+        (None, {"Authorization": "Bearer mcp-token"}, 401),
+    ],
+    ids=["no role", "no session", "an agent's bearer"],
+)
+def test_the_clear_refuses_all_but_the_editor_and_clears_nothing(
+    start, oidc_app, generate_test_jwt, roles, headers, status
+):
+    shown = failure("2026-09-19T10:00:00Z", "refused", None)
+    with start(app=oidc_app) as api:
+        api.runtime.actioner.hold.fail(ActionerFailure.model_validate(shown))
+        if roles is not None:
+            api.sign_in(generate_test_jwt(roles=roles))
+        response = clear(api, shown, headers=headers)
+        kept = api.runtime.actioner.hold.load()
+
+    assert response.status_code == status
+    assert kept == (None, ActionerFailure.model_validate(shown))
+
+
+# -- the hold's file: one writer at a time, on either pod ----------------------------------------
+
+RUN = Held("run-1", datetime(2026, 9, 19, 10, 0, tzinfo=UTC))
+NEXT = Held("run-2", datetime(2026, 9, 19, 10, 4, tzinfo=UTC))
+SHOWN = ActionerFailure(
+    at="2026-09-19T10:01:00Z", outcome="refused", reason="the controller failed"
+)
+NEWER = ActionerFailure(
+    at="2026-09-19T10:03:00Z", outcome="failed", reason="turn-error"
+)
+
+
+@pytest.mark.parametrize(
+    ("in_hand", "racing", "answered", "after"),
+    [
+        (
+            lambda hold: hold.release(RUN.run_id, NEWER),
+            lambda hold: hold.clear(SHOWN),
+            False,
+            (None, NEWER),
+        ),
+        (
+            lambda hold: hold.clear(SHOWN),
+            lambda hold: hold.release(RUN.run_id, NEWER),
+            True,
+            (None, NEWER),
+        ),
+        (
+            lambda hold: hold.take(NEXT.run_id, NEXT.at),
+            lambda hold: hold.clear(SHOWN),
+            False,
+            (NEXT, None),
+        ),
+        (
+            lambda hold: hold.clear(SHOWN),
+            lambda hold: hold.take(NEXT.run_id, NEXT.at),
+            None,
+            (NEXT, None),
+        ),
+        (
+            lambda hold: hold.fail(NEWER),
+            lambda hold: hold.clear(SHOWN),
+            False,
+            (RUN, NEWER),
+        ),
+        (
+            lambda hold: hold.clear(SHOWN),
+            lambda hold: hold.fail(NEWER),
+            None,
+            (RUN, NEWER),
+        ),
+    ],
+    ids=[
+        "the webhook, then a clear",
+        "a clear, then the webhook",
+        "a start, then a clear",
+        "a clear, then a start",
+        "a refused start, then a clear",
+        "a clear, then a refused start",
+    ],
+)
+def test_a_write_to_the_hold_on_the_other_pod_waits_for_the_one_in_hand(
+    tmp_path, monkeypatch, in_hand, racing, answered, after
+):
+    """Each writer loads the file and writes what it makes of it; the other pod's writer, coming
+    while that write is in hand, waits for it and works on what it wrote."""
+    path = tmp_path / ACTIONER_HOLD
+    one, other = Hold(path), Hold(path)
+    one.take(RUN.run_id, RUN.at)
+    one.fail(SHOWN)
+    write = one._write
+    racer: list[threading.Thread] = []
+    waited: list[bool] = []
+    answers: list[object] = []
+
+    def raced(held, failure):
+        racer.append(threading.Thread(target=lambda: answers.append(racing(other))))
+        racer[0].start()
+        racer[0].join(0.2)
+        waited.append(racer[0].is_alive())
+        write(held, failure)
+
+    monkeypatch.setattr(one, "_write", raced)
+    in_hand(one)
+    racer[0].join(5)
+
+    assert waited == [True]
+    assert answers == [answered]
+    assert other.load() == after

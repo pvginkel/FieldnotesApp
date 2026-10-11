@@ -431,6 +431,7 @@ def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate
         "take back": paths["/api/triage/items/{id}/ruling"]["delete"],
         "submit": paths["/api/triage/submit"]["post"],
         "actioner": paths["/api/triage/actioner"]["get"],
+        "clear": paths["/api/triage/actioner/clear"]["post"],
     }
     replies = {
         name: schema(o["responses"]["200"]["content"]) for name, o in operations.items()
@@ -447,6 +448,9 @@ def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate
         "since",
         "failure",
     }
+    assert set(replies["clear"]["properties"]) == set(replies["actioner"]["properties"])
+    cleared = schema(operations["clear"]["requestBody"]["content"])
+    assert set(cleared["properties"]) == {"at", "outcome", "reason"}
     request = schema(operations["rule"]["requestBody"]["content"])
     assert set(request["properties"]) == {"verb", "note", "written"}
     query = [

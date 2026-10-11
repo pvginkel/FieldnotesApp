@@ -19,8 +19,8 @@ any other run is ignored.
 
 A run that ended without succeeding, failed or skipped, a retried skip included, and a start the
 controller refused are recorded as the last failure in the hold's file, so both pods answer it,
-until the next run started clears it. The app bar reads the actioner's state from the pending
-start, the hold and that failure (FR-33).
+until the next run started clears it, or an editor clears it, naming the failure their page showed.
+The app bar reads the actioner's state from the pending start, the hold and that failure (FR-33).
 
 At most one start is pending in a pod, from the submit that asks for it until the controller accepts
 the run, refuses it, or nothing waits: a submit meanwhile is covered by it. The pending start lives
@@ -29,6 +29,7 @@ in this process alone, so a restarted API resumes none; the hold outlives it.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -89,7 +90,8 @@ class Held:
 
 
 class ActionerFailure(BaseModel):
-    """How the last run ended when it did not succeed, or the start the controller refused."""
+    """How the last run ended when it did not succeed, or the start the controller refused. A
+    clear names the failure it clears by all three fields, as the operator's page showed them."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -102,7 +104,7 @@ class ActionerState(BaseModel):
     """The actioner as the app bar shows it (FR-33): `running` while a run is held, `run` and
     `since` naming it; `starting` while a start is pending, asked of the controller or waiting to
     be tried again; `idle` otherwise. `failure` is the last failure, kept until the next run
-    starts."""
+    starts or an editor clears it."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -115,10 +117,14 @@ class ActionerState(BaseModel):
 class Hold:
     """The run held, `"runId"` and `"at"`, and the last failure, `"failure"`, in one file on the
     volume both pods mount, written whole through a rename, so it outlives a pod and both see it
-    through a rollout's overlap. A file that cannot be read holds nothing."""
+    through a rollout's overlap. Its writers take turns on an exclusive `flock` of a lock file
+    beside it, which the volume holds across both pods' mounts; each change opens the lock file
+    anew, so the threads of one process take turns as well. A file that cannot be read holds
+    nothing."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._lock = path.with_name(f".{path.name}.lock")
 
     def load(self) -> tuple[Held | None, ActionerFailure | None]:
         """The run held and the last failure."""
@@ -146,20 +152,54 @@ class Hold:
 
     def take(self, run_id: str, at: datetime) -> None:
         """Hold the run started, which clears the last failure."""
-        self._write(Held(run_id, at), None)
+        self._change(lambda held, failure: (None, Held(run_id, at), None))
 
     def release(self, run_id: str, failure: ActionerFailure | None = None) -> bool:
         """Release the hold if it names `run_id`, recording `failure` when the run did not
         succeed; whether it did."""
-        held, kept = self.load()
-        if held is None or held.run_id != run_id:
-            return False
-        self._write(None, failure if failure is not None else kept)
-        return True
+
+        def apply(
+            held: Held | None, kept: ActionerFailure | None
+        ) -> tuple[bool, Held | None, ActionerFailure | None]:
+            if held is None or held.run_id != run_id:
+                return False, held, kept
+            return True, None, failure if failure is not None else kept
+
+        return self._change(apply)
 
     def fail(self, failure: ActionerFailure) -> None:
         """Record a start the controller refused, the hold as it is."""
-        self._write(self.read(), failure)
+        self._change(lambda held, kept: (None, held, failure))
+
+    def clear(self, failure: ActionerFailure) -> bool:
+        """Clear the last failure if it is `failure`, the hold as it is; whether it was."""
+
+        def apply(
+            held: Held | None, kept: ActionerFailure | None
+        ) -> tuple[bool, Held | None, ActionerFailure | None]:
+            if kept != failure:
+                return False, held, kept
+            return True, held, None
+
+        return self._change(apply)
+
+    def _change[T](
+        self,
+        change: Callable[
+            [Held | None, ActionerFailure | None],
+            tuple[T, Held | None, ActionerFailure | None],
+        ],
+    ) -> T:
+        """Load the file and write what `change` makes of it, one writer at a time on either pod;
+        the value `change` answers with it."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            current = self.load()
+            value, held, failure = change(*current)
+            if (held, failure) != current:
+                self._write(held, failure)
+            return value
 
     def _write(self, held: Held | None, failure: ActionerFailure | None) -> None:
         body: dict[str, Any] = {}
@@ -170,7 +210,6 @@ class Hold:
         if not body:
             self.path.unlink(missing_ok=True)
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         written = self.path.with_name(
             f".{self.path.name}.{os.getpid()}.{threading.get_ident()}"
         )
@@ -257,6 +296,24 @@ class Actioner:
             since=None,
             failure=failure,
         )
+
+    def clear(self, failure: ActionerFailure) -> ActionerState:
+        """An editor's clear of the last failure, naming the one their page showed (FR-33): a
+        failure recorded since stays, and the hold stays as it stands. The actioner as it then
+        stands."""
+        if self.hold.clear(failure):
+            logger.info(
+                "the actioner's last failure, %s at %s, cleared (operator)",
+                failure.outcome,
+                failure.at,
+            )
+        else:
+            logger.info(
+                "the actioner's failure %s at %s is not the last failure; nothing cleared",
+                failure.outcome,
+                failure.at,
+            )
+        return self.state()
 
     def start(self, tasks: TaskService) -> None:
         """Start the actioner on the task service and return at once, unless a start is pending

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from app.fieldnotes.actioner import ActionerFailure, ActionerStart, Held, Hold
-from app.fieldnotes.inbox import Sitting, SittingFile
+from app.fieldnotes.inbox import InboxEnd, InboxLoss, Sitting, SittingFile
 from app.fieldnotes.runtime import ACTIONER_HOLD, INBOX_SITTING
 from app.fieldnotes.testing import FakeTurn
 from app.services.base_task import BaseTask, ProgressHandle
@@ -129,6 +129,50 @@ def test_the_run_s_session_is_found_past_those_working_before_it_and_the_inbox_s
     assert following == run_id
     assert reads(kubecoder) == [(headless(ENV, "claude-2"), "0")]
     assert not any(SPARE in c.path for c in kubecoder.calls)
+
+
+@pytest.mark.parametrize(
+    "kept",
+    [
+        {
+            "status": "ended",
+            "ended": InboxEnd(at="2026-09-19T09:55:00Z", idle_minutes=30),
+            "closed": True,
+        },
+        {
+            "status": "lost",
+            "lost": InboxLoss(at="2026-09-19T09:55:00Z", reason="Session not found"),
+        },
+    ],
+    ids=["ended", "lost"],
+)
+def test_a_kept_sitting_s_session_name_does_not_hide_the_run_s(
+    start, remote, kubecoder, eventually, environ, kept
+):
+    """An ended or lost sitting, kept until Start or End, takes no turn: the run's session is
+    found though it carries the name the sitting's file names."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.add_environment(ENV)
+    SittingFile(Path(environ["FIELDNOTES_CACHE_DIR"]) / INBOX_SITTING).change(
+        lambda _: (
+            None,
+            Sitting(
+                id="01J0INBOXSITTING0000000000",
+                environment=ENV,
+                session="claude",
+                began="2026-09-19T09:20:00Z",
+                moved="2026-09-19T09:25:00Z",
+                **kept,
+            ),
+        )
+    )
+    kubecoder.run_turns.append(FakeTurn(LINES[:1], held=True))
+    with start() as api:
+        run_id = started(api, eventually)
+        eventually(lambda: lines(api) == LINES[:1], "the run's first line")
+
+    assert kubecoder.run_sessions == {run_id: (ENV, "claude")}
+    assert reads(kubecoder) == [(headless(ENV, "claude"), "0")]
 
 
 def test_with_no_session_to_find_the_page_waits_until_the_webhook(

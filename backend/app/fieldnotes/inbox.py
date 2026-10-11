@@ -303,10 +303,16 @@ class SittingFile:
             return value
 
     def session(self) -> tuple[str, str] | None:
-        """The sitting's session as the file names it, its environment and its name; None while
-        there is none."""
+        """The live sitting's session as the file names it, its environment and its name; None
+        while there is none. A lost or ended sitting takes no turn: its session is gone or
+        ended."""
         sitting = self.load()
-        if sitting is None or sitting.environment is None or sitting.session is None:
+        if (
+            sitting is None
+            or not sitting.live
+            or sitting.environment is None
+            or sitting.session is None
+        ):
             return None
         return sitting.environment, sitting.session
 

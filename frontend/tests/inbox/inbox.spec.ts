@@ -309,10 +309,15 @@ test.describe('the working box', () => {
 
     await appBar.triageTab.click();
     await appBar.expectScreen('triage');
-    const reread = readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+    // The page's next read sets the lines whatever the replay added, so the screen is looked at
+    // from the return until that read: back right after the pill's read, it is an interval away.
+    await readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+    const reread = readHolding(page, ['Reading EX-1', 'Reading EX-2']).then(() => true);
     await appBar.inboxTab.click();
-    await reread;
-    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await expect(inbox.working).toBeVisible();
+    do {
+      expect(await inbox.workingLines.allTextContents()).toEqual(['Reading EX-1', 'Reading EX-2']);
+    } while (!(await Promise.race([reread, page.waitForTimeout(100).then(() => false)])));
     await controller.emit('Reading EX-3');
     await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2', 'Reading EX-3']);
   });

@@ -22,6 +22,16 @@ controller refused are recorded as the last failure in the hold's file, so both 
 until the next run started clears it, or an editor clears it, naming the failure their page showed.
 The app bar reads the actioner's state from the pending start, the hold and that failure (FR-33).
 
+The pod that starts a run follows it, on a thread of its own, for the actioner page (FR-27, FR-33).
+Before it asks for the run it notes the headless sessions working in the project's environments;
+once the run is held it looks every `LOOK_EVERY` seconds for the run's session, by elimination: a
+headless session working that was not working at the note and is not the inbox sitting's own. It
+reads that session's response stream from its start and keeps the run's last `TURN_LINES` log lines
+in the hold, where both pods read them and the editor's page fetches them; they go with the hold.
+The follow ends at the stream's result, the session gone, or the hold released or expired, and the
+pod leaves it as its shutdown is announced. It decides nothing: what it sees or fails at changes
+none of the run's start, its hold, its retries or its failure.
+
 At most one start is pending in a pod, from the submit that asks for it until the controller accepts
 the run, refuses it, or nothing waits: a submit meanwhile is covered by it. The pending start lives
 in this process alone, so a restarted API resumes none; the hold outlives it.
@@ -34,15 +44,16 @@ import json
 import logging
 import os
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.fieldnotes.controller import ControllerError
+from app.fieldnotes.controller import ControllerError, HttpController, LogLine
+from app.fieldnotes.inbox import TURN_LINES
 from app.fieldnotes.metrics import Metrics
 from app.fieldnotes.triage import TriageIndex, stamp
 from app.services.base_task import BaseTask, ProgressHandle
@@ -61,6 +72,12 @@ RETRY_SKIPPED = 300.0
 HOLD_EXPIRY = timedelta(minutes=30)
 # The skips the controller reports when no environment of the project was free or could be started.
 RETRIED_SKIPS = ("in-use", "no-capacity")
+# How often the follow looks for the run's session until it finds it.
+LOOK_EVERY = 5.0
+# A response stream that drops is read again after REREAD seconds, the wait doubling up to
+# REREAD_MAX until a line is read.
+REREAD = 2.0
+REREAD_MAX = 60.0
 
 DEFAULT_PROMPT = (
     "Read skills/install/SKILL.md in /work/Fieldnotes and follow it: pull, then load skill "
@@ -78,15 +95,14 @@ class ActionerSettings:
     reasoning_effort: str | None = None
 
 
-class Controller(Protocol):
-    def run(self, actioner: ActionerSettings) -> str:
-        """Start a prompt run of the actioner; its run id."""
-
-
 @dataclass(frozen=True)
 class Held:
+    """The run held: its id, when it was started, and its last `TURN_LINES` condensed log lines,
+    oldest first."""
+
     run_id: str
     at: datetime
+    lines: tuple[str, ...] = ()
 
 
 class ActionerFailure(BaseModel):
@@ -101,26 +117,28 @@ class ActionerFailure(BaseModel):
 
 
 class ActionerState(BaseModel):
-    """The actioner as the app bar shows it (FR-33): `running` while a run is held, `run` and
-    `since` naming it; `starting` while a start is pending, asked of the controller or waiting to
-    be tried again; `idle` otherwise. `failure` is the last failure, kept until the next run
-    starts or an editor clears it."""
+    """The actioner as the app bar and the actioner page show it (FR-33): `running` while a run is
+    held, `run` and `since` naming it and `lines` its last condensed log lines, oldest first, up
+    to four, none until the follow has read one; `starting` while a start is pending, asked of the
+    controller or waiting to be tried again; `idle` otherwise. `failure` is the last failure, kept
+    until the next run starts or an editor clears it."""
 
     model_config = ConfigDict(frozen=True)
 
     state: Literal["idle", "starting", "running"]
     run: str | None
     since: str | None
+    lines: list[str]
     failure: ActionerFailure | None
 
 
 class Hold:
-    """The run held, `"runId"` and `"at"`, and the last failure, `"failure"`, in one file on the
-    volume both pods mount, written whole through a rename, so it outlives a pod and both see it
-    through a rollout's overlap. Its writers take turns on an exclusive `flock` of a lock file
-    beside it, which the volume holds across both pods' mounts; each change opens the lock file
-    anew, so the threads of one process take turns as well. A file that cannot be read holds
-    nothing."""
+    """The run held, `"runId"`, `"at"` and `"lines"`, and the last failure, `"failure"`, in one
+    file on the volume both pods mount, written whole through a rename, so it outlives a pod and
+    both see it through a rollout's overlap. Its writers take turns on an exclusive `flock` of a
+    lock file beside it, which the volume holds across both pods' mounts; each change opens the
+    lock file anew, so the threads of one process take turns as well. A file that cannot be read
+    holds nothing."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -131,7 +149,12 @@ class Hold:
         try:
             body = json.loads(self.path.read_text(encoding="utf-8"))
             held = (
-                Held(str(body["runId"]), datetime.fromisoformat(body["at"]))
+                Held(
+                    str(body["runId"]),
+                    datetime.fromisoformat(body["at"]),
+                    # A pod of the release before the lines writes a hold without them.
+                    tuple(map(str, body.get("lines", ()))),
+                )
                 if "runId" in body
                 else None
             )
@@ -171,6 +194,19 @@ class Hold:
         """Record a start the controller refused, the hold as it is."""
         self._change(lambda held, kept: (None, held, failure))
 
+    def add_line(self, run_id: str, line: str) -> bool:
+        """Keep `line` as the latest of the held run's lines, the first of `TURN_LINES` dropped past
+        them, while the hold names `run_id`; whether it does. The failure stays as it stands."""
+
+        def apply(
+            held: Held | None, kept: ActionerFailure | None
+        ) -> tuple[bool, Held | None, ActionerFailure | None]:
+            if held is None or held.run_id != run_id:
+                return False, held, kept
+            return True, replace(held, lines=(*held.lines, line)[-TURN_LINES:]), kept
+
+        return self._change(apply)
+
     def clear(self, failure: ActionerFailure) -> bool:
         """Clear the last failure if it is `failure`, the hold as it is; whether it was."""
 
@@ -204,7 +240,11 @@ class Hold:
     def _write(self, held: Held | None, failure: ActionerFailure | None) -> None:
         body: dict[str, Any] = {}
         if held is not None:
-            body |= {"runId": held.run_id, "at": held.at.isoformat()}
+            body |= {
+                "runId": held.run_id,
+                "at": held.at.isoformat(),
+                "lines": list(held.lines),
+            }
         if failure is not None:
             body["failure"] = failure.model_dump()
         if not body:
@@ -243,6 +283,20 @@ class ActionerStart(BaseModel):
     outcome: Outcome
 
 
+# The headless sessions working in the project as a run is asked for: environment and name.
+Note = frozenset[tuple[str, str]]
+
+
+class _Follow:
+    """The follow of the held run `run_id`, which leaves out the sessions of its `note`."""
+
+    def __init__(self, run_id: str, note: Note) -> None:
+        self.run_id = run_id
+        self.note = note
+        # Set once the follow is over, or its pod leaves it.
+        self.released = threading.Event()
+
+
 class _Start(BaseTask):
     def __init__(self, actioner: Actioner) -> None:
         super().__init__()
@@ -255,45 +309,64 @@ class _Start(BaseTask):
 class Actioner:
     def __init__(
         self,
-        controller: Controller | None,
+        controller: HttpController | None,
         settings: ActionerSettings | None,
         triage: TriageIndex,
         metrics: Metrics,
         hold: Hold,
         clock: Callable[[], datetime],
+        inbox_session: Callable[[], tuple[str, str] | None],
     ) -> None:
         """Without `controller` or `settings`, their variables unset, a start is skipped and
-        logged."""
+        logged. `inbox_session` answers the inbox sitting's session, its environment and its
+        name, which the follow leaves out."""
         self.controller = controller
         self.settings = settings
         self.triage = triage
         self.metrics = metrics
         self.hold = hold
         self.clock = clock
+        self.inbox_session = inbox_session
         self.retry = RETRY_AFTER
         self.skipped_retry = RETRY_SKIPPED
         self.expiry = HOLD_EXPIRY
+        self.look_every = LOOK_EVERY
+        self.reread = REREAD
+        self.reread_max = REREAD_MAX
         self._lock = threading.Lock()
         self._pending = False
         self._retrying: threading.Timer | None = None
         self._stopped = False
+        self._following: _Follow | None = None
+        self._leaving = False
 
     @property
     def pending(self) -> bool:
         with self._lock:
             return self._pending
 
+    @property
+    def following(self) -> str | None:
+        """The run this pod follows, while it does."""
+        with self._lock:
+            return self._following.run_id if self._following is not None else None
+
     def state(self) -> ActionerState:
         """The actioner as the app bar shows it (FR-33). A pending start is this pod's alone."""
         held, failure = self.hold.load()
         if held is not None and self.clock() - held.at < self.expiry:
             return ActionerState(
-                state="running", run=held.run_id, since=stamp(held.at), failure=failure
+                state="running",
+                run=held.run_id,
+                since=stamp(held.at),
+                lines=list(held.lines),
+                failure=failure,
             )
         return ActionerState(
             state="starting" if self.pending else "idle",
             run=None,
             since=None,
+            lines=[],
             failure=failure,
         )
 
@@ -338,8 +411,8 @@ class Actioner:
         return True
 
     def attempt(self) -> Outcome:
-        """Start a run while submitted items wait and no run is held; a live hold is tried again
-        `retry` seconds later."""
+        """Start a run while submitted items wait and no run is held, and follow it; a live hold
+        is tried again `retry` seconds later."""
         assert self.controller is not None and self.settings is not None
         waiting = [item.observation for item in self.triage.items() if item.submitted]
         if not waiting:
@@ -363,6 +436,7 @@ class Actioner:
                 held.run_id,
                 self.expiry,
             )
+        note = self._note()
         try:
             run_id = self.controller.run(self.settings)
         except ControllerError as exc:
@@ -383,6 +457,7 @@ class Actioner:
             len(waiting),
             ", ".join(waiting),
         )
+        self._follow(run_id, note)
         self._settle()
         return "started"
 
@@ -445,8 +520,163 @@ class Actioner:
         with self._lock:
             self._pending = False
 
+    # The run's follow.
+
+    def _note(self) -> Note | None:
+        """The headless sessions working in the project before the run is asked for; None, the
+        run's session then not followed, when the controller could not say."""
+        try:
+            return frozenset(self._working())
+        except ControllerError as exc:
+            logger.warning(
+                "the sessions working before the actioner run were not noted, so its session "
+                "is not followed: %s",
+                exc,
+            )
+            return None
+
+    def _working(self) -> Iterator[tuple[str, str]]:
+        """The headless sessions working in the project's running environments, each its
+        environment and its name. An environment stopped since the list holds none."""
+        assert self.controller is not None
+        for env in self.controller.environments():
+            if env.status != "running":
+                continue
+            try:
+                sessions = self.controller.sessions(env.env_id)
+            except ControllerError as exc:
+                if not exc.lost:
+                    raise
+                continue
+            for session in sessions:
+                if session.mode == "headless" and session.working:
+                    yield env.env_id, session.name
+
+    def _follow(self, run_id: str, note: Note | None) -> None:
+        """Follow the run just held on a thread of its own, releasing the follow it replaces;
+        without the note, or once this pod has left its follows, the run is not followed."""
+        if note is None:
+            return
+        follow = _Follow(run_id, note)
+        with self._lock:
+            leaving, replaced = self._leaving, self._following
+            if not leaving:
+                self._following = follow
+        if leaving:
+            logger.info(
+                "actioner run %s is not followed: shutdown is announced", run_id
+            )
+            return
+        if replaced is not None:
+            replaced.released.set()
+        threading.Thread(
+            target=self._run, args=(follow,), name="actioner-follow", daemon=True
+        ).start()
+
+    def _run(self, follow: _Follow) -> None:
+        try:
+            found = self._search(follow)
+            if found is not None:
+                self._read(follow, *found)
+        except Exception:  # the run goes on; only its lines stop
+            logger.exception("actioner run %s: the follow failed", follow.run_id)
+        finally:
+            follow.released.set()
+            with self._lock:
+                if self._following is follow:
+                    self._following = None
+
+    def _live(self, follow: _Follow) -> bool:
+        """Whether the follow goes on: not released, and the hold its run's and not expired."""
+        if follow.released.is_set():
+            return False
+        held = self.hold.read()
+        return (
+            held is not None
+            and held.run_id == follow.run_id
+            and self.clock() - held.at < self.expiry
+        )
+
+    def _search(self, follow: _Follow) -> tuple[str, str] | None:
+        """The run's session, looked for every `look_every` seconds while the follow goes on: a
+        headless session working that was not at the note and is not the inbox sitting's own."""
+        while self._live(follow):
+            try:
+                inbox = self.inbox_session()
+                found = next(
+                    (
+                        session
+                        for session in self._working()
+                        if session not in follow.note and session != inbox
+                    ),
+                    None,
+                )
+            except ControllerError as exc:
+                logger.info(
+                    "actioner run %s: its session was not looked for: %s",
+                    follow.run_id,
+                    exc,
+                )
+            else:
+                if found is not None:
+                    logger.info(
+                        "actioner run %s: its session is %s in %s",
+                        follow.run_id,
+                        found[1],
+                        found[0],
+                    )
+                    return found
+            if follow.released.wait(self.look_every):
+                break
+        return None
+
+    def _read(self, follow: _Follow, env: str, name: str) -> None:
+        """The session's response stream from its start to its result while the follow goes on,
+        each condensed log line kept in the hold; a stream that drops read again from where it
+        stood. The session gone ends it: the controller ends it at its result."""
+        assert self.controller is not None
+        offset, wait = 0, self.reread
+        while self._live(follow):
+            try:
+                for event in self.controller.response(env, name, offset):
+                    if not self._live(follow):
+                        return
+                    if isinstance(event, LogLine):
+                        if not self.hold.add_line(follow.run_id, event.line):
+                            return
+                        offset, wait = event.offset, self.reread
+                return
+            except ControllerError as exc:
+                if exc.lost:
+                    logger.info(
+                        "actioner run %s: its session %s is gone: %s",
+                        follow.run_id,
+                        name,
+                        exc,
+                    )
+                    return
+                logger.warning(
+                    "actioner run %s: %s; reading again in %g s",
+                    follow.run_id,
+                    exc,
+                    wait,
+                )
+            if follow.released.wait(wait):
+                return
+            wait = min(wait * 2, self.reread_max)
+
+    def release(self) -> None:
+        """Leave the run's follow, and every follow that begins after: shutdown is announced."""
+        with self._lock:
+            self._leaving = True
+            follow = self._following
+        if follow is not None:
+            follow.released.set()
+            logger.info("actioner run %s: its follow left", follow.run_id)
+
     def stop(self) -> None:
-        """Drop a retry that waits."""
+        """Leave the run's follow and drop a retry that waits."""
+        self.release()
         with self._lock:
             self._stopped = True
             self._pending = False

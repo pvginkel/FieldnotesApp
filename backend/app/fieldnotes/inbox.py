@@ -302,6 +302,14 @@ class SittingFile:
                 self._write(changed)
             return value
 
+    def session(self) -> tuple[str, str] | None:
+        """The sitting's session as the file names it, its environment and its name; None while
+        there is none."""
+        sitting = self.load()
+        if sitting is None or sitting.environment is None or sitting.session is None:
+            return None
+        return sitting.environment, sitting.session
+
     def read(self, sitting_id: str) -> Sitting | None:
         """The sitting `sitting_id`, once the write that made it is done; None when the file holds
         another or none."""

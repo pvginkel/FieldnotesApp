@@ -9,9 +9,10 @@ and `m` distinct words with `shared` in common: a test sets a score by choosing 
 real board client and its reading of the JSON run in every test that syncs a card.
 
 `FakeController` answers the KubeCoder controller's routes the API calls, over an httpx transport:
-the actioner's prompt runs, and the environments, sessions and headless drive routes the inbox
-sitting's relay calls, the response stream included. The real controller client runs in every test
-that submits or sits the inbox, and the fake writes the webhook's body a run's ending would send.
+the actioner's prompt runs, which it plays in a headless session of the project, and the
+environments, sessions and headless drive routes the inbox sitting's relay and the run's follow
+call, the response stream included. The real controller client runs in every test that submits or
+sits the inbox, and the fake writes the webhook's body a run's ending would send.
 """
 
 from __future__ import annotations
@@ -226,10 +227,16 @@ class FakeController:
     Each prompt run is answered with the next of `answers`, the last one for every run after:
     `202` accepts it with the next run id, another status is the controller's problems, and
     `None` a connection that fails. `runs` holds each accepted or refused run's body, `ids` the ids
-    answered. `on_run` is called inside a run, before its answer.
+    answered. `on_run` is called inside a run, before its answer. An accepted run plays, off the
+    request, as the controller's: it takes a running environment of the project, else starts a
+    stopped one, creates a headless session there, sends it the run's prompt as a turn scripted by
+    the next of `run_turns`, and ends the session at its result. `run_sessions` names each run's
+    session, its environment and its name. A project with no environment to take, or one that does
+    not come up, plays nothing. The run's webhook is the test's to deliver.
 
     A test lays out `environments` with `add_environment`, an environment's start held until
-    `settle` brings it up, and scripts each turn sent, of any session, with the next of `turns`:
+    `settle` brings it up, and their sessions with `add_session`, and scripts each turn sent, of
+    any session, with the next of `turns`:
     its log lines and its result, at once or at a pace, or a turn held in flight until `finish`.
     Each request to the other routes takes the next of `faults` while any are left: a status is
     the controller failing, `None` a connection that fails. Each response stream opened takes the
@@ -249,6 +256,8 @@ class FakeController:
         self.runs: list[dict[str, Any]] = []
         self.ids: list[str] = []
         self.on_run: Callable[[], object] | None = None
+        self.run_turns: list[FakeTurn] = []
+        self.run_sessions: dict[str, tuple[str, str]] = {}
         self.environments: dict[str, FakeEnvironment] = {}
         self.turns: list[FakeTurn] = []
         self.faults: list[int | None] = []
@@ -297,13 +306,18 @@ class FakeController:
         return env
 
     def add_session(
-        self, env_id: str, name: str, *, working: bool = False
+        self, env_id: str, name: str, *, working: bool = False, headless: bool = False
     ) -> FakeSession:
-        """An interactive session of the environment, working or not."""
+        """A session of the environment, working or not: an interactive one, or with `headless` a
+        headless one, which works while a turn is in flight that `finish` ends."""
         env = self.environments[env_id]
-        session = FakeSession(
-            name, "interactive", self._workdir(env, None), working=working
-        )
+        workdir = self._workdir(env, None)
+        if headless:
+            session = FakeSession(
+                name, "headless", workdir, status="busy" if working else "idle"
+            )
+        else:
+            session = FakeSession(name, "interactive", workdir, working=working)
         with self._cond:
             env.sessions[name] = session
         return session
@@ -434,9 +448,41 @@ class FakeController:
         if status is None:
             raise httpx.ConnectError("connection refused", request=request)
         if status == 202:
-            self.ids.append(f"run-{len(self.ids) + 1}")
-            return httpx.Response(202, json={"runId": self.ids[-1]})
+            run_id = f"run-{len(self.ids) + 1}"
+            self.ids.append(run_id)
+            threading.Thread(
+                target=self._drive,
+                args=(run_id, body["prompt"]),
+                name="fake-run",
+                daemon=True,
+            ).start()
+            return httpx.Response(202, json={"runId": run_id})
         return self._problem(status, "internal", "the controller failed")
+
+    def _drive(self, run_id: str, prompt: str) -> None:
+        """Play the accepted run `run_id` as the controller drives a prompt run."""
+        with self._cond:
+            project = [e for e in self.environments.values() if e.repo == self.repo]
+            env = next((e for e in project if e.status == "running"), None) or next(
+                (e for e in project if e.status == "stopped"), None
+            )
+            if env is None:
+                return
+            if env.status == "stopped":
+                if env.start_as == "admission-blocked":
+                    return
+                env.status = "starting" if env.held else env.start_as
+                self._cond.wait_for(lambda: env.status != "starting" or not env.held)
+                if env.status != "running":
+                    return
+            session = self._open(env, {})
+            self.run_sessions[run_id] = (env.env_id, session.name)
+            turn = self.run_turns.pop(0) if self.run_turns else FakeTurn()
+            self._take(session, turn, prompt)
+            self._cond.wait_for(lambda: session.terminal)
+            if env.sessions.get(session.name) is session:
+                del env.sessions[session.name]
+                self._detach(session)
 
     def _environment(self, env: FakeEnvironment, status: str | None = None) -> Any:
         status = status or env.status
@@ -623,6 +669,10 @@ class FakeController:
         unknown = sorted(set(body) - _CREATE_FIELDS)
         if unknown:
             return self._invalid("extra inputs are not permitted", "body", unknown[0])
+        return httpx.Response(200, json=self._snapshot(self._open(env, body)))
+
+    def _open(self, env: FakeEnvironment, body: dict[str, Any]) -> FakeSession:
+        """A headless session of `env` made by the create `body`, named as the worker names it."""
         names = ["claude"] + [f"claude-{n}" for n in range(2, len(env.sessions) + 2)]
         name = next(name for name in names if name not in env.sessions)
         session = FakeSession(
@@ -633,7 +683,7 @@ class FakeController:
             session_id=body.get("resume") or "",
         )
         env.sessions[name] = session
-        return httpx.Response(200, json=self._snapshot(session))
+        return session
 
     def _status(self, call: Call, env_id: str, name: str) -> httpx.Response:
         env = self._gate(env_id)
@@ -656,8 +706,14 @@ class FakeController:
             return self._invalid("message is a string", "body", "message")
         if session.status not in ("idle", "error"):
             return self._problem(409, "session-busy", "a turn is in flight")
-        turn = self.turns.pop(0) if self.turns else FakeTurn()
-        session.messages.append(body["message"])
+        self._take(
+            session, self.turns.pop(0) if self.turns else FakeTurn(), body["message"]
+        )
+        return httpx.Response(202)
+
+    def _take(self, session: FakeSession, turn: FakeTurn, message: str) -> None:
+        """The session takes `message` as a turn that plays as `turn` has it."""
+        session.messages.append(message)
         session.status = "busy"
         session.terminal = False
         session.result = None
@@ -668,13 +724,12 @@ class FakeController:
                 name="fake-turn",
                 daemon=True,
             ).start()
-            return httpx.Response(202)
+            return
         for line in turn.lines:
             self._append(session, line)
         if not turn.held:
             self._finish(session, turn.result, turn.is_error)
         self._cond.notify_all()
-        return httpx.Response(202)
 
     def _play(self, session: FakeSession, finished: int, turn: FakeTurn) -> None:
         """Play a paced turn for as long as it is in flight: the session neither ended nor past

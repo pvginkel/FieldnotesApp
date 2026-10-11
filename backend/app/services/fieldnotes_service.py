@@ -147,6 +147,7 @@ class FieldnotesService:
             old_actioner.metrics,
             old_actioner.hold,
             old_actioner.clock,
+            old_actioner.inbox_session,
         )
         runtime.inbox = Inbox(
             controller,

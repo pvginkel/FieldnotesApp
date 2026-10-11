@@ -97,6 +97,7 @@ class Runtime:
             self.store, self.index, self.matcher, clock, board, outcomes, self.metrics
         )
         self.rulings = Rulings(self.store, clock, self.metrics)
+        sitting = SittingFile(settings.cache_dir / INBOX_SITTING)
         self.actioner = Actioner(
             controller,
             settings.actioner,
@@ -104,13 +105,9 @@ class Runtime:
             self.metrics,
             Hold(settings.cache_dir / ACTIONER_HOLD),
             clock,
+            sitting.session,
         )
-        self.inbox = Inbox(
-            controller,
-            settings.inbox,
-            SittingFile(settings.cache_dir / INBOX_SITTING),
-            clock,
-        )
+        self.inbox = Inbox(controller, settings.inbox, sitting, clock)
         self.ready = False
         self.failed = False
         self._on_failure = on_failure
@@ -147,9 +144,10 @@ class Runtime:
         )
 
     def release(self) -> None:
-        """Leave this pod's follows to the other pod and stop the inbox's timer: shutdown is
-        announced."""
+        """Leave this pod's follows, the inbox's and the actioner run's, to the other pod and stop
+        the inbox's timer: shutdown is announced."""
         self.inbox.stop()
+        self.actioner.release()
 
     def stop(self) -> None:
         self.inbox.stop()

@@ -446,6 +446,7 @@ def test_the_triage_endpoints_are_in_the_openapi_document_behind_the_editor_gate
         "state",
         "run",
         "since",
+        "lines",
         "failure",
     }
     assert set(replies["clear"]["properties"]) == set(replies["actioner"]["properties"])

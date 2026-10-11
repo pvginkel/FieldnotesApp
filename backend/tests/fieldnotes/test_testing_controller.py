@@ -261,6 +261,7 @@ def test_a_layout_ends_the_last_sitting_and_starts_the_actioner_afresh(
         "state": "idle",
         "run": None,
         "since": None,
+        "lines": [],
         "failure": None,
     }
     hold = Path(backend.runtime.settings.cache_dir) / ACTIONER_HOLD
@@ -305,6 +306,7 @@ def test_a_layout_drops_the_replaced_actioners_waiting_retry(backend, eventually
         "state": "idle",
         "run": None,
         "since": None,
+        "lines": [],
         "failure": None,
     }
 

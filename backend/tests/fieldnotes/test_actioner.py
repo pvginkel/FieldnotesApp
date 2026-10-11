@@ -39,7 +39,7 @@ UNSET = {
 }
 HOOK = "/api/hooks/kubecoder"
 CLEAR = "/api/triage/actioner/clear"
-IDLE = {"state": "idle", "run": None, "since": None, "failure": None}
+IDLE = {"state": "idle", "run": None, "since": None, "lines": [], "failure": None}
 
 
 def starts(api, scrape) -> dict[str, float]:
@@ -857,6 +857,7 @@ SHOWN = ActionerFailure(
 NEWER = ActionerFailure(
     at="2026-09-19T10:03:00Z", outcome="failed", reason="turn-error"
 )
+LINE = "[4s] [tool_use: Read] triage/EX-1.json"
 
 
 @pytest.mark.parametrize(
@@ -893,6 +894,30 @@ NEWER = ActionerFailure(
             (RUN, NEWER),
         ),
         (
+            lambda hold: hold.release(RUN.run_id, NEWER),
+            lambda hold: hold.add_line(RUN.run_id, LINE),
+            False,
+            (None, NEWER),
+        ),
+        (
+            lambda hold: hold.add_line(RUN.run_id, LINE),
+            lambda hold: hold.release(RUN.run_id, NEWER),
+            True,
+            (None, NEWER),
+        ),
+        (
+            lambda hold: hold.clear(SHOWN),
+            lambda hold: hold.add_line(RUN.run_id, LINE),
+            True,
+            (Held(RUN.run_id, RUN.at, (LINE,)), None),
+        ),
+        (
+            lambda hold: hold.take(NEXT.run_id, NEXT.at),
+            lambda hold: hold.add_line(RUN.run_id, LINE),
+            False,
+            (NEXT, None),
+        ),
+        (
             lambda hold: hold.clear(SHOWN),
             lambda hold: hold.fail(NEWER),
             None,
@@ -905,6 +930,10 @@ NEWER = ActionerFailure(
         "a start, then a clear",
         "a clear, then a start",
         "a refused start, then a clear",
+        "the webhook, then the follow's line",
+        "the follow's line, then the webhook",
+        "a clear, then the follow's line",
+        "the next start, then the last run's line",
         "a clear, then a refused start",
     ],
 )

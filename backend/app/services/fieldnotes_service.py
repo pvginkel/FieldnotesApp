@@ -1,6 +1,6 @@
 """The Fieldnotes runtime inside the app: built from the `FIELDNOTES_*` environment, started with
-the app's background services, stopped on shutdown, and reported to the health checks and the
-app's `/metrics`.
+the app's background services, its follows released once shutdown is announced, stopped on
+shutdown, and reported to the health checks and the app's `/metrics`.
 
 Outside production a missing store (`FIELDNOTES_STORE_URL` unset) leaves the runtime out, so the
 dev stack boots without one; the Fieldnotes endpoints then answer `503 not-ready`. In production a
@@ -169,7 +169,12 @@ class FieldnotesService:
         return {"ok": runtime.ready, "failed": runtime.failed}
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
-        if event == LifecycleEvent.SHUTDOWN and self.runtime is not None:
+        if self.runtime is None:
+            return
+        if event == LifecycleEvent.PREPARE_SHUTDOWN:
+            # Before the shutdown waiters, which wait out every task, the follows' included.
+            self.runtime.release()
+        elif event == LifecycleEvent.SHUTDOWN:
             self.runtime.stop()
             if self._scratch is not None:
                 shutil.rmtree(self._scratch, ignore_errors=True)

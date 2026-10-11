@@ -203,6 +203,9 @@ class FakeEnvironment:
     # What a start brings it to: `running`; `starting`, which its wait runs out on; `error`; or
     # `admission-blocked`, a start refused at the node's cap.
     start_as: str = "running"
+    # A held environment is `starting` from its start until `FakeController.settle`, a start that
+    # waits held as long, or until it is stopped.
+    held: bool = False
     sessions: dict[str, FakeSession] = field(default_factory=dict)
 
 
@@ -225,13 +228,14 @@ class FakeController:
     `None` a connection that fails. `runs` holds each accepted or refused run's body, `ids` the ids
     answered. `on_run` is called inside a run, before its answer.
 
-    A test lays out `environments` with `add_environment` and scripts each turn sent, of any
-    session, with the next of `turns`: its log lines and its result, at once or at a pace, or a
-    turn held in flight until `finish`. Each request to the other routes takes the next of
-    `faults` while any are left: a status is the controller failing, `None` a connection that
-    fails. Each response stream opened takes the next of `drops`, if any: it carries that many
-    events and then its connection drops. A quiet stream carries a keepalive every `keepalive`
-    seconds. `calls` holds every request to those routes made with the token.
+    A test lays out `environments` with `add_environment`, an environment's start held until
+    `settle` brings it up, and scripts each turn sent, of any session, with the next of `turns`:
+    its log lines and its result, at once or at a pace, or a turn held in flight until `finish`.
+    Each request to the other routes takes the next of `faults` while any are left: a status is
+    the controller failing, `None` a connection that fails. Each response stream opened takes the
+    next of `drops`, if any: it carries that many events and then its connection drops. A quiet
+    stream carries a keepalive every `keepalive` seconds. `calls` holds every request to those
+    routes made with the token.
 
     Where the documents are silent the fake follows the worker's code: a stream opened after its
     turn finished replays the log from its offset, then delivers that turn's result at once
@@ -285,8 +289,9 @@ class FakeController:
         name: str | None = None,
         repo: str | None = None,
         start_as: str = "running",
+        held: bool = False,
     ) -> FakeEnvironment:
-        env = FakeEnvironment(env_id, repo or self.repo, status, name, start_as)
+        env = FakeEnvironment(env_id, repo or self.repo, status, name, start_as, held)
         with self._cond:
             self.environments[env_id] = env
         return env
@@ -320,6 +325,16 @@ class FakeController:
             session = self.session(env_id, name)
             assert session.status == "busy", f"{name} has no turn in flight"
             self._finish(session, result, is_error)
+
+    def settle(self, env_id: str) -> None:
+        """A held environment comes up: a start brings it to its `start_as` from now on, and a
+        start that waits for it answers."""
+        with self._cond:
+            env = self.environments[env_id]
+            env.held = False
+            if env.status == "starting":
+                env.status = env.start_as
+            self._cond.notify_all()
 
     def stop_environment(self, env_id: str) -> None:
         """The environment stopped under its sessions, as a controller run's end stops it."""
@@ -527,9 +542,10 @@ class FakeController:
                     overflowEnvironments=0,
                     overflowSlots=1,
                 )
-            env.status = env.start_as
+            env.status = "starting" if env.held else env.start_as
             if not held:
                 return httpx.Response(202, json=self._environment(env, "starting"))
+            self._cond.wait_for(lambda: env.status != "starting" or not env.held)
         headers = {}
         if held:
             answered = env.status in ("running", "error", "stopped", "deleting")
@@ -710,6 +726,7 @@ class FakeController:
         for session in env.sessions.values():
             self._detach(session)
         env.sessions.clear()
+        self._cond.notify_all()
 
     def _end(self, call: Call, env_id: str, name: str) -> httpx.Response:
         env = self._gate(env_id)

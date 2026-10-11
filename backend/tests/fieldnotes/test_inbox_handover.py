@@ -3,12 +3,17 @@ follow, named with its pod and a heartbeat in the sitting's file, and taken over
 last offset by whichever pod notices its heartbeat stopped, on a read of the sitting or on the timer;
 the result lands once and the first turn is sent once; every write is checked against the sitting
 and the follow, across both pods; a failure that is not a loss is tried again, a loss loses the
-sitting; and the timer ends a sitting idle for the idle time (FR-31).
+sitting; a pod whose shutdown is announced leaves its turn at once, which the other pod takes over
+at its next read, and takes none over itself (FR-30); and the timer ends a sitting idle for the
+idle time (FR-31).
 
 Two pods are two instances over one cache directory: the app's own, and a second `Inbox` beside it.
 A pod retired mid-turn is the file it left behind: a follow whose last heartbeat is two minutes
-old. Against the fake controller; every environment, line and message is invented."""
+old. A pod stopped mid-turn is the app shut down through its lifecycle coordinator, as the chart's
+drain shuts it down, beside a second pod with a task service of its own. Against the fake
+controller; every environment, line and message is invented."""
 
+import logging
 import threading
 import time
 from datetime import timedelta
@@ -28,6 +33,9 @@ from app.fieldnotes.inbox import (
 )
 from app.fieldnotes.runtime import INBOX_SITTING
 from app.fieldnotes.testing import FakeTurn
+from app.schemas.task_schema import TaskStatus
+from app.services.task_service import TaskService
+from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.fieldnotes.test_inbox import (
     ANSWER,
     AT,
@@ -35,6 +43,7 @@ from tests.fieldnotes.test_inbox import (
     LATER,
     LINES,
     WRITE_UP,
+    begin,
     end,
     finished,
     inbox,
@@ -83,6 +92,26 @@ def second():
     yield make
     for other in made:
         other.stop()
+
+
+@pytest.fixture
+def standby(second):
+    """`standby(api, clock)`: the second pod with a task service of its own, as the pod beside
+    one that shuts down has; its inbox and its task service, which shuts down at the end, after
+    the inbox stops."""
+    made: list[tuple[Inbox, LifecycleCoordinator]] = []
+
+    def make(api, clock) -> tuple[Inbox, TaskService]:
+        lifecycle = LifecycleCoordinator(graceful_shutdown_timeout=5)
+        service = TaskService(lifecycle, api.app.container.sse_connection_manager())
+        other = second(api, clock)
+        made.append((other, lifecycle))
+        return other, service
+
+    yield make
+    for other, lifecycle in made:
+        other.stop()
+        lifecycle.shutdown()
 
 
 @pytest.fixture
@@ -165,6 +194,40 @@ def starting(clock, **changes) -> Sitting:
 def calls(kubecoder, since: int) -> list[str]:
     """The relay's controller calls since the `since`th, as `METHOD last-segment`."""
     return [f"{c.method} {c.path.rsplit('/', 1)[-1]}" for c in kubecoder.calls[since:]]
+
+
+def shut_down(api) -> threading.Thread:
+    """The app's pod shut down as the chart's drain shuts it down, through its lifecycle
+    coordinator, on a thread of its own; the thread."""
+    stopping = threading.Thread(
+        target=api.app.container.lifecycle_coordinator().shutdown, daemon=True
+    )
+    stopping.start()
+    return stopping
+
+
+def finished_on(service: TaskService, eventually, task_id):
+    """`finished`, for a task of `service`."""
+    eventually(
+        lambda: service.get_task_status(task_id).status
+        in (TaskStatus.COMPLETED, TaskStatus.FAILED),
+        "the task's end",
+    )
+    info = service.get_task_status(task_id)
+    assert info.status == TaskStatus.COMPLETED, info.error
+    return info.result
+
+
+def completed(heard, task_id) -> list[dict]:
+    return [
+        e["data"]
+        for e in heard
+        if e["task_id"] == task_id and e["event_type"] == "task_completed"
+    ]
+
+
+def starts(kubecoder) -> list[str]:
+    return [c.path for c in kubecoder.calls if c.path.endswith("/start")]
 
 
 # -- the handover --------------------------------------------------------------------------------
@@ -367,6 +430,149 @@ def test_a_follow_whose_turn_another_pod_took_over_writes_nothing_more(
     assert progress(heard, taken.turn.task) == [LINES[1]]
     assert result["message"]["text"] == ANSWER
     assert [m["text"] for m in state["sitting"]["transcript"]][-2:] == ["go", ANSWER]
+
+
+# -- a pod shutting down -------------------------------------------------------------------------
+
+
+def test_a_pod_shut_down_mid_turn_leaves_it_at_once_to_the_other_pod(
+    start, kubecoder, eventually, environ, clock, standby, monkeypatch
+):
+    """R2 (FN-39): the follow is released as shutdown is announced, so the shutdown waits out no
+    turn; the other pod takes the turn over at its next read, the clock not moved, and the result
+    lands once."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        heard = listen(api, monkeypatch)
+        other, other_tasks = standby(api, clock)
+        kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
+        old = send(api, "go").json()["sitting"]["turn"]["task"]
+        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        stopping = shut_down(api)
+        stopping.join(5)
+        prompt = not stopping.is_alive()
+        left = held(environ)
+        state = other.state(other_tasks)
+        assert state.sitting is not None and state.sitting.turn is not None
+        taken = state.sitting.turn.task
+        kubecoder.emit(ENV, "claude", LINES[1])
+        kubecoder.finish(ENV, "claude", ANSWER)
+        result = finished_on(other_tasks, eventually, taken)
+        answered = held(environ)
+
+    assert prompt
+    # Left as it stood, held by no follow.
+    assert left.follower is None
+    assert (left.status, left.turn.task, left.turn.log) == ("busy", old, LINES[0])
+    assert completed(heard, old) == [{"message": None}]
+    assert progress(heard, old) == [LINES[0]]
+    assert taken != old
+    assert progress(heard, taken) == [LINES[1]]
+    assert result == {"message": message("session", ANSWER)}
+    assert (answered.turn, answered.follower) == (None, None)
+    assert [m.text for m in answered.transcript] == [
+        "/dev:inbox",
+        WRITE_UP,
+        "go",
+        ANSWER,
+    ]
+    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
+
+
+def test_a_pod_shut_down_while_the_environment_comes_up_leaves_the_start_at_once(
+    start, kubecoder, eventually, environ, clock, standby, monkeypatch
+):
+    """The start of an environment the API started is one controller call that waits for it to
+    settle; the follow leaves it without waiting for its answer, and the other pod starts the
+    environment the file records."""
+    kubecoder.add_environment(ENV, "stopped", held=True)
+    with start() as api:
+        heard = listen(api, monkeypatch)
+        other, other_tasks = standby(api, clock)
+        old = begin(api).json()["sitting"]["turn"]["task"]
+        eventually(lambda: starts(kubecoder), "the start")
+        stopping = shut_down(api)
+        stopping.join(5)
+        prompt = not stopping.is_alive()
+        left = held(environ)
+        kubecoder.turns.append(FakeTurn(LINES, WRITE_UP))
+        state = other.state(other_tasks)
+        assert state.sitting is not None and state.sitting.turn is not None
+        kubecoder.settle(ENV)
+        result = finished_on(other_tasks, eventually, state.sitting.turn.task)
+
+    assert prompt
+    assert left.follower is None
+    assert (left.status, left.environment, left.started_environment, left.session) == (
+        "starting",
+        ENV,
+        True,
+        None,
+    )
+    assert completed(heard, old) == [{"message": None}]
+    assert result == {"message": message("session", WRITE_UP)}
+    assert len(starts(kubecoder)) == 2
+    assert list(kubecoder.environments[ENV].sessions) == ["claude"]
+    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox"]
+
+
+def test_a_pod_shutting_down_takes_no_turn_over_and_says_nothing_of_it(
+    start, kubecoder, eventually, environ, clock, caplog
+):
+    """While its shutdown waiters run, the pod's task service takes no task: its read answers the
+    sitting as it stands, and its sweep logs no failure."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        retired = retired_turn(environ, clock, "close EX-7")
+        lifecycle = api.app.container.lifecycle_coordinator()
+        draining, drained = threading.Event(), threading.Event()
+
+        def drain(timeout: float) -> bool:
+            draining.set()
+            return drained.wait(timeout)
+
+        lifecycle.register_shutdown_waiter("the drain", drain)
+        stopping = shut_down(api)
+        try:
+            assert draining.wait(5)
+            caplog.clear()
+            reply = api.get("/api/inbox")
+            api.runtime.inbox.sweep(tasks(api))
+        finally:
+            drained.set()
+        stopping.join(5)
+
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["sitting"]["turn"]["task"] == "retired-task"
+    assert held(environ).follower == retired.follower
+    assert [
+        r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
+    ] == []
+    assert not stopping.is_alive()
+
+
+def test_a_follow_that_begins_once_its_pod_has_stopped_leaves_its_turn(
+    start, kubecoder, eventually, environ, clock
+):
+    """A turn begun as shutdown is announced: its task started before the task service refused
+    any, its follow after the inbox left the follows it had."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        pod = api.runtime.inbox
+        follow = pod._follow_of(held(environ).id, fresh=True)
+        retired_turn(environ, clock, "go", follower=pod._follower(follow))
+        since = len(kubecoder.calls)
+        pod.stop()
+        result = pod.run(follow, progress=None)
+        left = held(environ)
+
+    assert result is None
+    assert left.follower is None
+    assert left.turn is not None
+    assert kubecoder.calls[since:] == []
 
 
 # -- checked writes ------------------------------------------------------------------------------
@@ -749,8 +955,8 @@ def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires
 def test_a_stopped_pod_sweeps_no_more_and_leaves_its_turn_to_the_next(
     start, kubecoder, eventually, environ, clock, second, swept
 ):
-    """A pod a rollout retires: its runtime's stop ends its timer and releases its follow, which
-    writes nothing more, so the turn is the next pod's to take over."""
+    """A pod a rollout retires: its runtime's stop ends its timer and leaves its follow's turn,
+    held by no follow and written to no more, for the next pod to take over."""
     kubecoder.add_environment(ENV)
     with start() as api:
         opened(api, eventually, kubecoder)
@@ -768,7 +974,7 @@ def test_a_stopped_pod_sweeps_no_more_and_leaves_its_turn_to_the_next(
 
     assert result == {"message": None}
     assert left.turn is not None
-    assert left.follower is not None
-    assert left.follower.pod == api.runtime.inbox.pod
+    assert left.turn.task == task_id
+    assert left.follower is None
     assert [m.text for m in left.transcript][-1] == "go"
     assert [m.text for m in answered.transcript][-2:] == ["go", ANSWER]

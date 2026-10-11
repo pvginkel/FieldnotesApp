@@ -17,11 +17,14 @@ The turn in flight, a Start's included, is held by one follow: the file names it
 in and its heartbeat, which it refreshes while it follows. Every write a follow makes is checked,
 in one step with the write and against both pods, against the sitting it was made for and the
 follow holding its turn, so no follow brings back a sitting End cleared, overwrites a newer one,
-or writes for a turn another follow took over. A turn whose heartbeat has stopped is taken over by
-whichever pod notices first, on a read of the sitting or on the timer each pod runs, and goes on
-from where the file stands: a message the session has not taken is sent, once. A controller
-failure that is a loss loses the sitting (FR-32); any other is tried again for as long as the
-follow holds the turn. The same timer ends a sitting that has not moved for the idle time (FR-31).
+or writes for a turn another follow took over. A pod leaves the turns it follows as its shutdown
+is announced, held by no follow: each follow stops where it stands, an environment's start
+included. A turn held by no follow, or whose heartbeat has stopped, is taken over by whichever pod
+notices first, on a read of the sitting or on the timer each pod runs, and goes on from where the
+file stands: a message the session has not taken is sent, once. A pod shutting down takes no turn
+over. A controller failure that is a loss loses the sitting (FR-32); any other is tried again for
+as long as the follow holds the turn. The same timer ends a sitting that has not moved for the
+idle time (FR-31).
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import socket
 import threading
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -41,6 +45,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.exceptions import InvalidOperationException
 from app.fieldnotes.controller import (
     ControllerError,
     HttpController,
@@ -206,10 +211,10 @@ class Sitting(_Model):
     sitting is lost. `moved` is the last send or result. `offset` is the session log's byte
     offset after the last line read, where the next read of the response stream begins.
     `turns` is the number of the session's last turn whose result the transcript holds.
-    `follower` is set exactly while a turn is in flight. `subject` is the OIDC subject of the
-    operator whose request began the last turn: its task's events, the session's lines and
-    message, reach only their SSE connections (NFR-4); None, with OIDC off, reaches every
-    connection."""
+    `follower` is set only while a turn is in flight, and is None for a turn in flight whose pod
+    left it as it shut down. `subject` is the OIDC subject of the operator whose request began
+    the last turn: its task's events, the session's lines and message, reach only their SSE
+    connections (NFR-4); None, with OIDC off, reaches every connection."""
 
     id: str
     status: Status
@@ -339,7 +344,7 @@ class _Follow(BaseTask):
         # failed, or a session it has just created.
         self.unsent = fresh
         self.delay = retry
-        # Set once the follow is over, or the sitting is no longer its own.
+        # Set once the follow is over, its pod leaves it, or the sitting is no longer its own.
         self.released = threading.Event()
 
     def execute(self, progress_handle: ProgressHandle, **kwargs: Any) -> BaseModel:
@@ -382,8 +387,8 @@ class Inbox:
         return self.controller, self.settings
 
     def state(self, tasks: TaskService) -> InboxState:
-        """FR-28: the sitting as the file holds it, or none; a turn whose follow is gone taken
-        over first, as a task the page then follows."""
+        """FR-28: the sitting as the file holds it, or none; a turn no follow holds taken over
+        first, as a task the page then follows."""
         if not self.configured:
             return self._state(self.file.load())
         return self._state(self._take_over(tasks))
@@ -503,7 +508,7 @@ class Inbox:
                 logger.exception("the inbox sweep failed")
 
     def sweep(self, tasks: TaskService) -> None:
-        """A round over the sitting: a turn whose follow is gone taken over, so a turn orphaned
+        """A round over the sitting: a turn no follow holds taken over, so a turn orphaned
         with no page open is finished; and a sitting with no turn in flight that has not moved for
         the idle time, a lost one included, ended as End ends it (FR-31). Both pods sweep, and
         End is idempotent."""
@@ -530,27 +535,40 @@ class Inbox:
             self._close(expired)
 
     def _take_over(self, tasks: TaskService) -> Sitting | None:
-        """The sitting, its turn taken over first when its follow's heartbeat is `takeover` old:
-        the new follow goes on from where the file stands, as a task whose events reach the
-        operator whose request began the turn (NFR-4)."""
+        """The sitting, its turn taken over first when no follow holds it: its pod left it as it
+        shut down, or its follow's heartbeat is `takeover` old. The new follow goes on from where
+        the file stands, as a task whose events reach the operator whose request began the turn
+        (NFR-4). A pod shutting down takes nothing over: its task service takes no task once
+        shutdown is announced."""
         now = self.clock()
 
         def take(current: Sitting | None) -> tuple[Sitting | None, Sitting | None]:
             if (
                 current is None
                 or current.turn is None
-                or current.follower is None
-                or now - current.follower.beat < self.takeover
+                or (
+                    current.follower is not None
+                    and now - current.follower.beat < self.takeover
+                )
             ):
                 return current, current
             follow = self._follow_of(current.id, fresh=False)
-            task = tasks.start_task(follow, caller_subject=current.subject)
-            logger.warning(
-                "inbox sitting %s: its follow in %s last beat at %s; taken over",
-                current.id,
-                current.follower.pod,
-                stamp(current.follower.beat),
-            )
+            try:
+                task = tasks.start_task(follow, caller_subject=current.subject)
+            except InvalidOperationException:
+                return current, current
+            if current.follower is None:
+                logger.info(
+                    "inbox sitting %s: its turn, left by a pod shutting down, taken over",
+                    current.id,
+                )
+            else:
+                logger.warning(
+                    "inbox sitting %s: its follow in %s last beat at %s; taken over",
+                    current.id,
+                    current.follower.pod,
+                    stamp(current.follower.beat),
+                )
             taken = current.model_copy(
                 update={
                     "turn": current.turn.model_copy(update={"task": task.task_id}),
@@ -562,13 +580,26 @@ class Inbox:
         return self.file.change(take)
 
     def stop(self) -> None:
-        """Stop the sweep and release this pod's follows: the turns they held are taken over by
-        the pod that serves next."""
+        """Stop the sweep and leave this pod's follows, and every follow that begins after.
+        Shutdown runs it as it is announced, before the shutdown waiters wait out the follows'
+        tasks."""
         self._stopped.set()
         with self._lock:
             follows = list(self._follows)
         for follow in follows:
-            follow.released.set()
+            self._leave(follow)
+
+    def _leave(self, follow: _Follow) -> None:
+        """Release `follow`; a turn it holds is left held by no follow, for the next read or sweep
+        of either pod to take over."""
+        follow.released.set()
+        left = self.file.update(
+            follow.sitting_id,
+            follow.id,
+            lambda s: s.model_copy(update={"follower": None}),
+        )
+        if left is not None:
+            logger.info("inbox sitting %s: its turn left to the other pod", left.id)
 
     # The follows.
 
@@ -577,9 +608,12 @@ class Inbox:
         file stands, its heartbeat refreshed meanwhile; the session's message it came to. A
         controller failure that is a loss loses the sitting; any other is tried again."""
         with self._lock:
-            if self._stopped.is_set():
-                return None
-            self._follows.add(follow)
+            stopped = self._stopped.is_set()
+            if not stopped:
+                self._follows.add(follow)
+        if stopped:
+            self._leave(follow)
+            return None
         beating = threading.Thread(
             target=self._beat, args=(follow,), name="inbox-heartbeat", daemon=True
         )
@@ -702,7 +736,9 @@ class Inbox:
         env = sitting.environment
         assert env is not None
         if sitting.started_environment:
-            started = controller.start(env)
+            started = self._unless_released(follow, lambda: controller.start(env))
+            if started is None:
+                return None
             if not started.settled:
                 self._lose(follow, f"{env} did not come up: it is {started.status}")
                 return None
@@ -718,6 +754,32 @@ class Inbox:
         if named is None:
             self._abandon(creating, name)
         return named
+
+    @staticmethod
+    def _unless_released[T](follow: _Follow, call: Callable[[], T]) -> T | None:
+        """`call`'s answer, the call made off the follow's thread; None once `follow` is released
+        first, the call left to end on its own and its answer dropped."""
+        answer: Future[T] = Future()
+        woken = threading.Event()
+
+        def make() -> None:
+            try:
+                answer.set_result(call())
+            except Exception as exc:
+                answer.set_exception(exc)
+            woken.set()
+
+        def watch() -> None:
+            # `run` releases its follow as it ends, so this thread ends with the follow.
+            follow.released.wait()
+            woken.set()
+
+        threading.Thread(target=make, name="inbox-call", daemon=True).start()
+        threading.Thread(target=watch, name="inbox-call-release", daemon=True).start()
+        woken.wait()
+        if follow.released.is_set():
+            return None
+        return answer.result()
 
     def _taken(self, sitting: Sitting) -> bool:
         """Whether the session has taken the sitting's last message: its turn is in flight, or

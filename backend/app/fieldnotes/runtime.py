@@ -146,6 +146,11 @@ class Runtime:
             ", ".join(self.settings.clients.names) or "none",
         )
 
+    def release(self) -> None:
+        """Leave this pod's follows to the other pod and stop the inbox's timer: shutdown is
+        announced."""
+        self.inbox.stop()
+
     def stop(self) -> None:
         self.inbox.stop()
         self.actioner.stop()

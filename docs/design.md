@@ -364,11 +364,13 @@ scope here.
     environment. The transcript is kept and shown with a line saying so, Send is withdrawn, and the
     sitting stays until the operator's Start or End: Start begins a new sitting, clearing the lost
     one as End does. The expiry keeps it too: once the idle time (FR-31) has passed since the loss,
-    not since the last send, the API ends its session and stops an environment it started, as for
-    an idle sitting, and keeps the sitting lost. A turn in flight when the sitting
-    is lost gets no result; what the session had written on the tracker stands, and the next
-    sitting reads it there, as the skill always has. Resuming the conversation by its id is
-    deferred.
+    not since the last send, the API stops an environment it started, as for an idle sitting, and
+    keeps the sitting lost. Closing a lost sitting, by Start, End or the expiry, ends no session:
+    its own is gone, and the worker may since have given its name to another, an actioner run's
+    among them, which keeps the environment running as any session working in it does. A turn in
+    flight when the sitting is lost gets no result; what the session had written on the tracker
+    stands, and the next sitting reads it there, as the skill always has. Resuming the
+    conversation by its id is deferred.
 
 **App bar**
 

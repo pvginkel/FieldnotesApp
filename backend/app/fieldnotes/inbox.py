@@ -27,7 +27,7 @@ over. A controller failure that is a loss loses the sitting (FR-32); any other i
 as long as the follow holds the turn. The same timer closes a sitting that has not moved for the
 idle time and keeps it, ended (FR-31), and closes a lost one once the idle time has passed since
 its loss, kept lost (FR-32). A sitting it closed is closed once: Start and End clear it and close
-nothing.
+nothing. Closing a lost sitting ends no session: its own is gone, and its name may be another's.
 """
 
 from __future__ import annotations
@@ -223,8 +223,8 @@ class Follower(_Model):
 class Sitting(_Model):
     """The sitting as its file holds it. `status` is `starting` until the session has taken its
     first turn, `busy` while a turn is in flight, `idle` between turns, `lost` once the sitting is
-    lost and `ended` once the expiry has ended it. `closed`: the expiry has ended its session and
-    stopped an environment the API started, which nothing does again. `moved` is the last send or
+    lost and `ended` once the expiry has ended it. `closed`: the expiry has ended its session, a
+    live one's, and stopped an environment the API started, which nothing does again. `moved` is the last send or
     result. `offset` is the session log's byte offset after the last line read, where the next
     read of the response stream begins. `turns` is the number of the session's last turn whose
     result the transcript holds. `follower` is set only while a turn is in flight, and is None
@@ -972,10 +972,13 @@ class Inbox:
 
     def _close(self, sitting: Sitting, environment: bool = True) -> None:
         """End the sitting's session and, with `environment`, stop the environment the API
-        started for it unless another session is working in it. What the controller no longer
-        knows, or no longer runs, is closed already; a call that fails otherwise is logged and its
-        work left, so End answers whatever the controller does."""
-        controller, env, name = self.controller, sitting.environment, sitting.session
+        started for it unless another session is working in it. A lost sitting's session is gone
+        (FR-32), and the worker may since have given its name to another session, an actioner
+        run's, so it ends none, and every session working in the environment counts. What the
+        controller no longer knows, or no longer runs, is closed already; a call that fails
+        otherwise is logged and its work left, so End answers whatever the controller does."""
+        controller, env = self.controller, sitting.environment
+        name = sitting.session if sitting.lost is None else None
         if controller is None or env is None:
             return
         try:

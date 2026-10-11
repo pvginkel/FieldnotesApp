@@ -941,7 +941,9 @@ def test_a_lost_sitting_is_closed_the_idle_time_after_its_loss_and_kept_lost(
         waiting = held(environ)
         running = kubecoder.environments[ENV].status
         clock.tick(1)
+        since = len(kubecoder.calls)
         api.runtime.inbox.sweep(tasks(api))
+        closing = calls(kubecoder, since)
         state = inbox(api)
 
     assert waiting.moved == AT
@@ -957,7 +959,50 @@ def test_a_lost_sitting_is_closed_the_idle_time_after_its_loss_and_kept_lost(
         "go",
     ]
     assert (held(environ).status, held(environ).closed) == ("lost", True)
+    # Its session is gone: the expiry ends none, and stops the environment it started.
+    assert closing == ["GET sessions", "POST stop"]
     assert kubecoder.environments[ENV].status == "stopped"
+
+
+@pytest.mark.parametrize("then", ["sweep", "start", "end"])
+def test_closing_a_lost_sitting_leaves_the_session_that_now_has_its_name(
+    start, kubecoder, eventually, environ, clock, then
+):
+    """FR-32: a lost sitting's session is gone, and the worker gives a new session the first free
+    name, so an actioner run playing in the environment meanwhile is typically given the sitting's.
+    Closing the sitting ends no session by that name, and the run working in the environment keeps
+    it running, though the API started it."""
+    kubecoder.add_environment(ENV, "stopped")
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        kubecoder.forget_session(ENV, "claude")
+        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
+        lost = held(environ)
+        kubecoder.add_session(ENV, "claude", working=True, headless=True)
+        since = len(kubecoder.calls)
+        if then == "sweep":
+            clock.tick(30 * 60)
+            api.runtime.inbox.sweep(tasks(api))
+        elif then == "start":
+            opened(api, eventually, kubecoder)
+        else:
+            assert end(api).status_code == 204
+        after = calls(kubecoder, since)
+
+    assert (lost.status, lost.session, lost.started_environment) == (
+        "lost",
+        "claude",
+        True,
+    )
+    assert "DELETE claude" not in after
+    assert "POST stop" not in after
+    assert kubecoder.session(ENV, "claude").status == "busy"
+    assert kubecoder.environments[ENV].status == "running"
+    if then == "sweep":
+        assert (held(environ).status, held(environ).closed) == ("lost", True)
+    elif then == "start":
+        assert held(environ).environment == ENV
+        assert held(environ).session == "claude-2"
 
 
 @pytest.mark.parametrize("then", ["sweep", "start", "end"])

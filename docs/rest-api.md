@@ -416,7 +416,9 @@ the wait doubling up to 60, for as long as the follow holds the turn.
 
 **End** clears the file first, then ends the session and stops the environment, but only one the
 API started and only while no other session is working in it, and neither for a sitting the expiry
-has closed already. What the controller no longer knows, or no longer runs, counts as closed; any
+has closed already. A lost sitting's session is gone, and the worker may since have given its name
+to another session, an actioner run's, so End ends none for it and counts every session working in
+the environment. What the controller no longer knows, or no longer runs, counts as closed; any
 other failure there is logged and left, so End always answers `204`.
 
 **The idle expiry.** The same sweep closes a sitting with no turn in flight once it is due, as End

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
+import { nameSseConnection } from '@/lib/api/sse-connection';
+import { makeUniqueToken } from '@/lib/utils/random';
 import type { SseTestEvent } from '@/lib/test/test-events';
 import { SseContext } from './sse-context-base';
 import type { SseContextValue } from './sse-context-base';
@@ -131,6 +133,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
     switch (message.type) {
       case 'connected':
+        nameSseConnection(message.requestId);
         setIsConnected(true);
         setRequestId(message.requestId);
         break;
@@ -189,8 +192,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
    * Uses onmessage to unwrap the {type, payload} envelope — same logic as the SharedWorker.
    */
   const createDirectConnection = useCallback(() => {
-    const tabRequestId = Math.random().toString(36).substring(2, 15) +
-                         Math.random().toString(36).substring(2, 15);
+    const tabRequestId = makeUniqueToken(32);
 
     const params = new URLSearchParams({ request_id: tabRequestId });
     const url = `/api/sse/stream?${params}`;
@@ -199,6 +201,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
+      nameSseConnection(tabRequestId);
       setIsConnected(true);
       setRequestId(tabRequestId);
 

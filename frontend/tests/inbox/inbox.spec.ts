@@ -19,16 +19,17 @@ async function inboxState(request: APIRequestContext, backendUrl: string) {
   };
 }
 
-/** The page's own SSE connection, which Start and Send name for the API to bind (P3). */
+/** The page's own SSE connection, which every request the page makes names for the API to bind
+ *  (NFR-4). */
 async function connection(testEvents: TestEventCapture): Promise<string> {
   const connected = await testEvents.waitForEvent((event) => event.kind === 'sse' && event.event === 'connected');
   return (connected as { data: { requestId: string } }).data.requestId;
 }
 
-/** The body of the next POST to `path`. */
-async function posted(page: Page, path: string): Promise<unknown> {
+/** The next POST to `path`: its body, and the SSE connection it names. */
+async function posted(page: Page, path: string): Promise<{ body: unknown; connection: string | null }> {
   const request = await page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === path);
-  return request.postDataJSON();
+  return { body: request.postDataJSON(), connection: await request.headerValue('x-sse-request-id') };
 }
 
 const ASK =
@@ -96,9 +97,9 @@ test.describe('Start', () => {
     await expect(inbox.end).toHaveCount(0);
 
     const requestId = await connection(testEvents);
-    const body = posted(page, '/api/inbox/start');
+    const sent = posted(page, '/api/inbox/start');
     await inbox.begin();
-    expect(await body).toEqual({ scope: '', sse_request_id: requestId });
+    expect(await sent).toEqual({ body: { scope: '' }, connection: requestId });
     await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1$/);
     await expect(inbox.working).toBeVisible();
     await expect(inbox.end).toBeVisible();
@@ -160,9 +161,9 @@ test.describe('the composer', () => {
     await expect(inbox.operatorMessages).toHaveCount(0);
 
     const requestId = await connection(testEvents);
-    const body = posted(page, '/api/inbox/turns');
+    const sent = posted(page, '/api/inbox/turns');
     await page.keyboard.press('Enter');
-    expect(await body).toEqual({ message: 'line one\nline two\nline three', sse_request_id: requestId });
+    expect(await sent).toEqual({ body: { message: 'line one\nline two\nline three' }, connection: requestId });
     await expect(inbox.operatorMessages).toHaveCount(1);
     await expect(inbox.field).toHaveValue('');
     await expect(inbox.working).toBeVisible();

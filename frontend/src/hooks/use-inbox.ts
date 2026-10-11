@@ -6,7 +6,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSseContext } from '@/contexts/sse-context';
 import { useSSETask } from '@/hooks/use-sse-task';
 import type { Toast } from '@/hooks/use-triage';
 import { api } from '@/lib/api/client';
@@ -15,6 +14,8 @@ import type {
   InboxState_5430f38,
   InboxState_5430f38_InboxMessage,
   InboxState_5430f38_InboxSitting,
+  StartRequest_5430f38,
+  TurnRequest_5430f38,
 } from '@/lib/api/generated/hooks';
 
 type InboxState = InboxState_5430f38;
@@ -43,10 +44,6 @@ const problemTitle = (error: unknown): string => {
 
 export function useInbox() {
   const queryClient = useQueryClient();
-  // The page's SSE connection, named with Start and Send: the API binds it to the editor when the
-  // gateway bound it to no one, so it hears the task's events, which go to the editor's
-  // connections only.
-  const { requestId } = useSseContext();
   const query = useGetInbox(undefined, {
     refetchInterval: (q) => ((q.state.data as InboxState | undefined)?.sitting?.turn ? 5000 : false),
   });
@@ -128,27 +125,29 @@ export function useInbox() {
     else localStorage.removeItem(DRAFT);
   }, []);
 
+  // Start's and Send's bodies leave out `sse_request_id`: the request names the page's SSE
+  // connection in its header (`@/lib/api/sse-connection`).
   const start = useCallback(
     (scope: string) =>
       write(
-        () => api.POST('/api/inbox/start', { body: { scope, sse_request_id: requestId } }) as Promise<Reply>,
+        () => api.POST('/api/inbox/start', { body: { scope } as StartRequest_5430f38 }) as Promise<Reply>,
         'Start failed',
         answered,
       ),
-    [write, requestId],
+    [write],
   );
 
   const send = useCallback(async () => {
     const message = draft.trim();
     if (!message) return false;
     const sent = await write(
-      () => api.POST('/api/inbox/turns', { body: { message, sse_request_id: requestId } }) as Promise<Reply>,
+      () => api.POST('/api/inbox/turns', { body: { message } as TurnRequest_5430f38 }) as Promise<Reply>,
       'Send failed',
       answered,
     );
     if (sent) setDraft('');
     return sent;
-  }, [draft, write, setDraft, requestId]);
+  }, [draft, write, setDraft]);
 
   const end = useCallback(
     () => write(() => api.POST('/api/inbox/end') as Promise<Reply>, 'End failed', cleared),

@@ -58,7 +58,7 @@ Everything below follows from that.
 | Vetting | The reconciler writes only the triage items, and on each item it would bet on, a draft of the ruling, marked guessed and shown with a robot icon; the operator still reviews every item and submits it. Documentation changes are recommended in text and become issues after a `yes` ruling, like everything else. | Docs are what every later agent reads; a wrong edit propagates. Ruling history will show what can be delegated later. Ruled 2026-10-10, from the ruling history: safe bets come drafted, the operator still sees and submits every one, and an untouched draft goes with Submit with no check that they looked, which is theirs to own. |
 | Output | Triage items in the store, one file per observation listed (ask, evidence, recommendation, impact, every report on it → ruling), plus a Telegram message with the size of the operator's queue and the triage UI's address. No cap, no threshold. An item stays in the queue until it is ruled; the reconciler lists an observation again only when it has something new to say. | A cap drops important items when volume is high and pads when it is low. Rulings are also calibration data for the next pass. Ruled 2026-09-26 with the triage UI: records instead of documents, so that nothing is ruled in an old document or lost in one; the document's summary and its second half, every new report word for word, went with it, the operator having read the raw reports for the while they asked for. |
 | Rulings | A verb, `yes`, `no` or `later`, and a note written as the operator would say it: the reason for a `no`, the revisit trigger for a `later`, and whatever else the actioner should know, a merge included. The actioner reads a ruling; it does not parse one. When it cannot read one with confidence it asks back on the item, and the operator answers in the queue. A ruling's reason is returned to the next reporter whose post matches. | "no with reason" is the decision record; "later" is where evidence-gathering time lives. Ruled at gate 2: the ruling is the operator's channel to the agents, used to say "I raised that card myself", "that shipped last week" and "this is expected, trust it" as often as `yes`, and no fixed grammar holds that. The verb and one note field were ruled with the triage UI. |
-| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; the reconciler's draft, if the item carries one, preset with a small robot icon; previous, skip and progress; a finish card whose Submit starts the actioner as a KubeCoder prompt run. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. On this screen triage only: no browsing observations, no dashboard, and of the actioner's runs only their state, as a pill in the app bar (App bar); the inbox sitting has a screen of its own (Inbox). | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. |
+| Triage UI | One screen in the app: the queue as a stack, one item at a time, with the observation as it stands now in a tooltip on hover over its ID; a verb by key and a note, saved as each ruling is made; the reconciler's draft, if the item carries one, preset with a small robot icon; previous, skip and progress; a finish card whose Submit starts the actioner as a KubeCoder prompt run. Desktop only, signed in through Keycloak and gated on the `editor` client role. Every ruling is a commit through the API's write queue. On this screen triage only: no browsing observations and no dashboard. Of the actioner's runs it shows their state, as a pill in the app bar (App bar), and while a run is starting or running, its progress: an actioner page with the run's latest log lines, which takes the place of the empty stack's "Nothing to rule on" and which the pill opens over items still to rule on, until the run ends. The inbox sitting has a screen of its own (Inbox). | Ruled 2026-09-26, when the proof of concept was judged proven: the operator's work arrives as a stack ruled in minutes, with no environment to open, no file to edit and no session to attend. The store stays the one source of truth, so a closed browser loses nothing and needs no state anywhere else. Ruled 2026-10-11 for the actioner page: after a submit the operator waits on the run, and the page shows what it is doing as the inbox's working box shows what the session is doing. |
 | Retirement | An observation is deleted once what it says is better learned elsewhere: the friction was fixed, or the hint went into documentation agents read anyway. The reconciler decides that on its own, as a rule when the card closes as done; the actioner does it for a ruling that says the work is already delivered. What was ruled and never carded stays for good. | The store is for what an agent cannot learn any other way. A recurrence after a deletion arrives as a fresh post, which is the signal that the fix did not hold. Git history is the record. |
 | Closure | Closed when the board says so: a YouTrack webhook into the API, and a board scan at the start of each reconciler run. The link is one-way: the observation records its issue id in `card`, and the board carries nothing of ours. Outcome from a configured resolution field (Resolved, Absorbed → done; Won't Do → wont-do), pointer in a comment. No resolution MCP tool. | The board is trusted; the tool would duplicate it. The operator sets the resolution field after the issue reaches Done, so a later change must still be applied. |
 | Card feedback | Any change to an observation's card, a comment included, puts the observation back in the reconciler's queue: board sync records the card's latest change on the file. The reconciler reads what changed and does with the observation what it judges right. | What the board learns about an observation, such as a solution or a proposed one, flows back into it, and so to the next agent whose post matches it. |
@@ -66,10 +66,10 @@ Everything below follows from that.
 | Storage | Git on GitHub, one file per observation; `last_updated` covers the whole file and drives the reconciler queue. Four statuses; condensing, merging and splitting are maintenance, not states. Embeddings are cached on the API's volume, content-addressed by model and hash of the embedded text. | Reversible edits and per-item history. The cache is disposable: deleting it costs a reindex and nothing else. |
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
-| Actioner start | Submit has the API ask the KubeCoder controller for a prompt run of the actioner's prompt in the store's project, and the run's outcome comes back as the controller's webhook. The API holds one run at a time, in a file on the volume both pods mount; a hold whose webhook does not come expires after 30 minutes. A run skipped for want of a free environment is tried again five minutes later; a failure is logged and counted. | Ruled 2026-10-01: the actioner depends on no timer. The controller refuses no second prompt run, so the API keeps it to one; the file outlives a pod and is shared through a rollout's overlap. Runs take minutes (1.5 to 4.5 from submit to the last stamp, measured), and a lost webhook almost always means a lost run. A prompt run's failure sends no Telegram message and has no **Run now**: the log and the metrics are enough, and a session in the store's environment is the retry. |
-| Inbox | The tracker's inbox sitting, the `dev` plugin's `/dev:inbox`, runs as a KubeCoder headless session in the store's environment, and the operator holds it from a second screen of the app, a chat: Start sends the skill its first turn, the sorted inbox and its questions arrive as one message, the operator answers in their own words, and the session records the rulings on the tracker as it does today. The API is the relay: it picks or starts the environment, creates the session, sends each turn, follows the response stream and ends the session, one sitting at a time, held with its transcript in a file on the volume both pods mount. The skill and the tracker convention do not change; the store gains the sitting's working directory, `inbox/`, whose CLAUDE.md tells the session the operator reads only a turn's last message. | Ruled 2026-10-10. The sitting is a write-up with a few questions, answered in a message or two, and the shape to keep is that exchange. Two other shapes were set aside: inbox items run through the triage pipeline as a second kind of item, which turns one message into a stack of cards and multiplies the operator's work; and a live tracker view in the UI, with or without a clerk session's annotations, which puts the tracker's conventions and a write credential into the API. A headless session keeps the judgment in the plugin's versioned skill, and the API decides nothing about a card. The controller streams a turn's condensed log, not its text, so the answer arrives whole, with what the session is doing shown meanwhile. A headless turn's result is its last message only, so the session is told to repeat what matters there; a KubeCoder change carrying every message was set aside (operator, 2026-10-10). |
-| App bar | Both screens' headers hold the screen tabs (Triage, Inbox) and two pills, each shown only while it has something to show, its tooltip saying what. The Inbox pill shows while the API holds a sitting: its dot breathes while a turn is in flight, is steady while the session waits for the operator's answer and turns amber once the sitting is lost; the pill links to the inbox screen. The Actioner pill, fed by `GET /api/triage/actioner`, has a dot that breathes while a start is pending (asked of the controller, or waiting to be tried again) or a run is held; after a run that ended without succeeding (failed, or skipped), or a start the controller refused, it shows a red dot until the next start; idle shows nothing. The page fetches both on a timer, sooner while something is in flight, and a submit fetches the actioner's at once. | Ruled 2026-10-10. The operator: now that there is a reason to wait for the actioner to finish (with the inbox screen there), it has value to show the actioner's state in the app; a sitting in progress should show from the triage screen too. This reverses the Triage UI row's former "nothing about the actioner's runs". |
-| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27) and Start (FR-29); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
+| Actioner start | Submit has the API ask the KubeCoder controller for a prompt run of the actioner's prompt in the store's project, and the run's outcome comes back as the controller's webhook. The API holds one run at a time, in a file on the volume both pods mount; a hold whose webhook does not come expires after 30 minutes. A run skipped for want of a free environment is tried again five minutes later; a failure is logged and counted. While a run is held the API follows its session for the run's log lines: the controller names no run's session, so the API finds it in the store project's environments as the headless session that starts working after the run was asked for, neither the inbox sitting's own nor one already working then. The follow decides nothing: the webhook alone says how the run ended. | Ruled 2026-10-01: the actioner depends on no timer. The controller refuses no second prompt run, so the API keeps it to one; the file outlives a pod and is shared through a rollout's overlap. Runs take minutes (1.5 to 4.5 from submit to the last stamp, measured), and a lost webhook almost always means a lost run. A prompt run's failure sends no Telegram message and has no **Run now**: the log and the metrics are enough, and a session in the store's environment is the retry. Ruled 2026-10-11 for the follow: finding the session by elimination needs no KubeCoder change; a session another caller starts in the project at the same moment can be taken for the run's, and a run too short to show a line shows none. |
+| Inbox | The tracker's inbox sitting, the `dev` plugin's `/dev:inbox`, runs as a KubeCoder headless session in the store's environment, and the operator holds it from a second screen of the app, a chat: Start sends the skill its first turn, the sorted inbox and its questions arrive as one message, the operator answers in their own words, and the session records the rulings on the tracker as it does today. The API is the relay: it picks or starts the environment, creates the session, sends each turn, follows the response stream and ends the session, one sitting at a time, held with its transcript in a file on the volume both pods mount; a sitting the API ended for idleness, or lost, is kept, its transcript read-only, until the operator starts another or ends it. The skill and the tracker convention do not change; the store gains the sitting's working directory, `inbox/`, whose CLAUDE.md tells the session the operator reads only a turn's last message. | Ruled 2026-10-10. The sitting is a write-up with a few questions, answered in a message or two, and the shape to keep is that exchange. Two other shapes were set aside: inbox items run through the triage pipeline as a second kind of item, which turns one message into a stack of cards and multiplies the operator's work; and a live tracker view in the UI, with or without a clerk session's annotations, which puts the tracker's conventions and a write credential into the API. A headless session keeps the judgment in the plugin's versioned skill, and the API decides nothing about a card. The controller streams a turn's condensed log, not its text, so the answer arrives whole, with what the session is doing shown meanwhile. A headless turn's result is its last message only, so the session is told to repeat what matters there; a KubeCoder change carrying every message was set aside (operator, 2026-10-10). Ruled 2026-10-11: a sitting the API ended or lost while the operator was away is kept until they have looked at it. |
+| App bar | Both screens' headers hold the screen tabs (Triage, Inbox) and two pills, each shown only while it has something to show, its tooltip saying what. The Inbox pill shows while the API holds a sitting: its dot breathes while a turn is in flight, is steady while the session waits for the operator's answer and turns amber once the sitting is lost or the idle expiry has ended it; the pill links to the inbox screen. The Actioner pill, fed by `GET /api/triage/actioner`, has a dot that breathes while a start is pending (asked of the controller, or waiting to be tried again) or a run is held, and a click on it then opens the actioner page on the triage screen (Triage UI); after a run that ended without succeeding (failed, or skipped), or a start the controller refused, it shows a red dot until the next start or until the operator closes the failure: a click on the pill, the actioner idle, opens a dialog with the failure, whose Close clears it and the pill with it and whose Cancel leaves both; idle with no failure shows nothing. The app fetches both on a timer, sooner while something is in flight, and a submit fetches the actioner's at once. | Ruled 2026-10-10. The operator: now that there is a reason to wait for the actioner to finish (with the inbox screen there), it has value to show the actioner's state in the app; a sitting in progress should show from the triage screen too. Ruled 2026-10-11: a sitting the expiry ended is amber because it is something the operator needs to look at, and a failure stays until the operator has seen it and closed it. |
+| Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. A pod whose shutdown is announced lets go at once of the sessions it follows, an inbox turn and the actioner's run, and the other pod goes on with them; a pod that is shutting down takes over none. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27) and Start (FR-29); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. What a pod follows is recorded in the files both pods share, so a retiring pod's shutdown waits on none of it. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
 | Agent steering | The user-level `~/.claude/CLAUDE.md`, shared by every environment, tells agents when to post; the `dev` plugin's close-out template carries the three-bin rule. | One place reaches every project's sessions, including those that run no slice. |
 | Not doing | Agent-facing search, transcript mining (dreaming), a vector database, TTL, fine-tuned reranker, reconciler-authored doc changes, a bug category. | Volume is already sufficient; a curated queue works; scale does not justify the rest. |
@@ -272,12 +272,25 @@ scope here.
     is tried again five minutes later, while items wait. Any other skip or failure, and a start the
     controller refuses, is logged and counted, not retried. A pod that starts resumes no waiting
     start and a retired pod's waiting start goes with it, while the hold outlives both. Of the
-    actioner the UI hears only its state, for the app bar (FR-33): a start pending, a run held, or
-    the last failure, a run's or a refused start's, kept beside the hold until the next start; a
-    failed run is in the API's log and metrics too, and the retry is the next submit or a session in
-    the store's environment asked to action the triage. Without the controller's address, the token,
-    the store's project and the webhook's address the API still starts and submit still writes; the
-    start is skipped and logged.
+    actioner the UI hears its state, for the app bar (FR-33): a start pending, a run held, or the
+    last failure, a run's or a refused start's, kept beside the hold until the next start or until
+    the operator clears it (FR-33); a failed run is in the API's log and metrics too, and the retry
+    is the next submit or a session in the store's environment asked to action the triage. While a
+    run is held the UI hears its progress too, for the actioner page (FR-33). The API follows the
+    run's headless session, which it finds in the store project's environments by elimination: the
+    headless session that starts working after the API asked for the run, leaving out the inbox
+    sitting's own (FR-29) and any session already working when the run was asked for. It reads the
+    session's condensed log lines from its response stream, as it reads a turn's (FR-30), and keeps
+    the run's last four with the hold, so both pods answer them; the lines belong to the held run
+    and go when its hold does. A run that ends before a line is read shows none. The follow decides
+    nothing: what it sees or fails at changes none of the run's start, its hold, its retries or its
+    failure, and the webhook alone says how the run ended. The follow is held as a turn's is
+    (FR-30): a pod retired mid-run lets it go and the other pod goes on with the run's lines, and a
+    pod that is shutting down takes none over. No write to the hold's file, by either pod, loses
+    another's: a start, the webhook, the follow and the operator's clear never bring back a released
+    hold or a cleared failure, drop a run taken meanwhile or lose a recorded failure. Without the
+    controller's address, the token, the store's project and the webhook's address the API still
+    starts and submit still writes; the start is skipped and logged.
 
 **Inbox**
 
@@ -291,10 +304,15 @@ scope here.
     (a card's ask wraps under the ask); around it paragraphs, nested lists, bold, code spans and
     links. Every card id they name is linked to its issue on the tracker, whose address the API
     serves with the sitting; the operator's messages are shown as they typed them, and each
-    message's time under it, with no label for who wrote it. Enter sends; Shift+Enter and Alt+Enter
-    break the line. While a turn is in flight Send is withheld but the text field stays open, so the
-    answer can be drafted meanwhile, and the last line of the session's condensed log is shown under
-    the transcript, as what the session is doing, with no elapsed time. End asks first, because the
+    message's time under it, with no label for who wrote it. The text field shows no placeholder and
+    grows with its text to eight lines, then scrolls; Ctrl+Enter sends, as Send's tooltip says, and
+    Enter breaks the line. While a turn is in flight Send is withheld but the text field stays open,
+    so the answer can be drafted meanwhile, and the session's condensed log is shown under the
+    transcript, as what the session is doing, with no elapsed time: the working box grows to four
+    lines as they arrive, the spinner on the last, and its top line scrolls out as a new one comes,
+    with nothing to mark the lines gone; each line stays on one line, cut with an ellipsis of its own
+    where the box is narrower than the line. A page that joins mid-turn starts with the turn's last
+    four lines. End asks first, because the
     transcript goes with it. Beyond the app bar (FR-33), the screen knows nothing of the triage
     queue and the triage screen nothing of the sitting.
 29. FR-29 Start begins a sitting, off the request: the reply carries the sitting as it stands, and
@@ -307,9 +325,11 @@ scope here.
     configured inbox prompt, with the scope the operator typed appended when they typed one. One
     sitting is held at a time, in a file on the volume both pods mount, naming the environment, the
     session, the conversation id once the controller reports it, whether the API started the
-    environment, when the sitting began and last moved, the turn in flight, and the transcript so
-    far: every message sent and every answer received, each with its time. A Start while a sitting is
-    live starts nothing and answers the live sitting. Without the controller's address, the token and
+    environment, when the sitting began and last moved, the turn in flight, when and why a sitting
+    was lost or ended, and the transcript so far: every message sent and every answer received,
+    each with its time. A Start while a sitting is live, neither lost nor ended, starts nothing and
+    answers the live sitting; a Start that finds one ended (FR-31) or lost (FR-32) clears it as End
+    does and begins a new one. Without the controller's address, the token and
     the project the sitting is not configured: the screen says so and Start is refused.
 30. FR-30 A turn: Send posts the operator's message to the session as its next turn, and the API
     follows the session's response stream to the turn's result, which it appends to the transcript
@@ -318,20 +338,34 @@ scope here.
     joins a sitting mid-turn subscribes to the turn in flight, which the sitting names. A send
     while a turn is in flight is refused (`session-busy`), and so is one without a live sitting
     (`conflict`); the page offers neither. The pod that took a send follows its stream and writes
-    the file, which carries the last offset the follower read, so when that pod is retired mid-turn
-    the pod that next serves the page re-opens the stream from there and finishes the turn. A
-    stream that drops is re-opened the same way; a session or an environment the controller no
-    longer knows is the sitting lost (FR-32).
+    the file, which carries the last offset the follower read and the turn's last four lines, so
+    when that pod is retired mid-turn the other pod re-opens the stream from there and finishes the
+    turn, its result landing in the transcript once. A pod lets go of its follow as soon as its
+    shutdown is announced, wherever the follow stands, reading the stream or waiting for an
+    environment it starts, so its shutdown waits on no turn, and the other pod takes the turn over
+    at its next read of the sitting or its next sweep (FR-31), without waiting for the follow to go
+    stale. A pod that is shutting down takes no turn over, and quietly: its reads answer the sitting
+    as it stands, and its sweep logs no failure. A stream that drops is re-opened the same way; a
+    session or an environment the controller no longer knows is the sitting lost (FR-32).
 31. FR-31 End ends the session and, when the API started the environment, stops it; the file is
-    cleared and the transcript with it. The app keeps no history of sittings: the tracker holds the
-    rulings, as `Inbox <date>:` comments on the cards, and the skill's closing notification holds
-    the summary. The API ends a sitting itself once it has not moved for the configured idle time,
-    30 minutes by default: no turn in flight and no send since the last result. The skill's own close
-    is unchanged, its notification included; the session then waits idle for End or the expiry.
+    cleared and the transcript with it. The app keeps no history of sittings past the one it holds:
+    the tracker holds the rulings, as `Inbox <date>:` comments on the cards, and the skill's closing
+    notification holds the summary. The API ends a sitting itself once it has not moved for the
+    configured idle time, 30 minutes by default: no turn in flight and no send since the last
+    result. It ends the session and stops an environment it started, as End does, and keeps the
+    sitting, ended: its transcript is shown read-only, closing on a line saying when it ended and
+    after how long idle ("Ended at HH:MM after 30 minutes idle."), Send is withdrawn, and the screen
+    offers a new sitting, as it does for a lost one (FR-32). Start and End clear an ended sitting as
+    they clear a lost one, and a sitting the expiry has closed is closed once: neither they nor a
+    later expiry end its session or stop its environment again. The skill's own close is unchanged,
+    its notification included; the session then waits idle for End or the expiry.
 32. FR-32 A sitting is lost when the controller no longer knows its session, because the worker
     restarted or the environment stopped or is gone, or when a call for it fails for want of the
-    environment. The transcript is kept and shown with a line saying so, Send is withdrawn, and
-    Start begins a new sitting, clearing the lost one as End does. A turn in flight when the sitting
+    environment. The transcript is kept and shown with a line saying so, Send is withdrawn, and the
+    sitting stays until the operator's Start or End: Start begins a new sitting, clearing the lost
+    one as End does. The expiry keeps it too: once the idle time (FR-31) has passed since the loss,
+    not since the last send, the API ends its session and stops an environment it started, as for
+    an idle sitting, and keeps the sitting lost. A turn in flight when the sitting
     is lost gets no result; what the session had written on the tracker stands, and the next
     sitting reads it there, as the skill always has. Resuming the conversation by its id is
     deferred.
@@ -341,16 +375,28 @@ scope here.
 33. FR-33 Both screens' headers must hold the screen tabs (Triage, Inbox) and two pills, each shown
     only while it has something to show, its tooltip saying what. The Inbox pill shows while the
     API holds a sitting (FR-29): its dot breathes while a turn is in flight, is steady while the
-    session waits for the operator's answer and turns amber once the sitting is lost (FR-32); the
-    pill is a link to the inbox screen. The Actioner pill is fed by `GET /triage/actioner`, gated as
-    the triage endpoints are: it answers the state (`idle`, `starting`, `running`), the held run's
-    id and since when, and the last failure (when, the controller's outcome for a run or `refused`
-    for a start the controller refused, its reason), which the API keeps beside the hold (FR-27) so
-    both pods see it. The pill's dot breathes while a start is pending (asked of the controller, or
-    waiting to be tried again) or a run is held; after a run that ended without succeeding, failed
-    or skipped, or a refused start, it is red until the next start; idle shows nothing. The page
-    fetches both on a timer, sooner while something is in flight, and a submit fetches the
-    actioner's at once.
+    session waits for the operator's answer and turns amber once the sitting is lost (FR-32) or the
+    expiry has ended it (FR-31); the pill is a link to the inbox screen. The Actioner pill is fed by
+    `GET /triage/actioner`, gated as the triage endpoints are: it answers the state (`idle`,
+    `starting`, `running`), the held run's id and since when, and the last failure (when, the
+    controller's outcome for a run or `refused` for a start the controller refused, its reason),
+    which the API keeps beside the hold (FR-27) so both pods see it. The pill's dot breathes while a
+    start is pending (asked of the controller, or waiting to be tried again, a failed run's
+    included) or a run is held, and a click on the pill then opens the actioner page, from either
+    screen. The triage screen shows that page for as long as a start is pending or a run is held:
+    of itself in place of "Nothing to rule on", and over items still to rule on once the pill has
+    opened it. The page is the inbox's working box (FR-28) over the run's log lines (FR-27), with its
+    waiting text while no line has come; a page that opens mid-run starts with the run's last four
+    lines, and a new line reaches it within seconds of the API reading it. When the run ends, by
+    success or failure, the screen shows what it would otherwise show: "Nothing to rule on", or the
+    stack. After a run that ended without succeeding, failed or skipped, or a refused start, the dot
+    is red until the next start or until the operator closes the failure: a click on the pill while
+    the actioner is idle opens a dialog with the failure (failed, skipped or refused, when, and the
+    reason, as the tooltip has it), whose Close clears the failure, and the pill with it, and whose
+    Cancel leaves both. The clear is a request of the editor's (NFR-4) that names the failure the
+    dialog showed and clears that one only: a failure recorded meanwhile stays, and the pill goes on
+    showing it; the hold stays as it stands. Idle with no failure shows nothing. The app fetches both
+    on a timer, sooner while something is in flight, and a submit fetches the actioner's at once.
 
 **Non-functional**
 
@@ -362,6 +408,14 @@ scope here.
     inbox endpoints (FR-23 to FR-33) take the template's OIDC session with the `editor` client role
     instead: a request without a session, or with an agent's bearer token, is refused as
     unauthenticated, and a signed-in user without the role as forbidden, reads and writes alike.
+    What the API sends pages over the template's SSE gateway in a session's words, an inbox turn's
+    progress and result and the actioner run's log lines, reaches only connections bound to a
+    signed-in editor, a turn's only those of the editor whose request began it (FR-30), and never
+    every connection. The gateway's connect binds a page's connection to the user of the access
+    token the page holds; a connection the connect left bound to no one, as for a page that
+    connected before its token was refreshed or reconnected after a rollout, is bound to the user of
+    the page's next request that authenticates. A request that authenticates as no one binds
+    nothing, a connection bound to a user is never rebound, and a connection's id is unguessable.
     Webhook secrets verified on every request.
 
 ## Technical design
@@ -646,30 +700,34 @@ capability is involved.
 The sitting's file lies beside the actioner's hold on the shared volume and is written whole through
 a rename, as the hold is: the environment, the session's name, the conversation id, whether the API
 started the environment, when the sitting began and last moved, its status (`starting`, `busy`,
-`idle`, `lost`), the log offset the next read of the response stream begins at, the number of the
+`idle`, `lost`, `ended`), for a lost or ended sitting when and why and whether the expiry has
+closed it, the log offset the next read of the response stream begins at, the number of the
 last turn whose result the transcript holds, the subject of the editor whose request began the last
-turn, the turn in flight (its task id, when it began and the last log line), the follow holding that
-turn (its pod, its id and its heartbeat) and the transcript, a list of `{author, text, at}` with
-`author` `operator` or `session`. Both pods read and write it, taking turns on a lock beside it,
-and only the follow the file names writes a turn's result. The wire carries the environment, null
-until Start has picked one, whether the API started it, when the sitting began and last moved, the
-turn in flight, the loss and the transcript.
+turn, the turn in flight (its task id, when it began and its last four log lines), the follow
+holding that turn (its pod, its id and its heartbeat) and the transcript, a list of
+`{author, text, at}` with `author` `operator` or `session`. Both pods read and write it, taking
+turns on a lock beside it, and only the follow the file names writes a turn's result. A pod lets go
+of the follow it holds as soon as its shutdown is announced, which the chart's preStop drain does
+before anything waits on the pod's work, and a pod that is shutting down takes no follow over
+(FR-30). The wire carries the environment, null until Start has picked one, whether the API
+started it, when the sitting began and last moved, the turn in flight with its lines, the loss or
+the end, and the transcript.
 
 The surface, `/api/inbox`, gated and typed as the triage surface is:
 
 - `GET /inbox`: the sitting as the file holds it, with the tracker's issue address, or no sitting.
   The page's one read, fetched again on focus and after each task event.
-- `POST /inbox/start {scope?, sse_request_id?}`: `202` with the sitting; the start runs as a task
+- `POST /inbox/start {scope?}`: `202` with the sitting; the start runs as a task
   that picks or starts the environment, creates the session, sends the first turn and follows it. A
   live sitting is answered as it is, `200`.
-- `POST /inbox/turns {message, sse_request_id?}`: `202` with the sitting, the turn's task id in it;
+- `POST /inbox/turns {message}`: `202` with the sitting, the turn's task id in it;
   `409 session-busy` with a turn in flight, `409 conflict` with no live sitting.
 - `POST /inbox/end`: `204`, idempotent.
 
-`sse_request_id` names the page's SSE connection: a task's events carry the session's words, so
-they reach only the connections bound to the editor whose request began it, and the request binds
-the page's connection to that editor when the gateway left it bound to no one, as it does for a
-page that connected before its token was refreshed.
+A turn's events carry the session's words, so they reach only the connections bound to the editor
+whose request began the turn. A page's connection is bound by the gateway's connect, from the
+page's access token, or, when the connect left it bound to no one, as it does for a page that
+connected before its token was refreshed, by the page's next request that authenticates (NFR-4).
 
 A turn is a task of the template's task service, so the page takes its progress, the log lines, and
 its completion, the result, over the SSE gateway it already uses, by task id; a page that joins
@@ -678,9 +736,10 @@ mid-turn takes the id from `GET /inbox`. The prompt, model and reasoning effort 
 `_INBOX_CWD`, `Fieldnotes/inbox` by default, the idle time `_INBOX_IDLE`, in minutes, 30 by
 default, and the issue address the screen links a card id to `_INBOX_TRACKER`,
 `https://issues.webathome.org/issue/` by default; the controller's address, token and project are
-the actioner's. Each pod runs the expiry on a timer over the file; End being idempotent, both may.
+the actioner's. Each pod runs the expiry on a timer over the file, under the file's lock, so
+whichever pod finds a sitting due closes it, once, and keeps it ended or lost (FR-31, FR-32).
 The screen is the route `/inbox`, reached by the app bar's tabs (FR-33): Start, the transcript, a
-text field with Send, End, and the status line. It was designed with the operator on 2026-10-10
+text field with Send, End, and the working box. It was designed with the operator on 2026-10-10
 against a fake of these endpoints that plays real sittings recorded in the spec repo
 (`mockups/inbox-ui/`), and the screen as designed is the one built, the fake going when the API
 follows; the Playwright suite drives it against the backend with the controller faked, as the
@@ -692,12 +751,12 @@ Bearer tokens on the agents' API and the MCP server, and the template's OIDC ses
 `editor` client role on the operator's triage endpoints (NFR-4); the GitHub webhook secret and the
 YouTrack webhook token verified before any processing. The API holds a GitHub credential scoped to
 the store repo, a read-only YouTrack token and the token of its own KubeCoder client, which starts
-the actioner's prompt runs (FR-27) and drives the inbox sitting's headless session (FR-29 to FR-31);
-skills use the session's own credentials, provided by KubeCoder. Thresholds, model names, the
-resolution field and value map, the actioner's and the inbox's prompts, models and project, the
-inbox's working directory and idle time, and endpoints are configuration, not code. Every secret is
-an OpenBao leaf materialised by External Secrets and referenced by `secretKeyRef`; none is ever in a
-config file, an image or this repo.
+the actioner's prompt runs and follows their sessions (FR-27) and drives the inbox sitting's
+headless session (FR-29 to FR-31); skills use the session's own credentials, provided by
+KubeCoder. Thresholds, model names, the resolution field and value map, the actioner's and the
+inbox's prompts, models and project, the inbox's working directory and idle time, and endpoints are
+configuration, not code. Every secret is an OpenBao leaf materialised by External Secrets and
+referenced by `secretKeyRef`; none is ever in a config file, an image or this repo.
 
 ## Validation
 
@@ -718,10 +777,10 @@ are issues, they'll surface soon enough").
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | Triage items the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
 | Actioner start | Rule an item in the triage UI on prd and submit | One prompt run starts; its webhook clears the hold; `fieldnotes_actioner_runs_total{outcome="success"}` counts it; the item is stamped |
 | Actioner idempotency | Submit rulings on items, run the actioner twice | Second run creates nothing and reports zero actions |
-| Inbox sitting | Start a sitting on prd, answer the write-up, End | One headless session in the store's environment; the write-up arrives as one message, the status line moving under it meanwhile, and the session's last message carries the answers to the operator's questions; the rulings land on the cards as `Inbox <date>:` comments; End ends the session, and an environment the API started is stopped |
+| Inbox sitting | Start a sitting on prd, answer the write-up, End | One headless session in the store's environment; the write-up arrives as one message, the working box showing the session's latest log lines under it meanwhile, up to four, each on one line, and the session's last message carries the answers to the operator's questions; the rulings land on the cards as `Inbox <date>:` comments; End ends the session, and an environment the API started is stopped |
 | Inbox rejoin | Reload the page mid-turn, then open it in a second browser | Both show the transcript and the turn in flight, and the result when it lands |
-| Inbox idle | Leave a sitting 30 minutes after the session's answer | The API ends it; an environment it started is stopped |
-| App bar | Start a sitting and open the triage screen; then rule an item and submit | The Inbox pill shows the sitting's state and leads to the inbox screen; the Actioner pill shows from the submit until the run's webhook, and a failed run leaves it red until the next start |
+| Inbox idle | Leave a sitting 30 minutes after the session's answer | The API ends it; an environment it started is stopped; the screen keeps the transcript read-only, closing on "Ended at HH:MM after 30 minutes idle.", Send withdrawn and the Inbox pill amber, until Start or End clears it |
+| App bar | Start a sitting and open the triage screen; then rule an item and submit, and watch the run from the triage screen, then from the inbox screen through the Actioner pill; after a failed run, click the pill and Close the dialog | The Inbox pill shows the sitting's state and leads to the inbox screen; the Actioner pill shows from the submit until the run's webhook and opens the actioner page, which shows the run's lines while it runs and gives way to "Nothing to rule on", or the stack, when it ends; a failed run leaves the pill red until the next start or the dialog's Close |
 
 The suites behind `kc project test` are hermetic and cover none of the rows that need real models, a
 real board or a cluster; those are scripts in `eval/` or documented manual steps.

@@ -24,7 +24,6 @@ from app.fieldnotes.errors import (
 from app.fieldnotes.inbox import Inbox, InboxState, StartRequest, TurnRequest
 from app.services.container import ServiceContainer
 from app.services.fieldnotes_service import FieldnotesService
-from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.task_service import TaskService
 from app.utils.auth import allow_roles, get_auth_context
 from app.utils.spectree_config import api
@@ -44,19 +43,11 @@ def _inbox(service: FieldnotesService) -> Inbox:
     return service.runtime.inbox
 
 
-def _subject(connection: str | None, connections: SSEConnectionManager) -> str | None:
-    """The signed-in editor's subject, which scopes a task's events to their SSE connections; the
-    page's own connection, when the gateway bound it to no one, bound to it first. The gateway
-    binds a connection only at connect, from the access cookie, which a page that connected before
-    its token was refreshed does not send. A connection bound to someone stays theirs."""
+def _editor() -> str | None:
+    """The signed-in editor's subject, which scopes a task's events to their SSE connections
+    (NFR-4); none with OIDC off."""
     auth = get_auth_context()
-    if auth is None:
-        return None
-    if connection is not None:
-        info = connections.get_connection_info(connection)
-        if info is not None and info.subject is None:
-            connections.bind_identity(connection, auth.subject)
-    return auth.subject
+    return auth.subject if auth is not None else None
 
 
 def _refused_body(
@@ -105,13 +96,9 @@ def start(
     json: StartRequest,
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
     tasks: TaskService = Provide[ServiceContainer.task_service],
-    connections: SSEConnectionManager = Provide[
-        ServiceContainer.sse_connection_manager
-    ],
 ) -> tuple[InboxState, int]:
     """FR-29: a sitting begun, off the request (202); a live one answers as it is (200)."""
-    subject = _subject(json.sse_request_id, connections)
-    state, began = _inbox(service).start(json.scope, tasks, subject)
+    state, began = _inbox(service).start(json.scope, tasks, _editor())
     return state, 202 if began else 200
 
 
@@ -127,13 +114,9 @@ def turn(
     json: TurnRequest,
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
     tasks: TaskService = Provide[ServiceContainer.task_service],
-    connections: SSEConnectionManager = Provide[
-        ServiceContainer.sse_connection_manager
-    ],
 ) -> tuple[InboxState, int]:
     """FR-30: the operator's message sent as the session's next turn, off the request."""
-    subject = _subject(json.sse_request_id, connections)
-    return _inbox(service).send(json.message, tasks, subject), 202
+    return _inbox(service).send(json.message, tasks, _editor()), 202
 
 
 @inbox_bp.route("/end", methods=["POST"])

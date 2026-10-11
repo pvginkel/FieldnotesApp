@@ -9,14 +9,20 @@ from app.config import Settings
 from app.services.auth_service import AuthService
 from app.services.container import ServiceContainer
 from app.services.oidc_client_service import OidcClientService
+from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.testing_service import TestingService
 from app.utils.auth import (
     authenticate_request,
+    get_auth_context,
     get_cookie_kwargs,
     get_token_expiry_seconds,
 )
 
 logger = logging.getLogger(__name__)
+
+# The header the frontend's API client names its page's SSE connection in
+# (frontend/src/lib/api/sse-connection.ts).
+SSE_REQUEST_ID_HEADER = "X-SSE-Request-Id"
 
 
 def register_oidc_hooks(api_bp: Blueprint) -> None:
@@ -27,17 +33,14 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
     for login/logout/callback endpoints.
     """
 
-    @api_bp.before_request
-    @inject
-    def before_request_authentication(
-        auth_service: AuthService = Provide[ServiceContainer.auth_service],
-        oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
-        testing_service: TestingService = Provide[ServiceContainer.testing_service],
-        config: Settings = Provide[ServiceContainer.config],
+    def authenticate(
+        auth_service: AuthService,
+        oidc_client_service: OidcClientService,
+        testing_service: TestingService,
+        config: Settings,
     ) -> None | tuple[dict[str, str], int]:
         """Authenticate all requests to /api endpoints before processing.
 
-        This hook runs before every request to endpoints under the /api blueprint.
         It checks if authentication is required and validates the JWT token.
         If the access token is expired but a refresh token is available, it will
         attempt to refresh the tokens automatically.
@@ -105,6 +108,36 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
         except AuthorizationException as e:
             logger.warning("Authorization failed: %s", str(e))
             return {"error": str(e)}, 403
+
+    @api_bp.before_request
+    @inject
+    def before_request_authentication(
+        auth_service: AuthService = Provide[ServiceContainer.auth_service],
+        oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
+        testing_service: TestingService = Provide[ServiceContainer.testing_service],
+        config: Settings = Provide[ServiceContainer.config],
+        sse_connection_manager: SSEConnectionManager = Provide[
+            ServiceContainer.sse_connection_manager
+        ],
+    ) -> None | tuple[dict[str, str], int]:
+        """Authenticate the request, then bind the SSE connection it names to its user.
+
+        This hook runs before every request to endpoints under the /api blueprint.
+        A request that authenticated as a user, refused or not, binds the SSE
+        connection named by its X-SSE-Request-Id header when the connection is
+        bound to no one, as the connect callback leaves a page's connection
+        that connected before its access token was refreshed.
+
+        Returns:
+            None if authentication succeeds or is skipped
+            Error response tuple if authentication fails
+        """
+        refusal = authenticate(auth_service, oidc_client_service, testing_service, config)
+        auth_context = get_auth_context()
+        request_id = request.headers.get(SSE_REQUEST_ID_HEADER)
+        if auth_context is not None and request_id:
+            sse_connection_manager.bind_unbound_identity(request_id, auth_context.subject)
+        return refusal
 
     @api_bp.after_request
     @inject

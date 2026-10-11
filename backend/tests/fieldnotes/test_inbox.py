@@ -53,18 +53,20 @@ def inbox(api, **kwargs):
     return reply.json()
 
 
+def naming(connection):
+    """The headers of a request the page makes once its SSE connection is open: it names it."""
+    return {} if connection is None else {"X-SSE-Request-Id": connection}
+
+
 def begin(api, scope=None, connection=None):
     body = {} if scope is None else {"scope": scope}
-    if connection is not None:
-        body["sse_request_id"] = connection
-    return api.post("/api/inbox/start", json=body)
+    return api.post("/api/inbox/start", json=body, headers=naming(connection))
 
 
 def send(api, message, connection=None):
-    body = {"message": message}
-    if connection is not None:
-        body["sse_request_id"] = connection
-    return api.post("/api/inbox/turns", json=body)
+    return api.post(
+        "/api/inbox/turns", json={"message": message}, headers=naming(connection)
+    )
 
 
 def end(api):
@@ -775,9 +777,9 @@ def bound(api, connection):
 def test_a_page_whose_connection_is_bound_to_no_one_hears_the_tasks_it_begins(
     start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
 ):
-    """FR-29, FR-30 under NFR-4: the gateway binds a connection only at connect, from the access
-    cookie, so a page that connected before its token was refreshed is bound to no one; its Start
-    and its turns name its connection, which is bound to the editor before the task begins."""
+    """FR-29, FR-30 under NFR-4: the gateway's connect binds a connection from the access cookie,
+    so a page that connected before its token was refreshed is bound to no one; its Start, as every
+    request it makes, names its connection, which is bound to the editor before the task begins."""
     kubecoder.add_environment(ENV)
     with start(app=oidc_app) as api:
         heard = connected(api, monkeypatch, "editor", "anonymous")
@@ -805,7 +807,7 @@ def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
 ):
     """FR-30 under NFR-4: a page reopened mid-sitting (a reload, a second browser) has a
     connection of its own, bound to no one once the token has lapsed, which no Start named; its
-    Send binds it to the editor before the turn begins."""
+    Send names it and binds it to the editor before the turn begins."""
     kubecoder.add_environment(ENV)
     with start(app=oidc_app) as api:
         heard = connected(api, monkeypatch, "opener", "reopened")
@@ -826,11 +828,12 @@ def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
     assert progress(heard["reopened"], task_id) == ["[3s] [tool_use: update] EX-7"]
 
 
-def test_a_request_binds_no_connection_bound_to_another_user_nor_one_it_is_refused_for(
+def test_an_editors_tasks_reach_no_connection_bound_to_another_user_nor_one_no_one_bound(
     start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
 ):
-    """A connection a request names is bound only by an editor's accepted request and only when
-    no one holds it: another user's stays theirs and hears none of the editor's tasks."""
+    """NFR-4: a connection a request names is bound to the user the request authenticated as, and
+    only when no one holds it: a request without a session binds nothing, a viewer's refused Start
+    binds the viewer's own, and another user's stays theirs; none hears the editor's tasks."""
     kubecoder.add_environment(ENV)
     with start(app=oidc_app) as api:
         heard = connected(api, monkeypatch, "other", "viewer", "anonymous")
@@ -847,7 +850,7 @@ def test_a_request_binds_no_connection_bound_to_another_user_nor_one_it_is_refus
 
         assert [r.status_code for r in refused] == [401, 403]
         assert bound(api, "other") == "inbox-other"
-        assert bound(api, "viewer") is None
+        assert bound(api, "viewer") == "inbox-viewer"
         assert bound(api, "anonymous") is None
     assert heard == {"other": [], "viewer": [], "anonymous": []}
 
@@ -886,5 +889,5 @@ def test_the_inbox_endpoints_are_in_the_openapi_document_behind_the_editor_gate(
     assert {"200", "202", "409", "422"} <= set(operations["start"]["responses"])
     assert {"202", "409", "422"} <= set(operations["turn"]["responses"])
     assert "204" in operations["end"]["responses"]
-    assert set(request("start")["properties"]) == {"scope", "sse_request_id"}
-    assert set(request("turn")["properties"]) == {"message", "sse_request_id"}
+    assert set(request("start")["properties"]) == {"scope"}
+    assert set(request("turn")["properties"]) == {"message"}

@@ -140,20 +140,13 @@ class InboxState(_Model):
     sitting: InboxSitting | None
 
 
-class _Followed(_Request):
-    """A write whose task the page follows: `sse_request_id` is the `request_id` of the page's SSE
-    stream, which the API binds to the editor when the gateway bound it to no one."""
-
-    sse_request_id: str | None = Field(default=None, max_length=64)
-
-
-class StartRequest(_Followed):
+class StartRequest(_Request):
     """FR-29: the scope the operator typed, appended to the inbox prompt; empty for all of it."""
 
     scope: str = Field(default="", max_length=500)
 
 
-class TurnRequest(_Followed):
+class TurnRequest(_Request):
     """FR-30: the operator's message, as they typed it."""
 
     message: str = Field(min_length=1, max_length=20000)

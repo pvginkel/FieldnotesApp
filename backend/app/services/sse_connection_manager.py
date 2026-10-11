@@ -313,6 +313,30 @@ class SSEConnectionManager:
             extra={"request_id": request_id, "subject": subject},
         )
 
+    def bind_unbound_identity(self, request_id: str, subject: str) -> None:
+        """Bind a connection this process holds to an OIDC subject, if it is bound to no one.
+
+        Called for an API request that authenticated and names its page's
+        connection, so a connection the connect callback left unbound (the
+        page connected before its access token was refreshed) is bound to the
+        request's user. A bound connection is never rebound, and a request_id
+        this process does not hold is ignored.
+
+        Args:
+            request_id: SSE connection request ID named by the request
+            subject: Subject the request authenticated as
+        """
+        with self._lock:
+            if request_id not in self._connections or request_id in self._identity_map:
+                return
+            self._identity_map[request_id] = subject
+
+        SSE_IDENTITY_BINDING_TOTAL.labels(status="success").inc()
+        logger.info(
+            "Identity bound for SSE connection by an API request",
+            extra={"request_id": request_id, "subject": subject},
+        )
+
     def get_connection_info(self, request_id: str) -> ConnectionInfo | None:
         """Get information about an active SSE connection.
 

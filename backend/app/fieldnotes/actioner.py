@@ -28,9 +28,17 @@ once the run is held it looks every `LOOK_EVERY` seconds for the run's session, 
 headless session working that was not working at the note and is not the inbox sitting's own. It
 reads that session's response stream from its start and keeps the run's last `TURN_LINES` log lines
 in the hold, where both pods read them and the editor's page fetches them; they go with the hold.
-The follow ends at the stream's result, the session gone, or the hold released or expired, and the
-pod leaves it as its shutdown is announced. It decides nothing: what it sees or fails at changes
-none of the run's start, its hold, its retries or its failure.
+The follow ends at the stream's result, the session gone, or the hold released or expired. It
+decides nothing: what it sees or fails at changes none of the run's start, its hold, its retries or
+its failure.
+
+The follow is held as an inbox turn is: the hold records it, with the note, the run's session once
+found and the log offset after the last line kept, and names the follow holding it, its pod and its
+heartbeat, which the follow refreshes while it follows. Each write the follow makes is checked, in
+one step with the write and against both pods, against the run and the follow holding it. A pod
+leaves its follow as its shutdown is announced, held by no follow. A follow held by no follow, or
+whose heartbeat has stopped, is taken over by whichever pod next reads the actioner's state, and
+goes on from where the record stands. A pod that has left its follows takes none over.
 
 At most one start is pending in a pod, from the submit that asks for it until the controller accepts
 the run, refuses it, or nothing waits: a submit meanwhile is covered by it. The pending start lives
@@ -43,7 +51,9 @@ import fcntl
 import json
 import logging
 import os
+import socket
 import threading
+import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -53,7 +63,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.fieldnotes.controller import ControllerError, HttpController, LogLine
-from app.fieldnotes.inbox import TURN_LINES
+from app.fieldnotes.inbox import HEARTBEAT, TAKEOVER, TURN_LINES, Follower
 from app.fieldnotes.metrics import Metrics
 from app.fieldnotes.triage import TriageIndex, stamp
 from app.services.base_task import BaseTask, ProgressHandle
@@ -95,14 +105,33 @@ class ActionerSettings:
     reasoning_effort: str | None = None
 
 
+# The headless sessions working in the project as a run is asked for: environment and name.
+Note = frozenset[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class Followed:
+    """The held run's follow as the hold records it, so either pod goes on with it: the note, the
+    run's session once found, its environment and its name, and the log's byte offset after the
+    last line kept, where the next read begins. `follower` is the follow holding it; None while
+    none does, its pod having left it as its shutdown was announced."""
+
+    note: Note
+    session: tuple[str, str] | None = None
+    offset: int = 0
+    follower: Follower | None = None
+
+
 @dataclass(frozen=True)
 class Held:
-    """The run held: its id, when it was started, and its last `TURN_LINES` condensed log lines,
-    oldest first."""
+    """The run held: its id, when it was started, its last `TURN_LINES` condensed log lines,
+    oldest first, and its follow; `follow` is None while the run is not followed: the note was
+    not taken, or the follow is over."""
 
     run_id: str
     at: datetime
     lines: tuple[str, ...] = ()
+    follow: Followed | None = None
 
 
 class ActionerFailure(BaseModel):
@@ -133,12 +162,12 @@ class ActionerState(BaseModel):
 
 
 class Hold:
-    """The run held, `"runId"`, `"at"` and `"lines"`, and the last failure, `"failure"`, in one
-    file on the volume both pods mount, written whole through a rename, so it outlives a pod and
-    both see it through a rollout's overlap. Its writers take turns on an exclusive `flock` of a
-    lock file beside it, which the volume holds across both pods' mounts; each change opens the
-    lock file anew, so the threads of one process take turns as well. A file that cannot be read
-    holds nothing."""
+    """The run held, `"runId"`, `"at"`, `"lines"` and `"follow"`, and the last failure,
+    `"failure"`, in one file on the volume both pods mount, written whole through a rename, so it
+    outlives a pod and both see it through a rollout's overlap. Its writers take turns on an
+    exclusive `flock` of a lock file beside it, which the volume holds across both pods' mounts;
+    each change opens the lock file anew, so the threads of one process take turns as well. A file
+    that cannot be read holds nothing."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -154,6 +183,7 @@ class Hold:
                     datetime.fromisoformat(body["at"]),
                     # A pod of the release before the lines writes a hold without them.
                     tuple(map(str, body.get("lines", ()))),
+                    _followed(body.get("follow")),
                 )
                 if "runId" in body
                 else None
@@ -173,9 +203,9 @@ class Hold:
     def read(self) -> Held | None:
         return self.load()[0]
 
-    def take(self, run_id: str, at: datetime) -> None:
-        """Hold the run started, which clears the last failure."""
-        self._change(lambda held, failure: (None, Held(run_id, at), None))
+    def take(self, run_id: str, at: datetime, follow: Followed | None = None) -> None:
+        """Hold the run started, followed as `follow` has it, which clears the last failure."""
+        self.change(lambda held, failure: (None, Held(run_id, at, follow=follow), None))
 
     def release(self, run_id: str, failure: ActionerFailure | None = None) -> bool:
         """Release the hold if it names `run_id`, recording `failure` when the run did not
@@ -188,24 +218,52 @@ class Hold:
                 return False, held, kept
             return True, None, failure if failure is not None else kept
 
-        return self._change(apply)
+        return self.change(apply)
 
     def fail(self, failure: ActionerFailure) -> None:
         """Record a start the controller refused, the hold as it is."""
-        self._change(lambda held, kept: (None, held, failure))
+        self.change(lambda held, kept: (None, held, failure))
 
-    def add_line(self, run_id: str, line: str) -> bool:
-        """Keep `line` as the latest of the held run's lines, the first of `TURN_LINES` dropped past
-        them, while the hold names `run_id`; whether it does. The failure stays as it stands."""
+    def update(
+        self, run_id: str, follow_id: str, change: Callable[[Held, Followed], Held]
+    ) -> Held | None:
+        """Write what `change` makes of the held run and its follow while the hold names `run_id`
+        and the follow `follow_id` holds its follow; the run written, or None, nothing written,
+        when the hold names another run or none, or its follow is another's or no one's. The
+        failure stays as it stands."""
 
         def apply(
             held: Held | None, kept: ActionerFailure | None
-        ) -> tuple[bool, Held | None, ActionerFailure | None]:
-            if held is None or held.run_id != run_id:
-                return False, held, kept
-            return True, replace(held, lines=(*held.lines, line)[-TURN_LINES:]), kept
+        ) -> tuple[Held | None, Held | None, ActionerFailure | None]:
+            if (
+                held is None
+                or held.run_id != run_id
+                or held.follow is None
+                or held.follow.follower is None
+                or held.follow.follower.id != follow_id
+            ):
+                return None, held, kept
+            changed = change(held, held.follow)
+            return changed, changed, kept
 
-        return self._change(apply)
+        return self.change(apply)
+
+    def add_line(self, run_id: str, follow_id: str, line: str, offset: int) -> bool:
+        """Keep `line` as the latest of the held run's lines, the first of `TURN_LINES` dropped past
+        them, and `offset` as where its follow reads next, while the follow `follow_id` holds the
+        run `run_id`; whether it does."""
+        return (
+            self.update(
+                run_id,
+                follow_id,
+                lambda held, followed: replace(
+                    held,
+                    lines=(*held.lines, line)[-TURN_LINES:],
+                    follow=replace(followed, offset=offset),
+                ),
+            )
+            is not None
+        )
 
     def clear(self, failure: ActionerFailure) -> bool:
         """Clear the last failure if it is `failure`, the hold as it is; whether it was."""
@@ -217,9 +275,9 @@ class Hold:
                 return False, held, kept
             return True, held, None
 
-        return self._change(apply)
+        return self.change(apply)
 
-    def _change[T](
+    def change[T](
         self,
         change: Callable[
             [Held | None, ActionerFailure | None],
@@ -245,6 +303,18 @@ class Hold:
                 "at": held.at.isoformat(),
                 "lines": list(held.lines),
             }
+            if held.follow is not None:
+                follow = held.follow
+                body["follow"] = {
+                    "note": sorted(map(list, follow.note)),
+                    "session": list(follow.session) if follow.session else None,
+                    "offset": follow.offset,
+                    "follower": (
+                        follow.follower.model_dump(mode="json")
+                        if follow.follower is not None
+                        else None
+                    ),
+                }
         if failure is not None:
             body["failure"] = failure.model_dump()
         if not body:
@@ -255,6 +325,24 @@ class Hold:
         )
         written.write_text(json.dumps(body), encoding="utf-8")
         os.replace(written, self.path)
+
+
+def _followed(body: Any) -> Followed | None:
+    """The follow as `Hold._write` records it; None for a hold that records none, as a pod of the
+    release before the follow writes it."""
+    if body is None:
+        return None
+    session = body["session"]
+    return Followed(
+        note=frozenset((str(env), str(name)) for env, name in body["note"]),
+        session=(str(session[0]), str(session[1])) if session is not None else None,
+        offset=int(body["offset"]),
+        follower=(
+            Follower.model_validate(body["follower"])
+            if body["follower"] is not None
+            else None
+        ),
+    )
 
 
 class RunRecord(BaseModel):
@@ -283,17 +371,17 @@ class ActionerStart(BaseModel):
     outcome: Outcome
 
 
-# The headless sessions working in the project as a run is asked for: environment and name.
-Note = frozenset[tuple[str, str]]
-
-
 class _Follow:
-    """The follow of the held run `run_id`, which leaves out the sessions of its `note`."""
+    """A follow of the held run `run_id` from where `followed`, the hold's record of the run's
+    follow, stands. It holds the run's follow while the hold names its id."""
 
-    def __init__(self, run_id: str, note: Note) -> None:
+    def __init__(self, run_id: str, followed: Followed) -> None:
         self.run_id = run_id
-        self.note = note
-        # Set once the follow is over, or its pod leaves it.
+        self.id = uuid.uuid4().hex
+        self.note = followed.note
+        self.session = followed.session
+        self.offset = followed.offset
+        # Set once the follow is over, its pod leaves it, or the run's follow is no longer its own.
         self.released = threading.Event()
 
 
@@ -316,10 +404,12 @@ class Actioner:
         hold: Hold,
         clock: Callable[[], datetime],
         inbox_session: Callable[[], tuple[str, str] | None],
+        pod: str | None = None,
     ) -> None:
         """Without `controller` or `settings`, their variables unset, a start is skipped and
         logged. `inbox_session` answers the inbox sitting's session, its environment and its
-        name, which the follow leaves out."""
+        name, which the follow leaves out. `pod` names this pod in the hold's record of the
+        follow; its host name by default."""
         self.controller = controller
         self.settings = settings
         self.triage = triage
@@ -327,12 +417,15 @@ class Actioner:
         self.hold = hold
         self.clock = clock
         self.inbox_session = inbox_session
+        self.pod = pod or socket.gethostname()
         self.retry = RETRY_AFTER
         self.skipped_retry = RETRY_SKIPPED
         self.expiry = HOLD_EXPIRY
         self.look_every = LOOK_EVERY
         self.reread = REREAD
         self.reread_max = REREAD_MAX
+        self.heartbeat = HEARTBEAT
+        self.takeover = TAKEOVER
         self._lock = threading.Lock()
         self._pending = False
         self._retrying: threading.Timer | None = None
@@ -352,7 +445,10 @@ class Actioner:
             return self._following.run_id if self._following is not None else None
 
     def state(self) -> ActionerState:
-        """The actioner as the app bar shows it (FR-33). A pending start is this pod's alone."""
+        """The actioner as the app bar and the actioner page show it (FR-33), the run's follow
+        taken over first when no follow holds it. A pending start is this pod's alone."""
+        if self.controller is not None:
+            self._take_over()
         held, failure = self.hold.load()
         if held is not None and self.clock() - held.at < self.expiry:
             return ActionerState(
@@ -449,7 +545,14 @@ class Actioner:
             )
             self._settle()
             return "failed"
-        self.hold.take(run_id, self.clock())
+        follow: _Follow | None = None
+        followed: Followed | None = None
+        if note is not None:
+            follow = self._claim(run_id, Followed(note))
+            followed = Followed(
+                note, follower=self._follower(follow) if follow is not None else None
+            )
+        self.hold.take(run_id, self.clock(), followed)
         self.metrics.actioner_starts.labels("started").inc()
         logger.info(
             "actioner run %s started for %d waiting: %s",
@@ -457,7 +560,13 @@ class Actioner:
             len(waiting),
             ", ".join(waiting),
         )
-        self._follow(run_id, note)
+        if follow is not None:
+            self._spawn(follow)
+        elif followed is not None:
+            logger.info(
+                "actioner run %s: its follow left to the other pod: shutdown is announced",
+                run_id,
+            )
         self._settle()
         return "started"
 
@@ -552,54 +661,139 @@ class Actioner:
                 if session.mode == "headless" and session.working:
                     yield env.env_id, session.name
 
-    def _follow(self, run_id: str, note: Note | None) -> None:
-        """Follow the run just held on a thread of its own, releasing the follow it replaces;
-        without the note, or once this pod has left its follows, the run is not followed."""
-        if note is None:
-            return
-        follow = _Follow(run_id, note)
+    def _claim(self, run_id: str, followed: Followed) -> _Follow | None:
+        """A follow of the held run from where `followed` stands, this pod's from now on, the
+        follow it replaces released; None once this pod has left its follows."""
+        follow = _Follow(run_id, followed)
         with self._lock:
-            leaving, replaced = self._leaving, self._following
-            if not leaving:
-                self._following = follow
-        if leaving:
-            logger.info(
-                "actioner run %s is not followed: shutdown is announced", run_id
-            )
-            return
+            if self._leaving:
+                return None
+            replaced, self._following = self._following, follow
         if replaced is not None:
             replaced.released.set()
+        return follow
+
+    def _follower(self, follow: _Follow) -> Follower:
+        return Follower(pod=self.pod, id=follow.id, beat=self.clock())
+
+    def _take_over(self) -> None:
+        """Take the held run's follow over when no follow holds it: its pod left it as its
+        shutdown was announced, or its heartbeat is `takeover` old. The new follow goes on from
+        where the hold's record of it stands. A pod that has left its follows takes none over."""
+        now = self.clock()
+
+        def take(
+            held: Held | None, failure: ActionerFailure | None
+        ) -> tuple[
+            tuple[_Follow, Follower | None] | None,
+            Held | None,
+            ActionerFailure | None,
+        ]:
+            if held is None or held.follow is None or now - held.at >= self.expiry:
+                return None, held, failure
+            left = held.follow.follower
+            if left is not None and now - left.beat < self.takeover:
+                return None, held, failure
+            follow = self._claim(held.run_id, held.follow)
+            if follow is None:
+                return None, held, failure
+            taken = replace(
+                held, follow=replace(held.follow, follower=self._follower(follow))
+            )
+            return (follow, left), taken, failure
+
+        taken = self.hold.change(take)
+        if taken is None:
+            return
+        follow, left = taken
+        if left is None:
+            logger.info(
+                "actioner run %s: its follow, left by a pod shutting down, taken over",
+                follow.run_id,
+            )
+        else:
+            logger.warning(
+                "actioner run %s: its follow in %s last beat at %s; taken over",
+                follow.run_id,
+                left.pod,
+                stamp(left.beat),
+            )
+        self._spawn(follow)
+
+    def _spawn(self, follow: _Follow) -> None:
         threading.Thread(
             target=self._run, args=(follow,), name="actioner-follow", daemon=True
         ).start()
 
     def _run(self, follow: _Follow) -> None:
+        """Follow the run while `follow` holds its follow, from where the hold's record stands,
+        its heartbeat refreshed meanwhile. A follow that ends once its pod has left its follows
+        leaves the run's follow held by no follow."""
+        beating = threading.Thread(
+            target=self._beat, args=(follow,), name="actioner-heartbeat", daemon=True
+        )
+        beating.start()
         try:
-            found = self._search(follow)
+            found = follow.session or self._search(follow)
             if found is not None:
                 self._read(follow, *found)
-        except Exception:  # the run goes on; only its lines stop
+        except Exception:  # a read takes it over once its heartbeat is stale
             logger.exception("actioner run %s: the follow failed", follow.run_id)
         finally:
             follow.released.set()
+            beating.join()
             with self._lock:
+                leaving = self._leaving
                 if self._following is follow:
                     self._following = None
+            if leaving:
+                self._leave(follow)
+
+    def _beat(self, follow: _Follow) -> None:
+        """Refresh the follow's heartbeat every `heartbeat` seconds until it is released; a run's
+        follow no longer its own releases it. A write the volume refuses misses one beat."""
+        while not follow.released.wait(self.heartbeat):
+            try:
+                beat = self.hold.update(
+                    follow.run_id,
+                    follow.id,
+                    lambda held, followed: replace(
+                        held, follow=replace(followed, follower=self._follower(follow))
+                    ),
+                )
+            except OSError as exc:
+                logger.warning(
+                    "actioner run %s: a heartbeat was not written: %r",
+                    follow.run_id,
+                    exc,
+                )
+                continue
+            if beat is None:
+                follow.released.set()
 
     def _live(self, follow: _Follow) -> bool:
-        """Whether the follow goes on: not released, and the hold its run's and not expired."""
+        """Whether the follow goes on: not released, and the hold its run's, not expired, and
+        its follow held by `follow`."""
         if follow.released.is_set():
             return False
         held = self.hold.read()
+        follower = (
+            held.follow.follower
+            if held is not None and held.follow is not None
+            else None
+        )
         return (
             held is not None
             and held.run_id == follow.run_id
             and self.clock() - held.at < self.expiry
+            and follower is not None
+            and follower.id == follow.id
         )
 
     def _search(self, follow: _Follow) -> tuple[str, str] | None:
         """The run's session, looked for every `look_every` seconds while the follow goes on: a
-        headless session working that was not at the note and is not the inbox sitting's own."""
+        headless session working that was not at the note and is not the inbox sitting's own.
+        Once found it is recorded with the hold; None when it was not found, or not recorded."""
         while self._live(follow):
             try:
                 inbox = self.inbox_session()
@@ -625,26 +819,44 @@ class Actioner:
                         found[1],
                         found[0],
                     )
-                    return found
+                    return self._record(follow, found)
             if follow.released.wait(self.look_every):
                 break
         return None
 
+    def _record(
+        self, follow: _Follow, session: tuple[str, str]
+    ) -> tuple[str, str] | None:
+        """`session`, recorded with the hold as the run's; None when `follow` no longer holds the
+        run's follow."""
+        kept = self.hold.update(
+            follow.run_id,
+            follow.id,
+            lambda held, followed: replace(
+                held, follow=replace(followed, session=session)
+            ),
+        )
+        return session if kept is not None else None
+
     def _read(self, follow: _Follow, env: str, name: str) -> None:
-        """The session's response stream from its start to its result while the follow goes on,
-        each condensed log line kept in the hold; a stream that drops read again from where it
-        stood. The session gone ends it: the controller ends it at its result."""
+        """The session's response stream from the follow's offset to its result while the follow
+        goes on, each condensed log line kept in the hold with the offset after it; a stream that
+        drops read again from where it stood. The result, or the session gone, ends the run's
+        follow: the controller ends the session at its result."""
         assert self.controller is not None
-        offset, wait = 0, self.reread
+        offset, wait = follow.offset, self.reread
         while self._live(follow):
             try:
                 for event in self.controller.response(env, name, offset):
                     if not self._live(follow):
                         return
                     if isinstance(event, LogLine):
-                        if not self.hold.add_line(follow.run_id, event.line):
+                        if not self.hold.add_line(
+                            follow.run_id, follow.id, event.line, event.offset
+                        ):
                             return
                         offset, wait = event.offset, self.reread
+                self._over(follow)
                 return
             except ControllerError as exc:
                 if exc.lost:
@@ -654,6 +866,7 @@ class Actioner:
                         name,
                         exc,
                     )
+                    self._over(follow)
                     return
                 logger.warning(
                     "actioner run %s: %s; reading again in %g s",
@@ -665,14 +878,36 @@ class Actioner:
                 return
             wait = min(wait * 2, self.reread_max)
 
+    def _over(self, follow: _Follow) -> None:
+        """The run's follow is over: the hold no longer records one, so no pod takes it over."""
+        self.hold.update(
+            follow.run_id, follow.id, lambda held, followed: replace(held, follow=None)
+        )
+
     def release(self) -> None:
-        """Leave the run's follow, and every follow that begins after: shutdown is announced."""
+        """Leave the run's follow to the other pod, and every follow that begins after: shutdown
+        is announced."""
         with self._lock:
             self._leaving = True
             follow = self._following
         if follow is not None:
-            follow.released.set()
-            logger.info("actioner run %s: its follow left", follow.run_id)
+            self._leave(follow)
+
+    def _leave(self, follow: _Follow) -> None:
+        """Release `follow`; the run's follow it holds is left held by no follow, for the next
+        read of either pod to take over."""
+        follow.released.set()
+        left = self.hold.update(
+            follow.run_id,
+            follow.id,
+            lambda held, followed: replace(
+                held, follow=replace(followed, follower=None)
+            ),
+        )
+        if left is not None:
+            logger.info(
+                "actioner run %s: its follow left to the other pod", follow.run_id
+            )
 
     def stop(self) -> None:
         """Leave the run's follow and drop a retry that waits."""

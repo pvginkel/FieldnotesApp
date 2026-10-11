@@ -8,14 +8,16 @@ take turns. Against the fake controller; every item is invented."""
 
 import logging
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
-from app.fieldnotes.actioner import ActionerFailure, Held, Hold
+from app.fieldnotes.actioner import ActionerFailure, Followed, Held, Hold
 from app.fieldnotes.controller import ControllerSettings, HttpController
+from app.fieldnotes.inbox import Follower
 from app.fieldnotes.runtime import ACTIONER_HOLD
 from app.fieldnotes.triage import item_path
 from tests.fieldnotes.test_triage import (
@@ -849,7 +851,11 @@ def test_the_clear_refuses_all_but_the_editor_and_clears_nothing(
 
 # -- the hold's file: one writer at a time, on either pod ----------------------------------------
 
-RUN = Held("run-1", datetime(2026, 9, 19, 10, 0, tzinfo=UTC))
+FOLLOWER = Follower(
+    pod="pod-a", id="follow-1", beat=datetime(2026, 9, 19, 10, 0, tzinfo=UTC)
+)
+FOLLOWED = Followed(frozenset(), ("pvginkel-fieldnotes-0a1b2c", "claude"), 0, FOLLOWER)
+RUN = Held("run-1", datetime(2026, 9, 19, 10, 0, tzinfo=UTC), follow=FOLLOWED)
 NEXT = Held("run-2", datetime(2026, 9, 19, 10, 4, tzinfo=UTC))
 SHOWN = ActionerFailure(
     at="2026-09-19T10:01:00Z", outcome="refused", reason="the controller failed"
@@ -858,6 +864,25 @@ NEWER = ActionerFailure(
     at="2026-09-19T10:03:00Z", outcome="failed", reason="turn-error"
 )
 LINE = "[4s] [tool_use: Read] triage/EX-1.json"
+OFFSET = len(LINE.encode()) + 1
+
+
+def add_line(hold: Hold) -> bool:
+    """The run's follow keeps its line."""
+    return hold.add_line(RUN.run_id, FOLLOWER.id, LINE, OFFSET)
+
+
+def leave(hold: Hold) -> Held | None:
+    """The run's follow, left by its pod as its shutdown is announced."""
+    return hold.update(
+        RUN.run_id,
+        FOLLOWER.id,
+        lambda held, followed: replace(held, follow=replace(followed, follower=None)),
+    )
+
+
+LEFT = replace(RUN, follow=replace(FOLLOWED, follower=None))
+READ = replace(RUN, lines=(LINE,), follow=replace(FOLLOWED, offset=OFFSET))
 
 
 @pytest.mark.parametrize(
@@ -895,27 +920,39 @@ LINE = "[4s] [tool_use: Read] triage/EX-1.json"
         ),
         (
             lambda hold: hold.release(RUN.run_id, NEWER),
-            lambda hold: hold.add_line(RUN.run_id, LINE),
+            add_line,
             False,
             (None, NEWER),
         ),
         (
-            lambda hold: hold.add_line(RUN.run_id, LINE),
+            add_line,
             lambda hold: hold.release(RUN.run_id, NEWER),
             True,
             (None, NEWER),
         ),
         (
             lambda hold: hold.clear(SHOWN),
-            lambda hold: hold.add_line(RUN.run_id, LINE),
+            add_line,
             True,
-            (Held(RUN.run_id, RUN.at, (LINE,)), None),
+            (READ, None),
         ),
         (
             lambda hold: hold.take(NEXT.run_id, NEXT.at),
-            lambda hold: hold.add_line(RUN.run_id, LINE),
+            add_line,
             False,
             (NEXT, None),
+        ),
+        (
+            leave,
+            add_line,
+            False,
+            (LEFT, SHOWN),
+        ),
+        (
+            lambda hold: hold.clear(SHOWN),
+            leave,
+            LEFT,
+            (LEFT, None),
         ),
         (
             lambda hold: hold.clear(SHOWN),
@@ -934,6 +971,8 @@ LINE = "[4s] [tool_use: Read] triage/EX-1.json"
         "the follow's line, then the webhook",
         "a clear, then the follow's line",
         "the next start, then the last run's line",
+        "its pod's leave, then the follow's line",
+        "a clear, then its pod's leave",
         "a clear, then a refused start",
     ],
 )
@@ -944,7 +983,7 @@ def test_a_write_to_the_hold_on_the_other_pod_waits_for_the_one_in_hand(
     while that write is in hand, waits for it and works on what it wrote."""
     path = tmp_path / ACTIONER_HOLD
     one, other = Hold(path), Hold(path)
-    one.take(RUN.run_id, RUN.at)
+    one.take(RUN.run_id, RUN.at, FOLLOWED)
     one.fail(SHOWN)
     write = one._write
     racer: list[threading.Thread] = []

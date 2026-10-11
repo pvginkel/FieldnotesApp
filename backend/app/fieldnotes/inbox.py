@@ -212,8 +212,8 @@ Status = Literal["starting", "busy", "idle", "lost", "ended"]
 
 
 class Follower(_Model):
-    """The follow holding the turn in flight: the pod it runs in, its own id, which each of its
-    writes is checked against, and its last heartbeat."""
+    """The follow holding the turn in flight, or the actioner run's follow: the pod it runs in,
+    its own id, which each of its writes is checked against, and its last heartbeat."""
 
     pod: str
     id: str

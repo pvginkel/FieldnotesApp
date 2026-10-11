@@ -10,13 +10,20 @@ session and line is invented."""
 import json
 import logging
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from app.fieldnotes.actioner import ActionerFailure, ActionerStart, Held, Hold
-from app.fieldnotes.inbox import InboxEnd, InboxLoss, Sitting, SittingFile
+from app.fieldnotes.actioner import (
+    ActionerFailure,
+    ActionerStart,
+    Followed,
+    Held,
+    Hold,
+)
+from app.fieldnotes.inbox import Follower, InboxEnd, InboxLoss, Sitting, SittingFile
 from app.fieldnotes.runtime import ACTIONER_HOLD, INBOX_SITTING
 from app.fieldnotes.testing import FakeTurn
 from app.services.base_task import BaseTask, ProgressHandle
@@ -337,31 +344,52 @@ def test_the_webhook_releasing_the_hold_mid_follow_ends_it_and_no_write_brings_a
 
 
 def test_the_hold_keeps_the_held_run_s_last_four_lines_beside_its_failure(tmp_path):
-    """A line belongs to the run held: another run's, or one once the hold is released, is not
-    kept, and the failure stays as it stands."""
+    """A line belongs to the run held and the follow holding its follow: another run's, another
+    follow's, or one once the hold is released, is not kept, and the failure stays as it stands.
+    The record of the follow, its offset the one after the last line kept, is read back whole."""
     hold = Hold(tmp_path / ACTIONER_HOLD)
     refused = ActionerFailure(at="2026-09-19T10:01:00Z", outcome="refused", reason=None)
-    hold.take("run-1", AT)
+    followed = Followed(
+        frozenset({(ENV, "busy"), (SPARE, "claude")}),
+        (ENV, "claude"),
+        0,
+        Follower(pod="pod-a", id="follow-1", beat=AT),
+    )
+    hold.take("run-1", AT, followed)
     hold.fail(refused)
-    added = [hold.add_line("run-1", line) for line in LINES[:5]]
-    other_run = hold.add_line("run-0", LINES[5])
+    added = [
+        hold.add_line("run-1", "follow-1", line, int(after(*LINES[: n + 1])))
+        for n, line in enumerate(LINES[:5])
+    ]
+    other_run = hold.add_line("run-0", "follow-1", LINES[5], int(after(*LINES)))
+    other_follow = hold.add_line("run-1", "follow-0", LINES[5], int(after(*LINES)))
     kept = hold.load()
     hold.release("run-1")
-    once_released = hold.add_line("run-1", LINES[5])
+    once_released = hold.add_line("run-1", "follow-1", LINES[5], int(after(*LINES)))
     released_hold = hold.load()
     hold.take("run-2", AT)
     next_run = hold.load()
 
     assert added == [True] * 5
     assert not other_run
-    assert kept == (Held("run-1", AT, tuple(LINES[1:5])), refused)
+    assert not other_follow
+    assert kept == (
+        Held(
+            "run-1",
+            AT,
+            tuple(LINES[1:5]),
+            replace(followed, offset=int(after(*LINES[:5]))),
+        ),
+        refused,
+    )
     assert not once_released
     assert released_hold == (None, refused)
     assert next_run == (Held("run-2", AT), None)
 
 
 def test_a_hold_written_without_lines_is_a_run_held_with_none(tmp_path):
-    """The hold as a pod of the release before the lines wrote it."""
+    """The hold as a pod of the release before the lines and the follow wrote it: a run held
+    with no line and no follow to take over."""
     path = tmp_path / ACTIONER_HOLD
     path.write_text(json.dumps({"runId": "run-1", "at": AT.isoformat()}))
 
@@ -388,7 +416,7 @@ def test_a_pod_shut_down_mid_run_leaves_the_follow_at_once(
 ):
     """R2: the follow is released as shutdown is announced, while the shutdown still waits out
     the pod's other tasks, and the shutdown waits on none of it; the session's next line is not
-    read, and the hold is left as it stands."""
+    read, and the run's follow is left in the hold as it stands, held by no follow."""
     seed(remote, item(IDS[0], ruling=ruling()))
     kubecoder.add_environment(ENV)
     kubecoder.run_turns.append(FakeTurn(LINES[:1], held=True))
@@ -409,22 +437,34 @@ def test_a_pod_shut_down_mid_run_leaves_the_follow_at_once(
 
     assert announced
     assert prompt
-    assert kept == (Held(run_id, AT, (LINES[0],)), None)
+    assert kept == (
+        Held(
+            run_id,
+            AT,
+            (LINES[0],),
+            Followed(frozenset(), (env, name), int(after(LINES[0]))),
+        ),
+        None,
+    )
 
 
-def test_a_run_started_once_shutdown_is_announced_is_not_followed(
+def test_a_run_started_once_shutdown_is_announced_is_left_to_the_other_pod(
     start, remote, kubecoder, eventually
 ):
+    """The run is held with its note and no follow holding it, for the other pod to take over."""
     seed(remote, item(IDS[0], ruling=ruling()))
     kubecoder.add_environment(ENV)
+    kubecoder.add_session(ENV, "busy", headless=True, working=True)
     kubecoder.run_turns.append(FakeTurn(LINES[:1], held=True))
     with start() as api:
         api.runtime.release()
         run_id = started(api, eventually)
         following = api.runtime.actioner.following
+        held = api.runtime.actioner.hold.read()
         calls = [c.path for c in kubecoder.calls]
 
     assert run_id == "run-1"
     assert following is None
+    assert held == Held(run_id, AT, follow=Followed(frozenset({(ENV, "busy")})))
     # The note, before the run was asked for, and nothing after.
     assert calls == ["/environments", f"/environments/{ENV}/sessions"]

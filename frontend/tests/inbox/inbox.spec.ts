@@ -4,7 +4,7 @@
  * controller plays the sitting's session. Every sitting, card id and title is invented.
  */
 
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { contrastFailures, type Failure } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import type { TestEventCapture } from '../support/helpers/test-events';
@@ -17,6 +17,16 @@ async function inboxState(request: APIRequestContext, backendUrl: string) {
     tracker: string | null;
     sitting: { turn: { task: string; lines: string[] } | null } | null;
   };
+}
+
+/** The page's next read of the sitting whose turn holds exactly `lines`. */
+function readHolding(page: Page, lines: string[]) {
+  return page.waitForResponse(async (response) => {
+    const url = new URL(response.url());
+    if (url.pathname !== '/api/inbox' || response.request().method() !== 'GET' || !response.ok()) return false;
+    const state = (await response.json()) as { sitting: { turn: { lines: string[] } | null } | null };
+    return JSON.stringify(state.sitting?.turn?.lines) === JSON.stringify(lines);
+  });
 }
 
 /** The page's own SSE connection, which every request the page makes names for the API to bind
@@ -284,6 +294,96 @@ test.describe('the working box', () => {
 
     await inbox.reload();
     await expect(inbox.workingLines).toHaveText(lines.slice(-4));
+  });
+
+  test("back on the inbox screen mid-turn with no reload, it shows the sitting's lines once each and in order: the task channel's replay of lines heard before adds none", async ({ controller, inbox, appBar, page }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('One question.');
+    await inbox.send('Yes.');
+    await controller.emit('Reading EX-1');
+    await controller.emit('Reading EX-2');
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+
+    await appBar.triageTab.click();
+    await appBar.expectScreen('triage');
+    const reread = readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+    await appBar.inboxTab.click();
+    await reread;
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await controller.emit('Reading EX-3');
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2', 'Reading EX-3']);
+  });
+
+  test('each read of the sitting sets its lines, changed or not: a line the read held before its event came is shown once', async ({ controller, inbox, page }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('One question.');
+    await inbox.send('Yes.');
+    await controller.emit('Reading EX-1');
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1']);
+
+    // The API writes a line, then sends its event: a read between the two holds the line before
+    // the page hears it. One read is made to answer so, ahead of the line.
+    let ahead = true;
+    // eslint-disable-next-line testing/no-route-mocks -- the read that lands between the API's write and its event cannot be timed
+    await page.route(
+      (url) => url.pathname === '/api/inbox',
+      async (route) => {
+        if (route.request().method() !== 'GET' || !ahead) return route.fallback();
+        ahead = false;
+        const response = await route.fetch();
+        const state = (await response.json()) as { sitting: { turn: { lines: string[] } } };
+        state.sitting.turn.lines = [...state.sitting.turn.lines, 'Reading EX-2'];
+        // eslint-disable-next-line testing/no-route-mocks -- as above
+        await route.fulfill({ response, json: state });
+      },
+    );
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await controller.emit('Reading EX-2');
+    await readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+  });
+
+  test('under a transcript taller than the screen, it keeps its newest line and the spinner in view as it grows, and leaves an operator who scrolled up where they are', async ({ controller, inbox, page }) => {
+    await page.setViewportSize({ width: 1000, height: 600 });
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }, { held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish(Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of the answer.`).join('\n\n'));
+    await inbox.send('Yes.');
+
+    // Inside the scrolling area, above the composer.
+    const inView = async (locator: Locator) => {
+      const main = (await inbox.main.boundingBox())!;
+      const box = (await locator.boundingBox())!;
+      return box.y >= main.y && box.y + box.height <= main.y + main.height + 0.5;
+    };
+    for (const line of ['Reading EX-1', 'Reading EX-2', 'Reading EX-3', 'Reading EX-4']) {
+      await controller.emit(line);
+      await expect(inbox.workingLines.last()).toHaveText(line);
+      await expect.poll(() => inView(inbox.workingLines.last())).toBe(true);
+      await expect.poll(() => inView(inbox.workingSpinner)).toBe(true);
+    }
+
+    await controller.finish('Recorded.');
+    await inbox.send('Go on.');
+    await expect.poll(() => inView(inbox.workingWaiting)).toBe(true);
+    await inbox.main.evaluate(
+      (main) =>
+        new Promise<void>((resolve) => {
+          main.addEventListener('scroll', () => resolve(), { once: true });
+          main.scrollTo({ top: 0 });
+        }),
+    );
+    await controller.emit('Reading EX-5');
+    await controller.emit('Reading EX-6');
+    await expect(inbox.workingLines).toHaveCount(2);
+    await page.waitForTimeout(500);
+    expect(await inbox.main.evaluate((main) => main.scrollTop)).toBe(0);
   });
 });
 

@@ -20,18 +20,16 @@ import type {
 type InboxState = InboxState_5430f38;
 export type Sitting = InboxState_5430f38_InboxSitting;
 export type Message = InboxState_5430f38_InboxMessage;
-type Turn = NonNullable<Sitting['turn']>;
 
-/** The lines the task said since the sitting was fetched with the lines `after`. */
+/** The lines the task said since the sitting was fetched at `fetched`. */
 interface Heard {
   task: string;
-  after: string[];
+  fetched: number;
   lines: string[];
 }
 
-// Query data keeps an unchanged part's identity across fetches, so the same `lines` array means
-// the sitting's lines have not changed since.
-const heardAfter = (heard: Heard, turn: Turn) => heard.task === turn.task && heard.after === turn.lines;
+const heardSince = (heard: Heard | null, task: string, fetched: number): heard is Heard =>
+  heard !== null && heard.task === task && heard.fetched === fetched;
 
 const KEY = ['getInbox', undefined];
 const DRAFT = 'fieldnotes-inbox-draft';
@@ -63,13 +61,12 @@ export function useInbox() {
   const turn = sitting?.turn ?? null;
 
   // The turn's last log lines: those the sitting held when it was last fetched, then those the
-  // task said since. A fetch that changes the sitting's lines replaces what was heard before it.
+  // task said since. Each fetch replaces what was heard before it, its lines changed or not.
   const [heard, setHeard] = useState<Heard | null>(null);
-  const shown = useRef(turn);
-  useEffect(() => {
-    shown.current = turn;
-  }, [turn]);
   const followed = useRef<string | null>(null);
+  // The API writes each line to the sitting's file before it sends it, so a fetch holds the lines
+  // said before it: the task channel's replay of them on a subscribe would show them twice.
+  const replaying = useRef(false);
   // Tasks whose end the page has seen. The template's task channel replays a task's events, its
   // end included, on every subscribe: following one again while a fetched sitting still names it
   // ends it again and fetches again, in a loop.
@@ -81,22 +78,30 @@ export function useInbox() {
     void queryClient.invalidateQueries({ queryKey: KEY });
   }, [queryClient]);
 
-  const onProgress = useCallback((line: string) => {
-    const current = shown.current;
-    if (!current || current.task !== followed.current) return;
-    setHeard((before) => ({
-      task: current.task,
-      after: current.lines,
-      lines: [...(before && heardAfter(before, current) ? before.lines : []), line].slice(-WORKING_LINES),
-    }));
-  }, []);
+  const onProgress = useCallback(
+    (line: string) => {
+      const fetched = queryClient.getQueryState<InboxState>(KEY);
+      const task = fetched?.data?.sitting?.turn?.task;
+      if (replaying.current || !fetched || !task || task !== followed.current) return;
+      setHeard((before) => ({
+        task,
+        fetched: fetched.dataUpdatedAt,
+        lines: [...(heardSince(before, task, fetched.dataUpdatedAt) ? before.lines : []), line].slice(
+          -WORKING_LINES,
+        ),
+      }));
+    },
+    [queryClient],
+  );
 
   const { subscribeToTask, unsubscribe } = useSSETask({ onProgress, onResult: settle, onError: settle });
 
   useEffect(() => {
     if (turn && followed.current !== turn.task && !finished.current.has(turn.task)) {
       followed.current = turn.task;
+      replaying.current = true;
       subscribeToTask(turn.task);
+      replaying.current = false;
     } else if (!turn && followed.current) {
       followed.current = null;
       unsubscribe();
@@ -104,7 +109,9 @@ export function useInbox() {
   }, [turn, subscribeToTask, unsubscribe]);
 
   const lines = turn
-    ? [...turn.lines, ...(heard && heardAfter(heard, turn) ? heard.lines : [])].slice(-WORKING_LINES)
+    ? [...turn.lines, ...(heardSince(heard, turn.task, query.dataUpdatedAt) ? heard.lines : [])].slice(
+        -WORKING_LINES,
+      )
     : [];
 
   // Toasts, for a write the API refused.

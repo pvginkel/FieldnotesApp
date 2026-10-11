@@ -741,9 +741,9 @@ whichever pod finds a sitting due closes it, once, and keeps it ended or lost (F
 The screen is the route `/inbox`, reached by the app bar's tabs (FR-33): Start, the transcript, a
 text field with Send, End, and the working box. It was designed with the operator on 2026-10-10
 against a fake of these endpoints that plays real sittings recorded in the spec repo
-(`mockups/inbox-ui/`), and the screen as designed is the one built, the fake going when the API
-follows; the Playwright suite drives it against the backend with the controller faked, as the
-backend's own tests fake it.
+(`mockups/inbox-ui/`), and the screen as designed is the one built, but for the composer and the
+working box, which are as FR-28 has them, the fake going when the API follows; the Playwright suite
+drives it against the backend with the controller faked, as the backend's own tests fake it.
 
 ### Security and config
 

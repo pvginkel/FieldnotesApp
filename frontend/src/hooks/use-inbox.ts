@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { WORKING_LINES } from '@/components/shell/working-box';
 import { useSSETask } from '@/hooks/use-sse-task';
 import type { Toast } from '@/hooks/use-triage';
 import { api } from '@/lib/api/client';
@@ -14,13 +15,23 @@ import type {
   InboxState_5430f38,
   InboxState_5430f38_InboxMessage,
   InboxState_5430f38_InboxSitting,
-  StartRequest_5430f38,
-  TurnRequest_5430f38,
 } from '@/lib/api/generated/hooks';
 
 type InboxState = InboxState_5430f38;
 export type Sitting = InboxState_5430f38_InboxSitting;
 export type Message = InboxState_5430f38_InboxMessage;
+type Turn = NonNullable<Sitting['turn']>;
+
+/** The lines the task said since the sitting was fetched with the lines `after`. */
+interface Heard {
+  task: string;
+  after: string[];
+  lines: string[];
+}
+
+// Query data keeps an unchanged part's identity across fetches, so the same `lines` array means
+// the sitting's lines have not changed since.
+const heardAfter = (heard: Heard, turn: Turn) => heard.task === turn.task && heard.after === turn.lines;
 
 const KEY = ['getInbox', undefined];
 const DRAFT = 'fieldnotes-inbox-draft';
@@ -51,8 +62,13 @@ export function useInbox() {
   const sitting = state?.sitting ?? null;
   const turn = sitting?.turn ?? null;
 
-  // The last log line: what the task said last, else what the sitting held when it was fetched.
-  const [streamed, setStreamed] = useState<{ task: string; line: string } | null>(null);
+  // The turn's last log lines: those the sitting held when it was last fetched, then those the
+  // task said since. A fetch that changes the sitting's lines replaces what was heard before it.
+  const [heard, setHeard] = useState<Heard | null>(null);
+  const shown = useRef(turn);
+  useEffect(() => {
+    shown.current = turn;
+  }, [turn]);
   const followed = useRef<string | null>(null);
   // Tasks whose end the page has seen. The template's task channel replays a task's events, its
   // end included, on every subscribe: following one again while a fetched sitting still names it
@@ -66,7 +82,13 @@ export function useInbox() {
   }, [queryClient]);
 
   const onProgress = useCallback((line: string) => {
-    if (followed.current) setStreamed({ task: followed.current, line });
+    const current = shown.current;
+    if (!current || current.task !== followed.current) return;
+    setHeard((before) => ({
+      task: current.task,
+      after: current.lines,
+      lines: [...(before && heardAfter(before, current) ? before.lines : []), line].slice(-WORKING_LINES),
+    }));
   }, []);
 
   const { subscribeToTask, unsubscribe } = useSSETask({ onProgress, onResult: settle, onError: settle });
@@ -81,7 +103,9 @@ export function useInbox() {
     }
   }, [turn, subscribeToTask, unsubscribe]);
 
-  const log = turn ? (streamed?.task === turn.task ? streamed.line : turn.log) : null;
+  const lines = turn
+    ? [...turn.lines, ...(heard && heardAfter(heard, turn) ? heard.lines : [])].slice(-WORKING_LINES)
+    : [];
 
   // Toasts, for a write the API refused.
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -125,15 +149,9 @@ export function useInbox() {
     else localStorage.removeItem(DRAFT);
   }, []);
 
-  // Start's and Send's bodies leave out `sse_request_id`: the request names the page's SSE
-  // connection in its header (`@/lib/api/sse-connection`).
   const start = useCallback(
     (scope: string) =>
-      write(
-        () => api.POST('/api/inbox/start', { body: { scope } as StartRequest_5430f38 }) as Promise<Reply>,
-        'Start failed',
-        answered,
-      ),
+      write(() => api.POST('/api/inbox/start', { body: { scope } }) as Promise<Reply>, 'Start failed', answered),
     [write],
   );
 
@@ -141,7 +159,7 @@ export function useInbox() {
     const message = draft.trim();
     if (!message) return false;
     const sent = await write(
-      () => api.POST('/api/inbox/turns', { body: { message } as TurnRequest_5430f38 }) as Promise<Reply>,
+      () => api.POST('/api/inbox/turns', { body: { message } }) as Promise<Reply>,
       'Send failed',
       answered,
     );
@@ -154,5 +172,5 @@ export function useInbox() {
     [write],
   );
 
-  return { query, state, sitting, turn, log, busy, toasts, draft, setDraft, start, send, end };
+  return { query, state, sitting, turn, lines, busy, toasts, draft, setDraft, start, send, end };
 }

@@ -83,6 +83,11 @@ export class Controller {
     return this.call('post', '/lose', { what });
   }
 
+  /** The sitting closed now as the idle expiry closes it: ended, or a lost one kept lost. */
+  expire(): Promise<void> {
+    return this.call('post', '/expire', {});
+  }
+
   /** The last prompt run the controller accepted ends as its webhook reports it: no outcome is a
    *  success. */
   runEnd(outcome: 'failed' | 'skipped' | null, reason: string | null = null): Promise<void> {

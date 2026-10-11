@@ -1,9 +1,12 @@
-// The operator's side (FR-28): a text field with Send. Enter sends; Shift+Enter and Alt+Enter break
-// the line. While a turn is in flight Send is withheld, not the field: the answer can be drafted
-// while the session works.
+// The operator's side (FR-28): a text field with Send. Ctrl+Enter sends; Enter breaks the line, as
+// the browser has it. While a turn is in flight Send is withheld, not the field: the answer can be
+// drafted while the session works.
 
 import { useLayoutEffect, useRef } from 'react';
 import { SendHorizontal } from 'lucide-react';
+
+/** How many lines the field grows to before it scrolls. */
+const LINES = 8;
 
 interface ComposerProps {
   draft: string;
@@ -15,20 +18,20 @@ interface ComposerProps {
 
 export function Composer({ draft, working, busy, onDraft, onSend }: ComposerProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const caret = useRef<number | null>(null);
   const canSend = Boolean(draft.trim()) && !working && !busy;
 
-  // The field grows with what is typed, to a limit, then scrolls.
+  // The field grows with what is typed, to `LINES` lines, then scrolls.
   useLayoutEffect(() => {
     const field = ref.current;
     if (!field) return;
-    if (caret.current !== null) {
-      field.selectionStart = field.selectionEnd = caret.current; // after an Alt+Enter line break
-      caret.current = null;
-    }
+    const style = getComputedStyle(field);
+    const px = (value: string) => parseFloat(value);
+    const frame = px(style.borderTopWidth) + px(style.borderBottomWidth);
+    const most = LINES * px(style.lineHeight) + px(style.paddingTop) + px(style.paddingBottom) + frame;
     field.style.height = 'auto';
-    field.style.height = `${Math.min(field.scrollHeight + 2, 240)}px`;
-    field.style.overflowY = field.scrollHeight + 2 > 240 ? 'auto' : 'hidden';
+    const needed = field.scrollHeight + frame;
+    field.style.height = `${Math.min(needed, most)}px`;
+    field.style.overflowY = needed > most ? 'auto' : 'hidden';
   }, [draft]);
 
   return (
@@ -38,20 +41,11 @@ export function Composer({ draft, working, busy, onDraft, onSend }: ComposerProp
           ref={ref}
           rows={1}
           value={draft}
-          placeholder={working ? 'The session is working; draft your answer meanwhile' : 'Answer in your own words'}
           onChange={(event) => onDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey) return;
+            if (event.key !== 'Enter' || !event.ctrlKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
-            if (event.altKey) {
-              // The browser breaks the line on Shift+Enter only: Alt+Enter does it here.
-              const field = event.currentTarget;
-              const at = field.selectionStart;
-              caret.current = at + 1;
-              onDraft(`${draft.slice(0, at)}\n${draft.slice(field.selectionEnd)}`);
-            } else if (canSend) {
-              onSend();
-            }
+            if (canSend) onSend();
           }}
           data-testid="inbox.composer.text"
         />
@@ -59,7 +53,7 @@ export function Composer({ draft, working, busy, onDraft, onSend }: ComposerProp
           type="button"
           className="btn btn-primary send"
           disabled={!canSend}
-          title={working ? 'Wait for the session to answer' : 'Send (Enter)'}
+          title={working ? 'Wait for the session to answer' : 'Send (Ctrl+Enter)'}
           onClick={onSend}
           data-testid="inbox.composer.send"
         >

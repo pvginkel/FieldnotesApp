@@ -14,8 +14,8 @@ export class AppBar {
     this.actionerPill = page.getByTestId('app-shell.pill.actioner');
   }
 
-  /** The pill shows in this state (`working`, `waiting`, `lost` or `failed`), its tooltip saying
-   *  what. */
+  /** The pill shows in this state (`working`, `waiting`, `lost`, `ended` or `failed`), its tooltip
+   *  saying what. */
   async expectPill(pill: Locator, state: string, title: RegExp): Promise<void> {
     await expect(pill).toHaveAttribute('data-state', state);
     await expect(pill).toHaveAttribute('title', title);

@@ -64,11 +64,11 @@ export function InboxPage() {
     seen.current = count;
   }, [count, lastAuthor]);
 
-  // A sitting lost: its line, at the end, in view.
-  const lost = Boolean(sitting?.lost);
+  // A sitting lost or ended: its line, at the end, in view.
+  const closed = Boolean(sitting?.lost || sitting?.ended);
   useLayoutEffect(() => {
-    if (lost) mainRef.current?.scrollTo({ top: mainRef.current.scrollHeight, behavior: 'smooth' });
-  }, [lost]);
+    if (closed) mainRef.current?.scrollTo({ top: mainRef.current.scrollHeight, behavior: 'smooth' });
+  }, [closed]);
 
   const content = (() => {
     if (query.isPending) return <CenterCard title="" testId="inbox.loading" />;
@@ -92,7 +92,7 @@ export function InboxPage() {
     }
     return (
       <div className="column inbox-column">
-        <Transcript sitting={sitting} tracker={state.tracker} log={inbox.log} />
+        <Transcript sitting={sitting} tracker={state.tracker} lines={inbox.lines} />
       </div>
     );
   })();
@@ -104,7 +104,7 @@ export function InboxPage() {
         <main className="main" ref={mainRef} data-testid="inbox.main">
           {content}
         </main>
-        {sitting && !sitting.lost && (
+        {sitting && !closed && (
           <Composer
             draft={inbox.draft}
             working={Boolean(sitting.turn)}
@@ -113,10 +113,12 @@ export function InboxPage() {
             onSend={() => void inbox.send()}
           />
         )}
-        {sitting?.lost && (
-          <div className="composer lost-bar" data-testid="inbox.restart">
+        {sitting && closed && (
+          <div className="composer restart-bar" data-testid="inbox.restart">
             <div className="column composer-row">
-              <span className="lost-note">The session is gone, and Send with it. A new sitting clears this one.</span>
+              <span className="restart-note">
+                The session {sitting.lost ? 'is gone' : 'has ended'}, and Send with it. A new sitting clears this one.
+              </span>
               <button
                 type="button"
                 className="btn btn-primary"

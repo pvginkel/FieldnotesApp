@@ -1,11 +1,13 @@
 // The sitting's transcript (FR-28): the inbox prompt as the sitting's opening line, the session's
 // messages as the skill writes them (markdown.tsx), the operator's as they typed them, each with
-// its time under it; under the last one, while a turn is in flight, the last line of the session's
-// condensed log. A lost sitting ends on a line saying so (FR-32).
+// its time under it; under the last one, while a turn is in flight, the working box over the
+// session's condensed log. A sitting the expiry ended (FR-31) or a lost one (FR-32) ends on a line
+// saying so.
 
-import { LoaderCircle, TriangleAlert } from 'lucide-react';
+import { TimerOff, TriangleAlert } from 'lucide-react';
+import { WorkingBox } from '@/components/shell/working-box';
 import type { Message, Sitting } from '@/hooks/use-inbox';
-import { clock } from '@/lib/inbox/text';
+import { clock, minutes } from '@/lib/inbox/text';
 import { stamp } from '@/lib/triage/time';
 import { Markdown } from './markdown';
 
@@ -34,24 +36,13 @@ function MessageTime({ at }: { at: string }) {
 
 const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
-function Working({ log }: { log: string | null }) {
-  return (
-    <div className="working" data-testid="inbox.working">
-      <LoaderCircle className="icon spin" aria-hidden="true" />
-      <span className="working-log" title={log ?? undefined} data-testid="inbox.working.log">
-        {log ?? 'Waiting for the session…'}
-      </span>
-    </div>
-  );
-}
-
 interface TranscriptProps {
   sitting: Sitting;
   tracker: string | null;
-  log: string | null;
+  lines: string[];
 }
 
-export function Transcript({ sitting, tracker, log }: TranscriptProps) {
+export function Transcript({ sitting, tracker, lines }: TranscriptProps) {
   const [prompt, ...rest] = sitting.transcript;
   return (
     <div className="transcript" data-testid="inbox.transcript">
@@ -71,14 +62,22 @@ export function Transcript({ sitting, tracker, log }: TranscriptProps) {
           </section>
         ),
       )}
-      {sitting.turn && <Working log={log} />}
+      {sitting.turn && <WorkingBox lines={lines} waiting="Waiting for the session…" testId="inbox.working" />}
       {sitting.lost && (
-        <div className="lost" role="status" data-testid="inbox.lost">
+        <div className="closed-line" role="status" data-testid="inbox.lost">
           <TriangleAlert className="icon" aria-hidden="true" />
           <div>
             <strong>Lost at {clock(sitting.lost.at)}.</strong> {sentence(sitting.lost.reason)} What the session
             wrote on the tracker stands, and a new sitting reads it there.
           </div>
+        </div>
+      )}
+      {sitting.ended && (
+        <div className="closed-line" role="status" data-testid="inbox.ended">
+          <TimerOff className="icon" aria-hidden="true" />
+          <strong>
+            Ended at {clock(sitting.ended.at)} after {minutes(sitting.ended.idle_minutes)} idle.
+          </strong>
         </div>
       )}
     </div>

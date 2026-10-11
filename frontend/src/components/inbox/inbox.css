@@ -59,29 +59,8 @@
   overflow-wrap: anywhere;
 }
 
-/* The turn in flight: the last line of the session's condensed log. */
-.working {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  border: 1px dashed hsl(var(--border));
-  border-radius: var(--radius);
-  font-size: 13px;
-  color: hsl(var(--muted-foreground));
-}
-.working .spin { flex: none; font-size: 16px; color: hsl(var(--primary)); animation: spin 1s linear infinite; }
-.working-log {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.lost {
+/* A sitting lost or ended: the line it closes on. */
+.closed-line {
   display: flex;
   gap: 10px;
   padding: 12px 16px;
@@ -91,8 +70,8 @@
   color: hsl(var(--warning-text));
   font-size: 14px;
 }
-.lost .icon { flex: none; margin-top: 4px; }
-.lost strong { font-weight: 600; }
+.closed-line .icon { flex: none; margin-top: 4px; }
+.closed-line strong { font-weight: 600; }
 
 /* ---- The composer, under the scrolling area ---------------------------------------- */
 
@@ -118,10 +97,9 @@
   resize: none;
 }
 .composer textarea:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
-.composer textarea::placeholder { color: hsl(var(--muted-foreground)); }
 .composer .send { height: 40px; }
-.lost-bar .composer-row { align-items: center; justify-content: space-between; }
-.lost-note { font-size: 14px; color: hsl(var(--muted-foreground)); }
+.restart-bar .composer-row { align-items: center; justify-content: space-between; }
+.restart-note { font-size: 14px; color: hsl(var(--muted-foreground)); }
 
 /* ---- No sitting ---------------------------------------------------------------------- */
 

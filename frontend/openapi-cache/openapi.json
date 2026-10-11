@@ -252,6 +252,25 @@
         "title": "Author",
         "type": "string"
       },
+      "InboxState.5430f38.InboxEnd": {
+        "description": "FR-31: when the expiry ended the sitting, and the idle time it had not moved for, in\nminutes: the configured one.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "idle_minutes": {
+            "title": "Idle Minutes",
+            "type": "number"
+          }
+        },
+        "required": [
+          "at",
+          "idle_minutes"
+        ],
+        "title": "InboxEnd",
+        "type": "object"
+      },
       "InboxState.5430f38.InboxLoss": {
         "description": "FR-32: why the sitting was lost, and when.",
         "properties": {
@@ -299,6 +318,16 @@
           "began": {
             "title": "Began",
             "type": "string"
+          },
+          "ended": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxState.5430f38.InboxEnd"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "environment": {
             "anyOf": [
@@ -354,28 +383,25 @@
           "moved",
           "turn",
           "lost",
+          "ended",
           "transcript"
         ],
         "title": "InboxSitting",
         "type": "object"
       },
       "InboxState.5430f38.InboxTurn": {
-        "description": "The turn in flight, a Start's included: the task the page follows for its progress, and the\nlast condensed log line read so far, for a page that joins it mid-turn.",
+        "description": "The turn in flight, a Start's included: the task the page follows for its progress, and the\nlast `TURN_LINES` condensed log lines read so far, oldest first, for a page that joins it\nmid-turn.",
         "properties": {
           "began": {
             "title": "Began",
             "type": "string"
           },
-          "log": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Log"
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "task": {
             "title": "Task",
@@ -385,7 +411,7 @@
         "required": [
           "task",
           "began",
-          "log"
+          "lines"
         ],
         "title": "InboxTurn",
         "type": "object"
@@ -471,19 +497,6 @@
             "maxLength": 500,
             "title": "Scope",
             "type": "string"
-          },
-          "sse_request_id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Sse Request Id"
           }
         },
         "title": "StartRequest",
@@ -1477,19 +1490,6 @@
             "minLength": 1,
             "title": "Message",
             "type": "string"
-          },
-          "sse_request_id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Sse Request Id"
           }
         },
         "required": [
@@ -2182,6 +2182,22 @@
           }
         ],
         "summary": "`{\"line\"}`: a log line of the sitting's turn in flight.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/expire": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_expire",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The sitting closed as the expiry closes it once the idle time has passed, now: ended, or a lost one kept lost; a conflict when it has a turn in flight, is closed already, or there is none.",
         "tags": [],
         "x-required-role": "editor"
       }

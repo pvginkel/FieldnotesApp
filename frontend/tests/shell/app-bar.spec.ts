@@ -83,6 +83,29 @@ test.describe('the Inbox pill', () => {
   });
 });
 
+test.describe('the Inbox pill, once the idle expiry has ended the sitting', () => {
+  test('is amber on both screens, its tooltip saying when it ended and after how long idle', async ({ store, controller, triage, inbox, appBar, request, backendUrl }) => {
+    await store.layOut({});
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }] });
+    await write(request, `${backendUrl}/api/inbox/start`);
+    await controller.finish('The inbox, sorted.');
+    await expect
+      .poll(async () => ((await (await request.get(`${backendUrl}/api/inbox`)).json()) as { sitting: { turn: unknown } }).sitting.turn)
+      .toBeNull();
+    await controller.expire();
+
+    await triage.open();
+    await appBar.expectPill(
+      appBar.inboxPill,
+      'ended',
+      /^The inbox sitting ended at \d{4}-\d\d-\d\d \d\d:\d\d after 30 minutes idle$/,
+    );
+    await appBar.inboxPill.click();
+    await expect(inbox.ended).toBeVisible();
+    await appBar.expectPill(appBar.inboxPill, 'ended', /ended at .+ after 30 minutes idle$/);
+  });
+});
+
 test.describe('the Actioner pill', () => {
   test('nothing while idle; breathing from a submit until the run ends; red after a failed run, on both screens, until the next start', async ({ store, controller, triage, inbox, appBar }) => {
     await controller.layOut();

@@ -1,7 +1,7 @@
 /**
- * The inbox screen (FR-28 to FR-32): Start, the transcript with the turn in flight under it, the
- * composer, a lost sitting and End. The worker backend's fake controller plays the sitting's
- * session. Every sitting, card id and title is invented.
+ * The inbox screen (FR-28 to FR-32): Start, the transcript with the working box under it, the
+ * composer, a lost sitting, one the idle expiry ended, and End. The worker backend's fake
+ * controller plays the sitting's session. Every sitting, card id and title is invented.
  */
 
 import type { APIRequestContext, Page } from '@playwright/test';
@@ -15,7 +15,7 @@ async function inboxState(request: APIRequestContext, backendUrl: string) {
   expect(response.ok(), await response.text()).toBe(true);
   return (await response.json()) as {
     tracker: string | null;
-    sitting: { turn: { task: string; log: string | null } | null } | null;
+    sitting: { turn: { task: string; lines: string[] } | null } | null;
   };
 }
 
@@ -105,9 +105,9 @@ test.describe('Start', () => {
     await expect(inbox.end).toBeVisible();
 
     await controller.emit('Sorting 4 cards');
-    await expect(inbox.working).toHaveText('Sorting 4 cards');
+    await expect(inbox.workingLines.last()).toHaveText('Sorting 4 cards');
     await controller.emit('Reading EX-3');
-    await expect(inbox.working).toHaveText('Reading EX-3');
+    await expect(inbox.workingLines.last()).toHaveText('Reading EX-3');
 
     await controller.finish('The inbox is empty.');
     await expect(inbox.sessionMessages).toHaveCount(1);
@@ -143,27 +143,34 @@ test.describe('Start', () => {
 });
 
 test.describe('the composer', () => {
-  test('Enter sends; Shift+Enter and Alt+Enter break the line; Send withheld while a turn is in flight, the field open', async ({ controller, inbox, page, testEvents }) => {
+  test('Ctrl+Enter sends and Enter breaks the line, with nothing of its own on Shift+Enter or Alt+Enter; no placeholder; Send withheld while a turn is in flight, the field open', async ({ controller, inbox, page, testEvents }) => {
     await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }, { held: true }] });
     await inbox.open();
     await inbox.begin();
     await expect(inbox.sendButton).toBeDisabled();
+    await expect(inbox.sendButton).toHaveAttribute('title', 'Wait for the session to answer');
+    await expect(inbox.field).not.toHaveAttribute('placeholder');
     await controller.finish('Two questions.');
     await expect(inbox.sessionMessages).toHaveCount(1);
+    await expect(inbox.sendButton).toHaveAttribute('title', 'Send (Ctrl+Enter)');
+    await expect(inbox.field).not.toHaveAttribute('placeholder');
 
+    // Enter and Shift+Enter break the line as the browser does; Alt+Enter does nothing.
     await inbox.field.click();
     await page.keyboard.type('line one');
-    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.press('Enter');
     await page.keyboard.type('line two');
-    await page.keyboard.press('Alt+Enter');
+    await page.keyboard.press('Shift+Enter');
     await page.keyboard.type('line three');
-    await expect(inbox.field).toHaveValue('line one\nline two\nline three');
+    await page.keyboard.press('Alt+Enter');
+    await page.keyboard.type('!');
+    await expect(inbox.field).toHaveValue('line one\nline two\nline three!');
     await expect(inbox.operatorMessages).toHaveCount(0);
 
     const requestId = await connection(testEvents);
     const sent = posted(page, '/api/inbox/turns');
-    await page.keyboard.press('Enter');
-    expect(await sent).toEqual({ body: { message: 'line one\nline two\nline three' }, connection: requestId });
+    await page.keyboard.press('Control+Enter');
+    expect(await sent).toEqual({ body: { message: 'line one\nline two\nline three!' }, connection: requestId });
     await expect(inbox.operatorMessages).toHaveCount(1);
     await expect(inbox.field).toHaveValue('');
     await expect(inbox.working).toBeVisible();
@@ -172,7 +179,7 @@ test.describe('the composer', () => {
     await expect(inbox.sendButton).toBeDisabled();
     await expect(inbox.field).toBeEditable();
     await inbox.field.fill('Yes to both.');
-    await inbox.field.press('Enter');
+    await inbox.field.press('Control+Enter');
     await expect(inbox.field).toHaveValue('Yes to both.');
     await expect(inbox.sendButton).toBeDisabled();
     await expect(inbox.operatorMessages).toHaveCount(1);
@@ -185,7 +192,98 @@ test.describe('the composer', () => {
 
     await expect
       .poll(async () => (await controller.read()).environments[0].sessions[0].messages)
-      .toEqual(['/dev:inbox', 'line one\nline two\nline three', 'Yes to both.']);
+      .toEqual(['/dev:inbox', 'line one\nline two\nline three!', 'Yes to both.']);
+  });
+
+  test('the field grows with its text to eight lines, then scrolls', async ({ controller, inbox }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }] });
+    await inbox.open();
+    await inbox.begin();
+
+    const measure = () =>
+      inbox.field.evaluate((field: HTMLTextAreaElement) => {
+        const style = getComputedStyle(field);
+        return {
+          height: field.getBoundingClientRect().height,
+          line: parseFloat(style.lineHeight),
+          scrolls: field.scrollHeight > field.clientHeight,
+          overflowY: style.overflowY,
+        };
+      });
+    const text = (count: number) => Array.from({ length: count }, (_, i) => `line ${i + 1}`).join('\n');
+
+    await inbox.field.fill(text(1));
+    const one = await measure();
+    await inbox.field.fill(text(3));
+    expect((await measure()).height).toBeCloseTo(one.height + 2 * one.line, 0);
+    await inbox.field.fill(text(8));
+    const eight = await measure();
+    expect(eight.height).toBeCloseTo(one.height + 7 * one.line, 0);
+    expect(eight.scrolls).toBe(false);
+    await inbox.field.fill(text(12));
+    const twelve = await measure();
+    expect(twelve.height).toBeCloseTo(eight.height, 0);
+    expect(twelve.scrolls).toBe(true);
+    expect(twelve.overflowY).toBe('auto');
+  });
+});
+
+test.describe('the working box', () => {
+  test('grows to four lines as they arrive, the spinner on the last, the top line going as a new one comes and nothing marking it; each line on one line, cut on its own; a reload starts with the four', async ({ controller, inbox, page }) => {
+    await page.setViewportSize({ width: 640, height: 800 });
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('One question.');
+    await inbox.send('Yes.');
+    await expect(inbox.workingWaiting).toHaveText('Waiting for the session…');
+    await expect(inbox.workingLines).toHaveCount(0);
+
+    const lines = [
+      'Reading EX-1',
+      'Reading EX-2',
+      'Reading EX-3',
+      'Reading EX-4',
+      'Recording the ruling on EX-1',
+      // 80 characters, as the controller cuts a line: wider than the box at this width.
+      `Bash: git -C /work/scratch/example log --oneline --since=yesterday -- docs/ src/…`,
+    ];
+    for (const [i, line] of lines.entries()) {
+      await controller.emit(line);
+      const shown = lines.slice(Math.max(0, i - 3), i + 1);
+      await expect(inbox.workingLines).toHaveText(shown);
+      await expect(inbox.workingWaiting).toHaveCount(0);
+      // Nothing but the lines and the spinner.
+      await expect(inbox.working).toHaveText(shown.join(''));
+      await expect(inbox.working.locator('svg')).toHaveCount(1);
+      // The spinner beside the last line.
+      const spinner = (await inbox.workingSpinner.boundingBox())!;
+      const last = (await inbox.workingLines.last().boundingBox())!;
+      const middle = spinner.y + spinner.height / 2;
+      expect(middle).toBeGreaterThan(last.y);
+      expect(middle).toBeLessThan(last.y + last.height);
+    }
+
+    // Each line one line high, the long one cut with an ellipsis of its own, the others whole.
+    const cut = await inbox.workingLines.evaluateAll((items) =>
+      items.map((item) => {
+        const style = getComputedStyle(item);
+        return {
+          oneLine: Math.abs(item.getBoundingClientRect().height - parseFloat(style.lineHeight)) < 1,
+          ellipsis: style.textOverflow === 'ellipsis' && style.whiteSpace === 'nowrap',
+          cut: item.scrollWidth > item.clientWidth,
+        };
+      }),
+    );
+    expect(cut).toEqual([
+      { oneLine: true, ellipsis: true, cut: false },
+      { oneLine: true, ellipsis: true, cut: false },
+      { oneLine: true, ellipsis: true, cut: false },
+      { oneLine: true, ellipsis: true, cut: true },
+    ]);
+
+    await inbox.reload();
+    await expect(inbox.workingLines).toHaveText(lines.slice(-4));
   });
 });
 
@@ -257,20 +355,23 @@ test.describe('the transcript', () => {
     await expect(message.getByRole('link', { name: 'FR-28' })).toHaveCount(0);
   });
 
-  test('a reload mid-turn rejoins the turn and gets its result', async ({ controller, inbox }) => {
+  test("a reload mid-turn rejoins the turn, starting with the turn's last four lines, and gets its result", async ({ controller, inbox, request, backendUrl }) => {
     await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }] });
     await inbox.open();
     await inbox.begin();
     await controller.emit('Reading the inbox');
-    await expect(inbox.working).toHaveText('Reading the inbox');
+    await expect(inbox.workingLines.last()).toHaveText('Reading the inbox');
+    const held = (await inboxState(request, backendUrl)).sitting!.turn!.lines;
+    expect(held).toHaveLength(4);
+    expect(held[3]).toBe('Reading the inbox');
 
     await inbox.reload();
     await expect(inbox.opening).toBeVisible();
-    await expect(inbox.working).toHaveText('Reading the inbox');
+    await expect(inbox.workingLines).toHaveText(held);
     await expect(inbox.sendButton).toBeDisabled();
 
     await controller.emit('Sorting 3 cards');
-    await expect(inbox.working).toHaveText('Sorting 3 cards');
+    await expect(inbox.workingLines).toHaveText([...held.slice(1), 'Sorting 3 cards']);
     await controller.finish('Sorted.');
     await expect(inbox.sessionMessages).toHaveCount(1);
     await expect(inbox.working).toHaveCount(0);
@@ -281,13 +382,13 @@ test.describe('the transcript', () => {
     await inbox.open();
     await inbox.begin();
     await controller.emit('Reading the inbox');
-    await expect(inbox.working).toHaveText('Reading the inbox');
+    await expect(inbox.workingLines.last()).toHaveText('Reading the inbox');
     const midTurn = await inboxState(request, backendUrl);
     const turn = midTurn.sitting!.turn!;
 
     // The API writes a turn's result before its task completes, so no read it serves names a
     // finished turn: only a follow that fails outright stays named, until a takeover a minute
-    // later. Here every read answers the sitting mid-turn, its log line moving, so the page sees
+    // later. Here every read answers the sitting mid-turn, its log lines moving, so the page sees
     // the turn it saw finish named again on each read.
     let reads = 0;
     // eslint-disable-next-line testing/no-route-mocks -- the API cannot be made to serve a finished turn's sitting
@@ -298,7 +399,7 @@ test.describe('the transcript', () => {
         reads += 1;
         // eslint-disable-next-line testing/no-route-mocks -- as above: the stale read is the case under test
         await route.fulfill({
-          json: { ...midTurn, sitting: { ...midTurn.sitting, turn: { ...turn, log: `Read ${reads}` } } },
+          json: { ...midTurn, sitting: { ...midTurn.sitting, turn: { ...turn, lines: [`Read ${reads}`] } } },
         });
       },
     );
@@ -343,6 +444,72 @@ test.describe('a lost sitting', () => {
   });
 });
 
+test.describe('a sitting the expiry ended', () => {
+  test('keeps its transcript, closing on when it ended and after how long idle; Send is withdrawn, the Inbox pill amber, End promises nothing of the session it ended, and a new Start clears it', async ({ controller, inbox, appBar, page }) => {
+    await controller.layOut({
+      environments: [{ env_id: 'env-1', status: 'stopped' }],
+      turns: [{ held: true }, { held: true }, { held: true }],
+    });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('One question.');
+    await inbox.send('Yes.');
+    await controller.finish('Recorded.');
+    await expect(inbox.sessionMessages).toHaveCount(2);
+
+    await controller.expire();
+    await inbox.reload();
+    await expect(inbox.ended).toHaveText(/^Ended at \d\d:\d\d after 30 minutes idle\.$/);
+    await expect(inbox.opening).toBeVisible();
+    await expect(inbox.sessionMessages).toHaveText([/One question\./, /Recorded\./]);
+    await expect(inbox.operatorMessages).toHaveText([/Yes\./]);
+    await expect(inbox.lost).toHaveCount(0);
+    await expect(inbox.field).toHaveCount(0);
+    await expect(inbox.sendButton).toHaveCount(0);
+    await expect(inbox.restart).toContainText('The session has ended, and Send with it.');
+    await appBar.expectPill(
+      appBar.inboxPill,
+      'ended',
+      /^The inbox sitting ended at \d{4}-\d\d-\d\d \d\d:\d\d after 30 minutes idle$/,
+    );
+    await expect
+      .poll(async () => (await controller.read()).environments)
+      .toEqual([{ env_id: 'env-1', status: 'stopped', sessions: [] }]);
+
+    await inbox.end.click();
+    await expect(inbox.endDialog).toContainText('The transcript goes with it.');
+    await expect(inbox.endDialog).not.toContainText('The session ends');
+    await expect(inbox.endDialog).not.toContainText('was started for this sitting');
+    await page.keyboard.press('Escape');
+    await expect(inbox.endDialog).toHaveCount(0);
+
+    await inbox.restartStart.click();
+    await expect(inbox.ended).toHaveCount(0);
+    await expect(inbox.sessionMessages).toHaveCount(0);
+    await expect(inbox.operatorMessages).toHaveCount(0);
+    await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1, started for this sitting$/);
+    await expect(inbox.field).toBeVisible();
+    await appBar.expectPill(appBar.inboxPill, 'working', /is working/);
+  });
+
+  test('End clears it', async ({ controller, inbox, request, backendUrl }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('Sorted.');
+    await expect(inbox.sessionMessages).toHaveCount(1);
+    await controller.expire();
+    await inbox.reload();
+    await expect(inbox.ended).toBeVisible();
+
+    await inbox.end.click();
+    await inbox.endConfirm.click();
+    await expect(inbox.start).toBeVisible();
+    await expect(inbox.transcript).toHaveCount(0);
+    expect((await inboxState(request, backendUrl)).sitting).toBeNull();
+  });
+});
+
 test.describe('End', () => {
   test('asks first, then ends the session, stops the environment it started and clears the sitting', async ({ controller, inbox, page, request, backendUrl }) => {
     await controller.layOut({ environments: [{ env_id: 'env-1', status: 'stopped' }], turns: [{ held: true }] });
@@ -372,8 +539,8 @@ test.describe('End', () => {
   });
 });
 
-test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, a lost one', async ({ controller, inbox, page }) => {
-  await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }] });
+test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, a lost one, an ended one', async ({ controller, inbox, page }) => {
+  await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }, { held: true }] });
   await inbox.open();
 
   const views: Record<string, Failure[]> = {};
@@ -385,7 +552,7 @@ test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, 
   await controller.finish(SORTED);
   await inbox.send('Yes to both.');
   await controller.emit('Recording the rulings');
-  await expect(inbox.working).toHaveText('Recording the rulings');
+  await expect(inbox.workingLines).toHaveText(['Recording the rulings']);
   for (const theme of ['light', 'dark'] as const) {
     await inbox.setTheme(theme);
     views[`mid-turn, ${theme}`] = await contrastFailures(page);
@@ -395,6 +562,16 @@ test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, 
   for (const theme of ['light', 'dark'] as const) {
     await inbox.setTheme(theme);
     views[`lost, ${theme}`] = await contrastFailures(page);
+  }
+  await inbox.restartStart.click();
+  await controller.finish('Sorted.');
+  await expect(inbox.sessionMessages).toHaveCount(1);
+  await controller.expire();
+  await inbox.reload();
+  await expect(inbox.ended).toBeVisible();
+  for (const theme of ['light', 'dark'] as const) {
+    await inbox.setTheme(theme);
+    views[`ended, ${theme}`] = await contrastFailures(page);
   }
 
   expect(Object.fromEntries(Object.entries(views).filter(([, failures]) => failures.length))).toEqual({});

@@ -9,6 +9,7 @@ import type {
   ActionerState_0c09c4d_ActionerFailure,
   InboxState_5430f38,
 } from '@/lib/api/generated/hooks';
+import { minutes } from '@/lib/inbox/text';
 import { stamp } from '@/lib/triage/time';
 
 type InboxState = InboxState_5430f38;
@@ -22,9 +23,11 @@ function InboxPill() {
   if (!sitting) return null;
   const [state, title] = sitting.lost
     ? ['lost', `The inbox sitting was lost at ${stamp(sitting.lost.at)}: ${sitting.lost.reason}`]
-    : sitting.turn
-      ? ['working', 'The inbox session is working']
-      : ['waiting', 'The inbox session waits for your answer'];
+    : sitting.ended
+      ? ['ended', `The inbox sitting ended at ${stamp(sitting.ended.at)} after ${minutes(sitting.ended.idle_minutes)} idle`]
+      : sitting.turn
+        ? ['working', 'The inbox session is working']
+        : ['waiting', 'The inbox session waits for your answer'];
   return (
     <Link to="/inbox" className="app-pill" data-state={state} title={title} data-testid="app-shell.pill.inbox">
       <span className="dot" />

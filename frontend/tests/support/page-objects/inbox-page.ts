@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
-/** The inbox screen (src/components/inbox/): Start, the transcript, the composer and End. */
+/** The inbox screen (src/components/inbox/): Start, the transcript with the working box, the
+ *  composer and End. */
 export class InboxPage {
   readonly header: Locator;
   readonly main: Locator;
@@ -13,8 +14,11 @@ export class InboxPage {
   readonly sessionMessages: Locator;
   readonly operatorMessages: Locator;
   readonly working: Locator;
-  readonly workingLog: Locator;
+  readonly workingLines: Locator;
+  readonly workingWaiting: Locator;
+  readonly workingSpinner: Locator;
   readonly lost: Locator;
+  readonly ended: Locator;
   readonly field: Locator;
   readonly sendButton: Locator;
   readonly restart: Locator;
@@ -39,8 +43,11 @@ export class InboxPage {
     this.sessionMessages = page.getByTestId('inbox.message.session');
     this.operatorMessages = page.getByTestId('inbox.message.operator');
     this.working = page.getByTestId('inbox.working');
-    this.workingLog = page.getByTestId('inbox.working.log');
+    this.workingLines = page.getByTestId('inbox.working.line');
+    this.workingWaiting = page.getByTestId('inbox.working.waiting');
+    this.workingSpinner = page.getByTestId('inbox.working.spinner');
     this.lost = page.getByTestId('inbox.lost');
+    this.ended = page.getByTestId('inbox.ended');
     this.field = page.getByTestId('inbox.composer.text');
     this.sendButton = page.getByTestId('inbox.composer.send');
     this.restart = page.getByTestId('inbox.restart');
@@ -74,12 +81,12 @@ export class InboxPage {
     await expect(this.opening).toBeVisible();
   }
 
-  /** The operator's answer typed and sent with Enter, once Send is offered: an Enter while the
-   * page still shows the last turn in flight is ignored. */
+  /** The operator's answer typed and sent with Ctrl+Enter, once Send is offered: a Ctrl+Enter
+   * while the page still shows the last turn in flight is ignored. */
   async send(text: string): Promise<void> {
     await this.field.fill(text);
     await expect(this.sendButton).toBeEnabled();
-    await this.field.press('Enter');
+    await this.field.press('Control+Enter');
     await expect(this.operatorMessages.last()).toContainText(text);
   }
 

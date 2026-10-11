@@ -1,5 +1,5 @@
 // The session's text as the inbox screen reads it (FR-28): the card ids a line names, where a
-// wrapped line continues, a code fence, and the time of day a message carries.
+// wrapped line continues, a code fence, the time of day a message carries, and an idle time.
 
 /** A card id: a project key and a number. Requirement numbers and the like are not cards. */
 const CARD = /\b([A-Z][A-Z0-9]{1,9})-(\d+)\b/g;
@@ -37,4 +37,10 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export const clock = (iso: string): string => {
   const d = new Date(iso);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** An idle time given in minutes, to a tenth: `30 minutes`. */
+export const minutes = (count: number): string => {
+  const shown = Math.round(count * 10) / 10;
+  return `${shown} minute${shown === 1 ? '' : 's'}`;
 };

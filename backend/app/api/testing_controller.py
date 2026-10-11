@@ -3,25 +3,27 @@
 The frontend's Playwright backend serves its inbox and its actioner over a fake controller
 (`FieldnotesService`), one per worker, and a test that opens the inbox screen or reads the app
 bar's pills starts by laying it out. `PUT` replaces the controller with one holding the
-environments and the turns given, the inbox configured or not, and the answers to the actioner's
-prompt runs; the sitting the last one held is ended as End ends it, and the actioner starts
-afresh. A test then plays what the controller does while the screen is open: the log lines and
-the result of the sitting's turn in flight (`emit`, `finish`), the sitting lost under the API
-(`lose`), the actioner's run ending as the controller's webhook reports it (`run-end`). The suite
-has no clock to move, so the API's own expiry is played too: the sitting brought to its idle end
-now (`expire`). `GET` answers what the controller holds, for a test to read what the API did
-there.
+environments, the headless sessions working in them, the sitting's turns and the actioner runs'
+turns given, the inbox configured or not, and the answers to the actioner's prompt runs; the
+sitting the last one held is ended as End ends it, and the actioner starts afresh. A test then
+plays what the controller does while the screen is open: the log lines and the result of the
+sitting's turn in flight (`emit`, `finish`) and of the actioner run's (`run-emit`, `run-finish`),
+the sitting lost under the API (`lose`), the actioner's run ending as the controller's webhook
+reports it (`run-end`). The suite has no clock to move, so the API's own expiry is played too: the
+sitting brought to its idle end now (`expire`). `GET` answers what the controller holds, for a
+test to read what the API did there.
 
-Every sitting a test plays is invented: FieldnotesApp is public.
+Every sitting and run a test plays is invented: FieldnotesApp is public.
 """
 
 import time
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, jsonify, request
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.api.testing_guard import reject_if_not_testing
 from app.fieldnotes.actioner import RunReport
@@ -37,9 +39,13 @@ testing_controller_bp = Blueprint(
     "testing_controller", __name__, url_prefix="/api/testing/controller"
 )
 
-# How long `emit` and `finish` wait for the sitting's turn to reach its session: a Start's picks
-# its environment and creates the session first, off the request.
+# How long `emit` and `finish` wait for the sitting's turn to reach its session, and `run-emit` and
+# `run-finish` for the run's: a Start's picks its environment and creates the session first, and
+# an accepted run is played, off the request.
 TURN_WAIT = 5.0
+
+# How often a run's follow looks for the run's session; the API's looks every 5 s.
+LOOK_EVERY = 0.25
 
 
 class _Body(BaseModel):
@@ -48,17 +54,25 @@ class _Body(BaseModel):
 
 class EnvironmentLayout(_Body):
     """An environment of the store's project; `start_as` is what a start brings a stopped one to,
-    `starting` being a start whose wait runs out."""
+    `starting` being a start whose wait runs out. `working` names the headless sessions of a
+    running one with a turn in flight that nothing ends, which a run's follow sees past."""
 
     env_id: str = Field(min_length=1)
     status: Literal["running", "stopped"] = "running"
     start_as: Literal["running", "starting", "error", "admission-blocked"] = "running"
+    working: list[Annotated[str, Field(min_length=1)]] = []
+
+    @model_validator(mode="after")
+    def _working_where_running(self) -> Self:
+        if self.working and self.status != "running":
+            raise ValueError("a stopped environment has no session working")
+        return self
 
 
 class TurnLayout(_Body):
-    """A turn of the session, the next send's: its condensed log lines, then its result, each
-    `pace` seconds after the one before; a `held` turn stays in flight after its lines until
-    `finish`."""
+    """A turn of a session, the sitting's next send or the next run's prompt: its condensed log
+    lines, then its result, each `pace` seconds after the one before; a `held` turn stays in flight
+    after its lines until `finish` (`run-finish` for a run's)."""
 
     lines: list[str] = []
     pace: float = Field(default=0.0, ge=0, le=60)
@@ -68,13 +82,18 @@ class TurnLayout(_Body):
 
 
 class ControllerLayout(_Body):
-    """`inbox` false: the inbox not configured. `runs`: the controller's answer to each prompt
-    run, the last one to every run after; 202 accepts it, another status refuses it, and null is
-    a connection that fails."""
+    """`inbox` false: the inbox not configured. `turns`: the sitting's, a send each. `runs`: the
+    controller's answer to each prompt run, the last one to every run after; 202 accepts it,
+    another status refuses it, and null is a connection that fails. An accepted run is played in
+    a new headless session of the first running environment, else of the first stopped one, which
+    it starts; with neither, or a start that does not bring it up, it plays nothing. `run_turns`:
+    the turn each accepted run's session plays, in order; a run past them plays a turn with no
+    line, over at once, its session ended."""
 
     inbox: bool = True
     environments: list[EnvironmentLayout] = []
     turns: list[TurnLayout] = []
+    run_turns: list[TurnLayout] = []
     runs: list[Annotated[int, Field(ge=200, le=599)] | None] = Field(
         default=[202], min_length=1
     )
@@ -131,20 +150,48 @@ def _served(service: FieldnotesService) -> tuple[Runtime, FakeController]:
     return service.runtime, service.kubecoder
 
 
-def _sitting_session(runtime: Runtime, fake: FakeController) -> tuple[str, str]:
-    """The environment and the session of the sitting's turn in flight, once the session has
-    taken it; a conflict when it has not within TURN_WAIT."""
+def _turn(turn: TurnLayout) -> FakeTurn:
+    return FakeTurn(turn.lines, turn.result, turn.is_error, turn.held, turn.pace)
+
+
+def _in_flight(
+    fake: FakeController, named: Callable[[], tuple[str, str] | None], whose: str
+) -> tuple[str, str]:
+    """The environment and the session `named` answers, once the session has a turn in flight;
+    a conflict when it has not within TURN_WAIT."""
     deadline = time.monotonic() + TURN_WAIT
     while True:
-        sitting = runtime.inbox.file.load()
-        if sitting is not None and sitting.environment and sitting.session:
-            env = fake.environments.get(sitting.environment)
-            session = env.sessions.get(sitting.session) if env is not None else None
+        found = named()
+        if found is not None:
+            env = fake.environments.get(found[0])
+            session = env.sessions.get(found[1]) if env is not None else None
             if session is not None and session.status == "busy":
-                return sitting.environment, sitting.session
+                return found
         if time.monotonic() >= deadline:
-            raise _conflict("the sitting has no turn in flight at the controller")
+            raise _conflict(f"{whose} has no turn in flight at the controller")
         time.sleep(0.05)
+
+
+def _sitting_session(runtime: Runtime, fake: FakeController) -> tuple[str, str]:
+    """The environment and the session of the sitting's turn in flight."""
+
+    def named() -> tuple[str, str] | None:
+        sitting = runtime.inbox.file.load()
+        if sitting is None or not sitting.environment or not sitting.session:
+            return None
+        return sitting.environment, sitting.session
+
+    return _in_flight(fake, named, "the sitting")
+
+
+def _run_session(fake: FakeController) -> tuple[str, str]:
+    """The environment and the session of the turn in flight of the last run the controller
+    accepted."""
+    return _in_flight(
+        fake,
+        lambda: fake.run_sessions.get(fake.ids[-1]) if fake.ids else None,
+        "the last run accepted",
+    )
 
 
 @testing_controller_bp.route("", methods=["GET"])
@@ -186,16 +233,17 @@ def lay_out_controller(
 ) -> Any:
     """A `ControllerLayout`: the controller the API is served from now on."""
     layout = _body(ControllerLayout)
-    _served(service)
+    runtime, _ = _served(service)
     fake = FakeController()
     for env in layout.environments:
         fake.add_environment(env.env_id, env.status, start_as=env.start_as)
-    fake.turns = [
-        FakeTurn(turn.lines, turn.result, turn.is_error, turn.held, turn.pace)
-        for turn in layout.turns
-    ]
+        for name in env.working:
+            fake.add_session(env.env_id, name, headless=True, working=True)
+    fake.turns = [_turn(turn) for turn in layout.turns]
+    fake.run_turns = [_turn(turn) for turn in layout.run_turns]
     fake.answers = list(layout.runs)
     service.serve_controller(fake, layout.inbox)
+    runtime.actioner.look_every = LOOK_EVERY
     return "", 204
 
 
@@ -220,6 +268,31 @@ def finish(
     body = _body(ResultBody)
     runtime, fake = _served(service)
     fake.finish(*_sitting_session(runtime, fake), body.result, body.is_error)
+    return "", 204
+
+
+@testing_controller_bp.route("/run-emit", methods=["POST"])
+@inject
+def run_emit(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> Any:
+    """`{"line"}`: a log line of the turn in flight of the last run the controller accepted."""
+    body = _body(LogLineBody)
+    _, fake = _served(service)
+    fake.emit(*_run_session(fake), body.line)
+    return "", 204
+
+
+@testing_controller_bp.route("/run-finish", methods=["POST"])
+@inject
+def run_finish(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> Any:
+    """`{"result", "is_error"}`: the turn in flight of the last run the controller accepted ends
+    with this result, and the controller ends the run's session; the run's end stays `run-end`'s."""
+    body = _body(ResultBody)
+    _, fake = _served(service)
+    fake.finish(*_run_session(fake), body.result, body.is_error)
     return "", 204
 
 

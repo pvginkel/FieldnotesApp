@@ -1,8 +1,8 @@
 """The Playwright suite's controller, /api/testing/controller: the testing-mode backend serves the
 inbox and the actioner over a fake KubeCoder controller (FR-27 to FR-33), which a test lays out,
-plays the sitting's turns on, loses the sitting at, brings it to its idle end through and ends the
-actioner's runs through. Every
-environment, line and message is invented."""
+plays the sitting's turns and the actioner run's session on, loses the sitting at, brings it to
+its idle end through and ends the actioner's runs through. Every environment, line and message is
+invented."""
 
 import time
 from pathlib import Path
@@ -21,6 +21,13 @@ ENV = "pvginkel-fieldnotes-9f8e7d"
 LINES = [
     "[2s] [tool_use: Skill] Skill",
     "[8s] [tool_use: mcp__tracker__search] search",
+]
+RUN_LINES = [
+    "[1s] [tool_use: Bash] git pull",
+    "[5s] [tool_use: Read] triage/EX-7.json",
+    "[11s] [tool_use: Edit] observations/EX-7.json",
+    "[18s] [tool_use: Bash] python3 action.py stamp EX-7",
+    "[24s] [tool_use: Bash] git push",
 ]
 WRITE_UP = "**Q1 (EX-4).** Close it as a duplicate of EX-2? I'd say yes."
 ANSWER = "EX-4 is closed, with a dated comment."
@@ -224,6 +231,105 @@ def test_a_sitting_with_a_turn_in_flight_or_none_is_not_expired(backend, eventua
     assert sitting(backend)["ended"] is None
 
 
+def sessions(api, env_id=ENV):
+    """The sessions of the environment at the controller, each its name and its status."""
+    (env,) = (e for e in controller(api)["environments"] if e["env_id"] == env_id)
+    return [(s["name"], s["status"]) for s in env["sessions"]]
+
+
+def test_a_run_plays_the_turn_laid_out_past_the_sessions_working(backend, eventually):
+    """The run's session is a new one of the project's environment, which the follow finds past
+    a session laid out working and the sitting's own, and shows the lines played there (FR-27,
+    FR-33)."""
+    lay_out(
+        backend,
+        environments=[{"env_id": ENV, "working": ["audit"]}],
+        turns=[{"lines": LINES[:1], "held": True}],
+        run_turns=[{"lines": RUN_LINES[:1], "held": True}],
+    )
+    begin(backend)
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1],
+        "the sitting's line",
+    )
+
+    submitted(backend, eventually)
+
+    eventually(
+        lambda: actioner(backend)["lines"] == RUN_LINES[:1], "the run's first line"
+    )
+    assert sessions(backend) == [
+        ("audit", "busy"),
+        ("claude", "busy"),
+        ("claude-2", "busy"),
+    ]
+    run = controller(backend)["environments"][0]["sessions"][2]
+    assert run["messages"] == [fake(backend).runs[-1]["prompt"]]
+    for line in RUN_LINES[1:]:
+        assert play(backend, "run-emit", line=line).status_code == 204
+    eventually(
+        lambda: actioner(backend)["lines"] == RUN_LINES[-4:],
+        "the run's last four lines",
+    )
+    assert sitting(backend)["turn"]["lines"][-1:] == LINES[:1]
+
+    assert (
+        play(backend, "run-finish", result="it broke", is_error=True).status_code == 204
+    )
+
+    eventually(lambda: len(sessions(backend)) == 2, "the run's session ended")
+    assert sessions(backend) == [("audit", "busy"), ("claude", "busy")]
+    # The run's end is its webhook's: until it comes the run is held with its lines.
+    reply = actioner(backend)
+    assert (reply["state"], reply["lines"]) == ("running", RUN_LINES[-4:])
+    assert play(backend, "run-end", outcome="failed").status_code == 204
+    reply = actioner(backend)
+    assert (reply["state"], reply["lines"]) == ("idle", [])
+
+
+def test_a_run_past_the_turns_laid_out_is_over_before_a_line_is_shown(
+    backend, eventually, monkeypatch
+):
+    monkeypatch.setattr("app.api.testing_controller.TURN_WAIT", 0.1)
+    lay_out(backend, environments=[{"env_id": ENV, "status": "stopped"}])
+
+    submitted(backend, eventually)
+
+    eventually(lambda: "run-1" in fake(backend).run_sessions, "the run's session")
+    eventually(lambda: sessions(backend) == [], "the run's session ended")
+    assert controller(backend)["environments"][0]["status"] == "running"
+    reply = actioner(backend)
+    assert (reply["state"], reply["lines"]) == ("running", [])
+    for verb, body in [("run-emit", {"line": RUN_LINES[0]}), ("run-finish", {})]:
+        refused = play(backend, verb, **body)
+        assert refused.status_code == 409, verb
+        assert refused.json()["type"] == "conflict"
+
+
+def test_a_run_s_session_that_comes_after_the_follow_s_first_look_is_found_at_once(
+    backend, eventually
+):
+    """The follow looks again within a fraction of a second, where the API's looks every 5 s: a
+    spec's wait is shorter than that."""
+    lay_out(backend, run_turns=[{"lines": RUN_LINES[:1], "held": True}])
+    kubecoder = fake(backend)
+    # Its start held until settled: the run's session comes then.
+    kubecoder.add_environment(ENV, "stopped", held=True)
+
+    def looks() -> int:
+        return sum(c.path == "/environments" for c in kubecoder.calls)
+
+    submitted(backend, eventually)
+    eventually(lambda: looks() >= 2, "the note and the follow's first look")
+    kubecoder.settle(ENV)
+    settled = time.monotonic()
+
+    eventually(lambda: actioner(backend)["lines"] == RUN_LINES[:1], "the run's line")
+    assert time.monotonic() - settled < 3
+    assert play(backend, "run-finish").status_code == 204
+    assert play(backend, "run-end", outcome="failed").status_code == 204
+
+
 def test_the_inbox_laid_out_not_configured_refuses_start(backend):
     lay_out(backend, inbox=False, environments=[{"env_id": ENV}])
 
@@ -383,6 +489,8 @@ def test_without_a_turn_in_flight_the_session_cannot_be_played(backend, monkeypa
         ("emit", {"line": LINES[0]}),
         ("finish", {}),
         ("lose", {"what": "session"}),
+        ("run-emit", {"line": RUN_LINES[0]}),
+        ("run-finish", {}),
     ]:
         reply = play(backend, verb, **body)
         assert reply.status_code == 409, verb
@@ -432,7 +540,10 @@ def test_after_the_turns_result_the_session_cannot_be_played(
     [
         {"environments": [{"env_id": ""}]},
         {"environments": [{"env_id": ENV, "status": "deleting"}]},
+        {"environments": [{"env_id": ENV, "working": [""]}]},
+        {"environments": [{"env_id": ENV, "status": "stopped", "working": ["audit"]}]},
         {"turns": [{"pace": -1}]},
+        {"run_turns": [{"held": "later"}]},
         {"runs": []},
         {"runs": [99]},
         {"surprise": True},
@@ -453,5 +564,5 @@ def test_outside_testing_mode_it_is_not_there(start, test_settings, test_app_set
     with start(app=app) as api:
         assert api.get("/api/testing/controller").status_code == 400
         assert api.put("/api/testing/controller", json={}).status_code == 400
-        for verb in ("emit", "finish", "lose", "run-end"):
+        for verb in ("emit", "finish", "lose", "run-emit", "run-finish", "run-end"):
             assert play(api, verb).status_code == 400, verb

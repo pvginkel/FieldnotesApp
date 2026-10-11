@@ -168,8 +168,8 @@ def submit(
 def actioner(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
 ) -> ActionerState:
-    """FR-33: the actioner's state, for the app bar: a start pending, the run held, and the last
-    failure."""
+    """FR-33: the actioner's state, for the app bar and the actioner page: a start pending, the
+    run held and its last log lines, and the last failure."""
     return _runtime(service).actioner.state()
 
 

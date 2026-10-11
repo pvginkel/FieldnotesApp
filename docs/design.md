@@ -381,7 +381,7 @@ scope here.
     `starting`, `running`), the held run's id and since when, and the last failure (when, the
     controller's outcome for a run or `refused` for a start the controller refused, its reason),
     which the API keeps beside the hold (FR-27) so both pods see it. The pill's dot breathes while a
-    start is pending (asked of the controller, or waiting to be tried again, a failed run's
+    start is pending (asked of the controller, or waiting to be tried again, a skipped run's
     included) or a run is held, and a click on the pill then opens the actioner page, from either
     screen. The triage screen shows that page for as long as a start is pending or a run is held:
     of itself in place of "Nothing to rule on", and over items still to rule on once the pill has
@@ -408,14 +408,15 @@ scope here.
     inbox endpoints (FR-23 to FR-33) take the template's OIDC session with the `editor` client role
     instead: a request without a session, or with an agent's bearer token, is refused as
     unauthenticated, and a signed-in user without the role as forbidden, reads and writes alike.
-    What the API sends pages over the template's SSE gateway in a session's words, an inbox turn's
-    progress and result and the actioner run's log lines, reaches only connections bound to a
-    signed-in editor, a turn's only those of the editor whose request began it (FR-30), and never
-    every connection. The gateway's connect binds a page's connection to the user of the access
-    token the page holds; a connection the connect left bound to no one, as for a page that
-    connected before its token was refreshed or reconnected after a rollout, is bound to the user of
-    the page's next request that authenticates. A request that authenticates as no one binds
-    nothing, a connection bound to a user is never rebound, and a connection's id is unguessable.
+    What the API gives pages in a session's words reaches only a signed-in editor: the actioner
+    run's log lines only through the editor's `GET /triage/actioner` (FR-33), and an inbox turn's
+    progress and result, over the template's SSE gateway, only the connections bound to the editor
+    whose request began it (FR-30), never every connection. The gateway's connect binds a page's
+    connection to the user of the access token the page holds; a connection the connect left bound
+    to no one, as for a page that connected before its token was refreshed or reconnected after a
+    rollout, is bound to the user of the page's next request that authenticates. A request that
+    authenticates as no one binds nothing, a connection bound to a user is never rebound, and a
+    connection's id is unguessable.
     Webhook secrets verified on every request.
 
 ## Technical design
@@ -468,13 +469,13 @@ workspace:
 | --- | --- |
 | `backend/app/fieldnotes/` | The domain: the store (the pod's own checkout, its write queue on one worker thread, and the timed pull), the index, the match pipeline, board sync, the webhooks' verification, the triage index, the operator's rulings, the actioner start, the inbox sitting (the controller's headless session, the sitting's file and the turn relay), the metrics, and the `Runtime` that builds them from the settings. |
 | `backend/app/api/fieldnotes.py` | The agents' REST surface, a blueprint under the template's `/api`. Its endpoints are public to the template's OIDC hook and check a client's bearer themselves. |
-| `backend/app/api/triage.py` | The triage UI's REST surface, a blueprint at `/api/triage`. Its endpoints are gated on the operator's OIDC session with the `editor` client role and typed in the template's OpenAPI document. It also answers the actioner's state for the app bar (FR-33). |
+| `backend/app/api/triage.py` | The triage UI's REST surface, a blueprint at `/api/triage`. Its endpoints are gated on the operator's OIDC session with the `editor` client role and typed in the template's OpenAPI document. It also answers the actioner's state, for the app bar and the actioner page, and takes the editor's clear of its last failure (FR-33). |
 | `backend/app/api/inbox.py` | The inbox screen's REST surface, a blueprint at `/api/inbox`, gated and typed as the triage surface is (FR-28 to FR-32). |
 | `backend/app/services/fieldnotes_service.py` | The runtime inside the app: started with the background services, stopped on shutdown, reported to `/health/readyz` and `/metrics`. |
 | `backend/packages/fieldnotes-contracts/` | The pydantic wire models of the REST surface, shared by the API and the MCP server as a live workspace source. The models are the contract; the API validates with them directly. |
 | `backend/mcp-server/` | `fieldnotes-mcp`: FastMCP on the official `mcp` SDK, streamable HTTP at `/mcp`, stateless. One module holds the three tools; one client module is the only code that speaks HTTP to the API. |
 | `backend/eval/` | The replay and eval harness. Code and invented fixtures only: the mined dataset is private and is passed in by path. |
-| `frontend/` | The operator's UI: React, TanStack Router and Query, a client generated from the backend's OpenAPI document, OIDC sign-in through the backend. Two screens: the triage stack, `src/components/triage/`, with its logic in `src/hooks/use-triage.ts`, a port of the operator's mockup (`FieldnotesAppSpecs/mockups/triage-ui/`), its styles in `src/components/triage/triage.css` and its colours in `src/styles/app-theme.css`; and the inbox, `src/components/inbox/`, a chat over the sitting, with its logic in `src/hooks/use-inbox.ts`. Both share the app bar, `src/components/shell/`: the screen tabs and the pills (FR-33). |
+| `frontend/` | The operator's UI: React, TanStack Router and Query, a client generated from the backend's OpenAPI document, OIDC sign-in through the backend. Two screens: the triage stack, `src/components/triage/`, with its logic in `src/hooks/use-triage.ts`, a port of the operator's mockup (`FieldnotesAppSpecs/mockups/triage-ui/`), its styles in `src/components/triage/triage.css` and its colours in `src/styles/app-theme.css`; and the inbox, `src/components/inbox/`, a chat over the sitting, with its logic in `src/hooks/use-inbox.ts`. While the actioner is starting or running the triage screen can show the actioner page, `src/components/triage/actioner-page.tsx` (FR-33). Both screens share the app bar, `src/components/shell/`: the screen tabs, the pills and the actioner failure's dialog (FR-33), beside the working box the inbox and the actioner page show their live lines in. |
 | `backend/Dockerfile`, `frontend/Dockerfile`, `Jenkinsfile` | Two images: the backend carries both entry points, the frontend serves the SPA. Built by kaniko on push. |
 
 Conventions: settings read once at startup from `FIELDNOTES_*` environment variables into a frozen
@@ -496,10 +497,11 @@ API endpoints, under `/api`: `POST /observations`, `POST /observations/{id}/reac
 /observations/{id}`, `POST /observations/{id}/board-sync`, `POST /match`, `GET
 /observations/{id}/neighbors`, `POST /hooks/github`, `POST /hooks/youtrack`, and the operator's
 triage endpoints, `GET /triage/queue`, `PUT` and `DELETE /triage/items/{id}/ruling`, `POST
-/triage/submit` and `GET /triage/actioner` (FR-23 to FR-27, FR-33), and the inbox screen's, `GET
-/inbox`, `POST /inbox/start`, `POST /inbox/turns` and `POST /inbox/end` (FR-28 to FR-32), typed in
-the template's OpenAPI document, from which the UI generates its client. Beside them the template's
-`GET /health/healthz`, `GET /health/readyz` and `GET /metrics`.
+/triage/submit`, `GET /triage/actioner` and `POST /triage/actioner/clear` (FR-23 to FR-27, FR-33),
+and the inbox screen's, `GET /inbox`, `POST /inbox/start`, `POST /inbox/turns` and `POST
+/inbox/end` (FR-28 to FR-32), typed in the template's OpenAPI document, from which the UI
+generates its client. Beside them the template's `GET /health/healthz`, `GET /health/readyz` and
+`GET /metrics`.
 
 The agents' and the skills' callers authenticate with a bearer token that resolves to a named client
 (`mcp`, `skills`); the name is logged with each write. The triage and inbox endpoints take the

@@ -34,7 +34,7 @@ own (one markdown file per observation, every write a commit):
 | --- | --- |
 | `backend/` | The Flask backend and the only component with logic: the git-backed store, the in-memory index (embeddings plus BM25), the match pipeline, the GitHub and YouTrack webhooks, the triage UI's queue and rulings, the actioner start, and the inbox sitting's relay to KubeCoder, under `/api`. A uv workspace whose members are the MCP server, the wire models it shares with the API, and the eval harness. |
 | `backend/mcp-server/` | `fieldnotes-mcp`, a thin MCP server with exactly three tools, `post`, `react` and `get`, mapped 1:1 onto the API; the backend image's second entry point. |
-| `frontend/` | The operator's UI, behind the Keycloak sign-in: the triage stack and the inbox sitting's chat, with an app bar that shows a sitting or an actioner run in progress. |
+| `frontend/` | The operator's UI, behind the Keycloak sign-in: the triage stack and the inbox sitting's chat, with an app bar that shows a sitting or an actioner run in progress, and a page that follows the run's progress. |
 
 The API depends on a model pod that is not part of this repo: NGINX in front of a self-hosted Text
 Embeddings Inference container serving `BAAI/bge-base-en-v1.5`. A post comes back with candidates

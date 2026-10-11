@@ -28,6 +28,16 @@ included. A request with no session, or with an agent's bearer token, is
 refused with 401, and a signed-in user without the role with 403, both in the template's own
 `{error}` body rather than problem+json.
 
+The template's OIDC hook on the `/api` blueprint also binds the page's SSE connection (NFR-4).
+Every request the UI's client makes names its page's connection in the `X-SSE-Request-Id` header
+once the page has one, and a request that authenticated as a user, refused or not (a viewer's 403
+binds the viewer), binds the connection the header names to that user when this pod holds it bound
+to no one. The gateway's connect binds a connection from the access cookie, and with OIDC off to
+`local-user`; a page whose connect came before its token's refresh, or that reconnected after a
+rollout, is bound by its next request. A bound connection is never rebound. A request that
+authenticates as no one binds nothing: a 401, a `@public` endpoint such as `GET /api/auth/self`,
+and any path outside the `/api` blueprint, the gateway's callback and `/api/testing/…` among them.
+
 ## Endpoints
 
 The `{id}` path segment must be a ULID (26 characters of Crockford base32,
@@ -47,7 +57,8 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `PUT /api/triage/items/{id}/ruling` | `RulingRequest` | 200 the item as it now stands |
 | `DELETE /api/triage/items/{id}/ruling?written=…` | `written` | 200 the item as it now stands |
 | `POST /api/triage/submit` | | 200 the ids submitted, a list, empty when nothing was ruled |
-| `GET /api/triage/actioner` | | 200 `{state, run, since, failure}` |
+| `GET /api/triage/actioner` | | 200 `{state, run, since, lines, failure}` |
+| `POST /api/triage/actioner/clear` | `ActionerFailure` | 200 the actioner's state as it then stands |
 | `GET /api/inbox` | | 200 `{configured, tracker, sitting}`, the sitting null when none is held |
 | `POST /api/inbox/start` | `StartRequest` | 202 the inbox's state with the sitting begun; 200 with the live sitting, starting nothing |
 | `POST /api/inbox/turns` | `TurnRequest` | 202 the inbox's state, the turn in flight in it |
@@ -70,9 +81,12 @@ unknown fields are refused.
   only), `written` (the item's `written` as the operator's page saw it, `YYYY-MM-DDTHH:MM:SSZ`). The
   take-back's `written` query parameter is the same.
 - `StartRequest`: `scope` (optional, ≤500, appended to the inbox prompt; empty for the whole
-  inbox), `sse_request_id` (optional, ≤64: the request id of the page's SSE connection, see
-  [The inbox sitting](#the-inbox-sitting)).
-- `TurnRequest`: `message` (1–20,000, the operator's words), `sse_request_id` (as above).
+  inbox).
+- `TurnRequest`: `message` (1–20,000, the operator's words).
+- `ActionerFailure`, the clear's body, is the one exception to the rules above: the failure as
+  `GET /api/triage/actioner` answered it, `at`, `outcome` and `reason`, each required, `reason`
+  sent as null when it was null. It is compared as sent, not stripped, and fields beyond the three
+  are ignored.
 
 ## What each endpoint does
 
@@ -133,8 +147,11 @@ unknown fields are refused.
   its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`. A submit
   that submitted something then starts the actioner, off the request: see
   [The actioner start](#the-actioner-start).
-- **Actioner state** (FR-33): the actioner as the app bar's Actioner pill shows it: a start
-  pending, the run held, and the last failure. See [The actioner's state](#the-actioners-state).
+- **Actioner state** (FR-33): the actioner as the app bar's Actioner pill and the actioner page
+  show it: a start pending, the run held with its last log lines, and the last failure. See
+  [The actioner's state](#the-actioners-state).
+- **Clear** (FR-33): the editor's clear of the last failure, the one their page showed. See
+  [The actioner's state](#the-actioners-state).
 - **Inbox** (FR-28 to FR-32): the operator's inbox sitting, a headless KubeCoder session the API
   relays: its state, Start, a turn and End. See [The inbox sitting](#the-inbox-sitting).
 - **Metrics**: counts for Prometheus, which scrapes the API through the Service's `prometheus.io/*`
@@ -253,21 +270,63 @@ a retired pod's included, and a pod that starts resumes none, so the items wait 
 or the held run's webhook. The hold outlives the pod, and either pod may receive the webhook. Without
 the four settings a submit still writes, and the start is skipped with a warning in the log.
 
+Every write to the hold's file, a start's, the webhook's, the follow's and the clear's, loads and
+writes it under an exclusive `flock` of `.actioner-run.json.lock` beside it, so no writer on either
+pod loses another's write. A write that changes nothing writes nothing.
+
+### The run's follow
+
+The controller names no run's session, so the pod that starts a run finds it by elimination and
+follows it, on a thread of its own, for the actioner page (FR-27). Before it asks for the run it
+notes the headless sessions working in the project's running environments. Once the run is held it
+looks every 5 seconds for a headless session that is working and is neither in the note nor the
+live inbox sitting's own, and reads that session's response stream from its start. Each condensed
+log line is kept in the hold's file, the last four as the run's `lines`, with the stream's offset
+after it. The follow ends at the stream's result, at the session gone (`404` or `409`), or once
+the hold is released or has expired; a stream that drops is read again from its offset after 2
+seconds, the wait doubling up to 60. A note the controller cannot give leaves the run started and
+not followed, with no lines. The follow decides nothing: what it sees or fails at changes none of
+the run's start, its hold, its retries or its failure, and the webhook alone ends the run.
+
+The hold's file records the follow beside the lines (`"lines"` and `"follow"` beside `"runId"`):
+the note, the run's session once found, the offset, and the follow holding it, its pod, its id and
+a heartbeat it refreshes every 15 seconds. Each write the follow makes is checked against the run
+and that follow. A follow held by no follow, or whose heartbeat is a minute old, is taken over by
+whichever pod next answers `GET /api/triage/actioner` or the clear, and goes on from the record:
+the stream from the offset, or the look past the note while no session is recorded. A pod lets go
+of its follow as its shutdown is announced (the chart's preStop drain), held by no follow, so the
+other pod's next read takes it over at once; from then on it takes none over, quietly, and a run it
+starts is held with no follow holding it, for the other pod. The result, or the session gone,
+writes the follow out of the record, and no read takes it over then. A hold with no `"lines"`, as
+a pod of an earlier release writes it during a rollout, loads with none.
+
 ### The actioner's state
 
-`GET /api/triage/actioner` answers what the app bar's Actioner pill shows (FR-33):
+`GET /api/triage/actioner` answers what the app bar's Actioner pill and the actioner page show
+(FR-33), a takeover of the run's follow made first when one is due (see
+[The run's follow](#the-runs-follow)):
 
 - `state`: `running` while a live hold names a run, with `run` its id and `since` when the API
   started it; `starting` while the answering pod has a start pending, a call under way or a retry
   waiting, a retried skip's included; `idle` otherwise. A hold 30 minutes old counts as no run
   held. A pending start is the answering pod's alone, so through a rollout's overlap the other pod
   answers `idle` for it.
+- `lines`: while `running`, the run's last condensed log lines, oldest first, up to four, `[]`
+  until the follow has read one; `[]` otherwise.
 - `failure`: the last failure, `{at, outcome, reason}`, or null. A run's comes from its webhook,
   `outcome` `failed` or `skipped` with the controller's `reason` (null when it gave none) and `at`
   the API's clock at the delivery. A start the controller refused or could not be reached is
   `refused`, its `reason` the controller's problem title, else `/prompt-runs answered <status>`, or
   the transport error. It is kept in the hold's file, `"failure"` beside `"runId"` and `"at"`, so
-  both pods answer it, until the next run started clears it in the same write that takes the hold.
+  both pods answer it, until the next run started clears it in the same write that takes the hold,
+  or an editor clears it.
+
+`POST /api/triage/actioner/clear` is that clear: its body names the failure as the editor's page
+read it, and the failure is cleared only while it is the last failure, all three fields equal. A
+newer failure, recorded since the page read it, stays, and so does the hold, a run held since
+included. The reply is the state as it then stands, cleared or not, `failure` null once cleared or
+the newer one; the log says which. A body without one of the three fields is `422
+validation-error`, and nothing is cleared.
 
 The times are in the store's spelling, `YYYY-MM-DDTHH:MM:SSZ`.
 
@@ -288,52 +347,65 @@ the screen's links) and `sitting`, the one sitting the API holds, or null:
   `started_environment`: whether the API started it.
 - `began`, and `moved`: the last send or result.
 - `turn`: the turn in flight, a Start's included, or null: `task`, the id of the task-service task
-  the page follows for it; `began`; and `log`, the last condensed log line read.
+  the page follows for it; `began`; and `lines`, the last four of its progress texts (below), a
+  Start's steps and the condensed log lines read, oldest first, `[]` as the turn begins.
 - `lost`: `{at, reason}` once the sitting is lost, else null.
+- `ended`: `{at, idle_minutes}` once the idle expiry has ended the sitting, else null: when the
+  sweep ended it, and the configured idle time in minutes.
 - `transcript`: every message, `{author, text, at}`, `author` being `operator` or `session`. The
   first is the prompt the API sent.
 
-**Start** with a live sitting answers it, `200`, and starts nothing; a lost one it clears first, as
-End does. Otherwise it writes a new sitting whose first message is
-`FIELDNOTES_KUBECODER_INBOX_PROMPT` (`/dev:inbox`) with the operator's scope appended after a space,
-answers `202`, and runs a task that lists the project's environments in `normal` mode and takes a
-running one, else starts a stopped one, records that the API started it, and waits up to 15 minutes
-for it to settle. In it, the task creates a headless session in `FIELDNOTES_KUBECODER_INBOX_CWD`
-(`Fieldnotes/inbox`, under `/work`, the store's `inbox/`) with the configured model and reasoning
-effort, sends the first message, and follows the turn. The task's progress texts are its steps
-(`Picking an environment of <project>`, `Taking <env>, which is running` or `Starting <env>, which
-was stopped`, `Creating the session`), then the turn's log lines.
+**Start** with a live sitting, neither lost nor ended, answers it, `200`, and starts nothing; a
+lost or ended one it clears first, as End does. Otherwise it writes a new sitting whose first
+message is `FIELDNOTES_KUBECODER_INBOX_PROMPT` (`/dev:inbox`) with the operator's scope appended
+after a space, answers `202`, and runs a task that lists the project's environments in `normal`
+mode and takes a running one, else starts a stopped one, records that the API started it, and
+waits up to 15 minutes for it to settle. In it, the task creates a headless session in
+`FIELDNOTES_KUBECODER_INBOX_CWD` (`Fieldnotes/inbox`, under `/work`, the store's `inbox/`) with the
+configured model and reasoning effort, sends the first message, and follows the turn. The task's
+progress texts are its steps (`Picking an environment of <project>`, `Taking <env>, which is
+running` or `Starting <env>, which was stopped`, `Creating the session`), then the turn's log
+lines.
 
 **A turn** appends the operator's message and answers `202`, the turn in flight in the sitting; its
 task sends the message and follows it. While a turn is in flight, a Start's included, a turn is
-refused with `session-busy`, and without a live sitting, none or a lost one, with `conflict`.
+refused with `session-busy`, and without a live sitting, none, a lost one or an ended one, with
+`conflict`.
 
 **Following** a turn reads the session's response stream from the log offset the sitting last
-read: each condensed log line becomes the task's progress text and the turn's `log`, and the
-turn's result is appended to the transcript as the session's message, which clears the turn. The
-task completes with `{message}`, null when the sitting was ended, lost or taken over under it.
+read: each condensed log line becomes the task's progress text and the latest of the turn's
+`lines`, the oldest dropped past four, and the turn's result is appended to the transcript as the
+session's message, which clears the turn. The task completes with `{message}`, null when the
+sitting was ended, lost or taken over under it.
 
 **The page's events.** A task's events carry the session's words, so they reach only the SSE
-connections bound to the editor whose request began the turn (with OIDC off, every connection).
-The gateway binds a connection at connect, from the access cookie; a page whose connect came before
-its token's refresh stays unbound, so Start and a turn name the page's connection in
-`sse_request_id` and the request binds it to the editor when it is bound to no one. A connection
-bound to someone stays theirs. A page that hears nothing still gets the result by fetching
-`GET /api/inbox` again.
+connections bound to the editor whose request began the turn, a takeover's task's included (with
+OIDC off, every connection). How a page's connection comes to be bound is under
+[Listening and authentication](#listening-and-authentication). A page that hears nothing still
+gets the result by fetching `GET /api/inbox` again.
 
 **Both pods.** The sitting is `inbox-sitting.json` in `FIELDNOTES_CACHE_DIR`, beside the actioner's
 hold, written whole through a rename. Its writers, on either pod, take turns on an exclusive
 `flock` of a lock file beside it, and each write a task makes is checked against the sitting it was
 made for, so a task never brings back a sitting End cleared or writes into a newer one. Beyond the
-wire, the file holds the session's name, the conversation id once known, the log offset, the
-number of the last turn whose result it holds, and the follow holding the turn in flight: its pod
-and a heartbeat it refreshes every 15 seconds. A turn whose heartbeat is a minute old, its pod
-retired or gone, is taken over by whichever pod notices first, on a `GET /api/inbox` or on the
-sweep each pod runs every 15 seconds, as a new task (`turn.task` changes) that goes on from the
-file: a message the session has not taken is sent, once, and the stream is read from the last
-offset. Only the follow the file names writes the result, so it lands once. Through a rollout's
-overlap a page on the pod not following the turn gets no progress, and its next read brings the
-result.
+wire, the file holds its status (`starting`, `busy`, `idle`, `lost` or `ended`), the subject of the
+editor whose request began the last turn, the session's name, the conversation id once known, the
+log offset, the number of the last turn whose result it holds, whether the expiry has closed it,
+and the follow holding the turn in flight: its pod and a heartbeat it refreshes every 15 seconds. A
+turn no follow holds, or whose heartbeat is a minute old, its pod retired or gone, is taken over by
+whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs every 15 seconds,
+as a new task (`turn.task` changes) that goes on from the file: a message the session has not
+taken is sent, once, and the stream is read from the last offset. Only the follow the file names
+writes the result, so it lands once. Through a rollout's overlap a page on the pod not following
+the turn gets no progress, and its next read brings the result.
+
+**Shutdown.** A pod lets go of its follows as its shutdown is announced (the chart's preStop
+drain), before the shutdown waits on anything: its sweep stops, and a follow holding the turn is
+released and written out of the file, the turn kept in flight with no follow holding it, so the
+other pod takes it over at its next read or sweep without waiting out the minute. A follow waiting
+for an environment it started walks away from that wait, and one that begins after the
+announcement leaves at once. A pod shutting down takes no turn over, and quietly: its
+`GET /api/inbox` answers the sitting as it stands.
 
 **Failures.** A controller answer that it does not know the environment or the session (`404
 not-found`), or that the environment is not running (`409 conflict`), loses the sitting: `lost` is
@@ -343,13 +415,17 @@ failure, a `5xx`, an unreachable controller or a dropped stream, is tried again 
 the wait doubling up to 60, for as long as the follow holds the turn.
 
 **End** clears the file first, then ends the session and stops the environment, but only one the
-API started and only while no other session is working in it. What the controller no longer knows,
-or no longer runs, counts as closed; any other failure there is logged and left, so End always
-answers `204`.
+API started and only while no other session is working in it, and neither for a sitting the expiry
+has closed already. What the controller no longer knows, or no longer runs, counts as closed; any
+other failure there is logged and left, so End always answers `204`.
 
-**The idle expiry.** The same sweep ends, as End does, a sitting with no turn in flight whose
-`moved` is `FIELDNOTES_KUBECODER_INBOX_IDLE` minutes old (30), a lost one included. Both pods
-sweep; End being idempotent, either may.
+**The idle expiry.** The same sweep closes a sitting with no turn in flight once it is due, as End
+closes it, and keeps it. A live sitting is due once its `moved` is `FIELDNOTES_KUBECODER_INBOX_IDLE`
+minutes old (30), and is kept with status `ended`, its `ended` set. A lost one is due once that time
+has passed since `lost.at`, not since its last send, and stays lost; it reads the same on the wire
+before and after. Either is marked closed in the write that keeps it, so it is closed once: no
+later sweep, and neither Start nor End, which clear it, ends its session or stops its environment
+again. Both pods sweep, under the file's lock.
 
 The log names each Start with its prompt and each turn by its length, not its text.
 
@@ -394,17 +470,26 @@ untyped, as the template's testing endpoints are:
 - `/api/testing/store`: `PUT {"files": {path: text}}` makes `observations/` and `triage/` those
   files, in one commit through the write queue, indexed before the `204`; `GET` answers them as the
   store holds them, for a test to read what the UI wrote.
-- `/api/testing/controller`: `PUT {inbox, environments, turns, runs}` replaces the fake controller
-  with one holding those environments of the store's project, the turns the session's next sends
-  play (their log lines, their result, a pace between them, or held until `finish`) and the answers
-  to the actioner's prompt runs, the inbox configured or not; the sitting the old one held is ended
-  as End ends it, and the actioner starts afresh, with no hold and no failure. The backend starts
-  with no environment, so a test that opens the inbox lays one out. `POST …/emit {line}` and
-  `POST …/finish {result, is_error}` play the log and the result of the sitting's turn in flight,
-  `POST …/lose {what: session|environment}` loses the sitting at the controller, and
-  `POST …/run-end {outcome, reason}` delivers the webhook of the last run the fake accepted; `GET`
-  answers the environments, their sessions and the messages sent to each, and the runs accepted. A
-  body that does not validate is `422 validation-error`, nothing to play `409 conflict`.
+- `/api/testing/controller`: `PUT {inbox, environments, turns, run_turns, runs}` replaces the fake
+  controller with one holding those environments of the store's project, each with the names of
+  the headless sessions `working` in it (a running one only), the turns the session's next sends
+  play (their log lines, their result, a pace between them, or held until `finish`), the turn each
+  accepted actioner run's session plays, in order, and the answers to the actioner's prompt runs,
+  the inbox configured or not; the sitting the old one held is ended as End ends it, and the
+  actioner starts afresh, with no hold and no failure. The backend starts with no environment, so a
+  test that opens the inbox, or wants a run's lines, lays one out. An accepted run plays in a new
+  headless session of the first running environment, else of the first stopped one, which it
+  starts; a run past `run_turns` plays no line and is over at once. The layout has the run's
+  follow look every quarter of a second. `POST …/emit {line}` and `POST …/finish {result,
+  is_error}` play the log and the result of the sitting's turn in flight, and `POST …/run-emit` and
+  `POST …/run-finish`, with the same bodies, those of the last run the fake accepted, whose session
+  `run-finish` ends; each waits up to 5 seconds for its turn to be in flight. `POST …/lose {what:
+  session|environment}` loses the sitting at the controller, `POST …/expire` closes the sitting as
+  the idle expiry does once its time has passed, now, and `POST …/run-end {outcome, reason}`
+  delivers the webhook of the last run the fake accepted; `GET` answers the environments, their
+  sessions and the messages sent to each, and the runs accepted. A body that does not validate is
+  `422 validation-error`, nothing to play `409 conflict`, such as no turn in flight within the
+  wait, or for `expire` a sitting with a turn in flight, one closed already, or none.
 
 ## The pinned surface
 
@@ -450,6 +535,6 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_KUBECODER_INBOX_PROMPT` | `/dev:inbox` | the inbox sitting's first message, the operator's scope appended; see [The inbox sitting](#the-inbox-sitting) |
 | `FIELDNOTES_KUBECODER_INBOX_CWD` | `Fieldnotes/inbox` | the sitting's session's working directory, `/work`-relative or absolute |
 | `FIELDNOTES_KUBECODER_INBOX_MODEL`, `FIELDNOTES_KUBECODER_INBOX_EFFORT` | the engine's defaults | the sitting's model and reasoning effort |
-| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved before the API ends it; a positive number |
+| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved, or a lost one stays lost, before the API closes it and keeps it; see [The inbox sitting](#the-inbox-sitting); a positive number |
 | `FIELDNOTES_KUBECODER_INBOX_TRACKER` | `https://issues.webathome.org/issue/` | the issue address the inbox screen appends a card id to |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |

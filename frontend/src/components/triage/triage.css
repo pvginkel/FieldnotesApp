@@ -633,3 +633,6 @@ button.user { padding: 0; border: 0; font-family: inherit; cursor: pointer; }
 }
 .menu .btn { justify-content: center; height: 34px; }
 .menu .btn .icon { font-size: 16px; }
+
+/* The actioner page (actioner-page.tsx): the working box across the column, its lines left-aligned. */
+.actioner-run { align-self: stretch; margin-top: 28px; text-align: left; }

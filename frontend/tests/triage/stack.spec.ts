@@ -26,7 +26,9 @@ test.describe('the stack', () => {
     await expect(triage.headline).toHaveText(items[1].headline);
   });
 
-  test('an empty queue has nothing to rule on', async ({ store, triage }) => {
+  test('an empty queue has nothing to rule on', async ({ store, controller, triage }) => {
+    // The actioner idle: a run an earlier submit started would take the empty page's place.
+    await controller.layOut();
     await store.layOut({});
 
     await triage.open();

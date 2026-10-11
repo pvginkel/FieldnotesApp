@@ -1,7 +1,9 @@
 /**
  * The app bar (FR-33): the screen tabs, and the two pills on both screens, each shown only while
- * it has something to show, its tooltip saying what. The worker backend's fake controller plays
- * the inbox sitting's session and the actioner's runs. Every item and sitting is invented.
+ * it has something to show, its tooltip saying what. The Actioner pill opens the actioner page
+ * while the actioner is busy, and the failure's dialog once it is idle with one. The worker
+ * backend's fake controller plays the inbox sitting's session and the actioner's runs. Every item
+ * and sitting is invented.
  */
 
 import type { APIRequestContext } from '@playwright/test';
@@ -16,8 +18,20 @@ async function write(request: APIRequestContext, url: string, data: object = {})
   expect(response.ok(), await response.text()).toBe(true);
 }
 
+const RULING = { verb: 'yes' as const, note: '', at: minutesAgo(5), submitted: null };
+
 /** One item, ruled and not yet submitted: what a submit sends. */
-const ruled = () => stack(1, () => ({ ruling: { verb: 'yes', note: '', at: minutesAgo(5), submitted: null } }));
+const ruled = () => stack(1, () => ({ ruling: RULING }));
+
+/** Two items, the first ruled: after a submit, the second is still to rule on. */
+const ruledAndOpen = () => stack(2, (i) => ({ ruling: i === 0 ? RULING : null }));
+
+/** The actioner's state as the API answers it now. */
+async function actionerState(request: APIRequestContext, backendUrl: string): Promise<string> {
+  const response = await request.get(`${backendUrl}/api/triage/actioner`);
+  expect(response.ok(), await response.text()).toBe(true);
+  return ((await response.json()) as { state: string }).state;
+}
 
 /** The finish card's Submit, from the ruled card the page opens on. */
 async function submit(triage: TriagePage): Promise<void> {
@@ -138,9 +152,10 @@ test.describe('the Actioner pill', () => {
     await appBar.expectPill(appBar.actionerPill, 'working', /^The actioner is running/);
   });
 
-  test('a skipped run waiting to be tried again breathes, its tooltip saying why', async ({ store, controller, triage, appBar }) => {
+  test('a skipped run waiting to be tried again breathes, its tooltip saying why, and opens the actioner page over the stack', async ({ store, controller, triage, appBar }) => {
     await controller.layOut();
-    await store.layOut(ruled());
+    const { observations, items, ids } = ruledAndOpen();
+    await store.layOut({ observations, items });
     await triage.open();
     await submit(triage);
     await appBar.expectPill(appBar.actionerPill, 'working', /^The actioner is running/);
@@ -151,18 +166,144 @@ test.describe('the Actioner pill', () => {
       'working',
       /^The actioner's last run was skipped at \d{4}-\d\d-\d\d \d\d:\d\d: in-use; it is tried again$/,
     );
+    await triage.expectCard(ids[1]);
+    await appBar.actionerPill.click();
+    await expect(triage.actionerTitle).toHaveText('The actioner is starting');
+    await expect(triage.card).toHaveCount(0);
   });
 
-  test('a start the controller refuses is red', async ({ store, controller, triage, appBar }) => {
+  test('a start the controller refuses is red, and its dialog says so', async ({ store, controller, triage, appBar }) => {
     await controller.layOut({ runs: [503] });
     await store.layOut(ruled());
     await triage.open();
     await submit(triage);
     await appBar.expectPill(appBar.actionerPill, 'failed', /^The controller refused the actioner's start at \d{4}-\d\d-\d\d \d\d:\d\d: .+/);
+
+    await appBar.actionerPill.click();
+    await expect(appBar.failureWhat).toHaveText("The controller refused the actioner's start");
+    await expect(appBar.failureWhen).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+    await expect(appBar.failureReason).not.toBeEmpty();
   });
 });
 
-test('the app bar meets WCAG AA in both themes, with every look of the pills', async ({ store, controller, triage, appBar, page, request, backendUrl }) => {
+test.describe('the Actioner pill, while the actioner is busy', () => {
+  test('opens the actioner page over items still to rule on, from either screen; the Triage tab leaves it for the stack; the stack again once the run has ended', async ({ store, controller, triage, inbox, appBar, page }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], run_turns: [{ lines: ['Reading the rulings'], held: true }] });
+    const { observations, items, ids } = ruledAndOpen();
+    await store.layOut({ observations, items });
+    await triage.open();
+    await submit(triage);
+    await triage.expectCard(ids[1]);
+    await appBar.expectPill(appBar.actionerPill, 'working', /^The actioner is running/);
+    await expect(triage.actioner).toHaveCount(0);
+
+    await appBar.actionerPill.click();
+    await expect(triage.actionerLines).toHaveText(['Reading the rulings']);
+    await expect(triage.card).toHaveCount(0);
+    await expect(triage.pane).toBeHidden();
+    await expect(triage.headerSubmit).toBeHidden();
+    await expect(page).toHaveURL(/\/\?actioner=true$/);
+    await appBar.expectScreen('triage');
+    // The triage keys rule no card from it.
+    await triage.press('y');
+    await triage.press('ArrowLeft');
+    await expect(triage.actioner).toBeVisible();
+
+    await appBar.triageTab.click();
+    await triage.expectCard(ids[1]);
+    await triage.expectVerb(null);
+    await expect(triage.actioner).toHaveCount(0);
+
+    await appBar.inboxTab.click();
+    await expect(inbox.header).toBeVisible();
+    await appBar.actionerPill.click();
+    await expect(triage.actionerLines).toHaveText(['Reading the rulings']);
+    await appBar.expectScreen('triage');
+
+    // A card's segment leaves the page for that card.
+    await triage.segments.first().click();
+    await triage.expectCard(ids[1]);
+    await expect(page).toHaveURL(/\/$/);
+
+    await appBar.actionerPill.click();
+    await expect(triage.actioner).toBeVisible();
+    await controller.runEnd('failed', 'the session ended in an error');
+    await triage.expectCard(ids[1]);
+    await expect(triage.actioner).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(appBar.actionerPill).toHaveAttribute('data-state', 'failed');
+  });
+});
+
+test.describe('the failed Actioner pill', () => {
+  test("opens the failure's dialog: what, when and why; Cancel, Escape and a click beside it leave the failure and the pill; Close clears both, from either screen", async ({ store, controller, triage, inbox, appBar, page }) => {
+    await controller.layOut();
+    const { observations, items, ids } = ruledAndOpen();
+    await store.layOut({ observations, items });
+    await triage.open();
+    await submit(triage);
+    await appBar.expectPill(appBar.actionerPill, 'working', /^The actioner is running/);
+    await controller.runEnd('failed', 'the session ended in an error');
+    await appBar.expectPill(appBar.actionerPill, 'failed', /last run failed/);
+
+    await appBar.actionerPill.click();
+    await expect(appBar.failureWhat).toHaveText("The actioner's last run failed");
+    await expect(appBar.failureWhen).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+    await expect(appBar.failureReason).toHaveText('the session ended in an error');
+    // The triage keys do not reach the card beneath.
+    await triage.press('y');
+    await appBar.failureCancel.click();
+    await expect(appBar.failure).toHaveCount(0);
+    await triage.expectCard(ids[1]);
+    await triage.expectVerb(null);
+    await appBar.expectPill(appBar.actionerPill, 'failed', /last run failed/);
+
+    await appBar.actionerPill.click();
+    await expect(appBar.failure).toBeVisible();
+    await triage.press('Escape');
+    await expect(appBar.failure).toHaveCount(0);
+    await appBar.actionerPill.click();
+    await expect(appBar.failure).toBeVisible();
+    await page.mouse.click(5, 700);
+    await expect(appBar.failure).toHaveCount(0);
+    await triage.reload();
+    await expect(appBar.actionerPill).toHaveAttribute('data-state', 'failed');
+
+    await appBar.inboxTab.click();
+    await expect(inbox.header).toBeVisible();
+    await appBar.actionerPill.click();
+    await appBar.failureClose.click();
+    await expect(appBar.failure).toHaveCount(0);
+    await expect(appBar.actionerPill).toHaveCount(0);
+    await appBar.fetched(() => inbox.open());
+    await expect(appBar.actionerPill).toHaveCount(0);
+  });
+
+  test('Close clears only the failure it showed: one recorded meanwhile stays, and the pill shows it', async ({ store, controller, triage, appBar, request, backendUrl }) => {
+    await controller.layOut();
+    await store.layOut(ruled());
+    await triage.open();
+    await submit(triage);
+    await appBar.expectPill(appBar.actionerPill, 'working', /^The actioner is running/);
+    await controller.runEnd('failed', 'the first run failed');
+    await appBar.expectPill(appBar.actionerPill, 'failed', /: the first run failed$/);
+    await appBar.actionerPill.click();
+    await expect(appBar.failureReason).toHaveText('the first run failed');
+
+    // Meanwhile another submit starts a run, which fails.
+    await store.layOut(ruled());
+    await write(request, `${backendUrl}/api/triage/submit`);
+    await expect.poll(() => actionerState(request, backendUrl)).toBe('running');
+    await controller.runEnd('failed', 'the second run failed');
+
+    await expect(appBar.failureReason).toHaveText('the first run failed');
+    await appBar.failureClose.click();
+    await expect(appBar.failure).toHaveCount(0);
+    await appBar.expectPill(appBar.actionerPill, 'failed', /^The actioner's last run failed at .+: the second run failed$/);
+  });
+});
+
+test("the app bar meets WCAG AA in both themes, with every look of the pills and the failure's dialog", async ({ store, controller, triage, appBar, page, request, backendUrl }) => {
   await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }], runs: [503] });
   await store.layOut(ruled());
   await write(request, `${backendUrl}/api/inbox/start`);
@@ -176,6 +317,10 @@ test('the app bar meets WCAG AA in both themes, with every look of the pills', a
   for (const theme of ['light', 'dark'] as const) {
     await triage.setTheme(theme);
     views[`working and failed, ${theme}`] = await contrastFailures(page);
+    await appBar.actionerPill.click();
+    await expect(appBar.failure).toBeVisible();
+    views[`the failure's dialog, ${theme}`] = await contrastFailures(page);
+    await appBar.failureCancel.click();
   }
   await controller.lose('session');
   await expect(appBar.inboxPill).toHaveAttribute('data-state', 'lost');

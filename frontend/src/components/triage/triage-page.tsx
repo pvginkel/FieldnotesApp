@@ -1,10 +1,16 @@
-// The one screen: the triage stack, ported from the mockup (FieldnotesAppSpecs/mockups/triage-ui/).
+// The triage screen: the triage stack, ported from the mockup (FieldnotesAppSpecs/mockups/triage-ui/),
+// and the actioner page (FR-33), which takes the place of "Nothing to rule on" for as long as a
+// start is pending or a run is held, and of the stack once the Actioner pill has opened it.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { RefreshCw } from 'lucide-react';
 import { useTriage } from '@/hooks/use-triage';
+import { useGetTriageActioner } from '@/lib/api/generated/hooks';
+import { isBusy } from '@/lib/triage/actioner';
 import { prosePattern, ProsePatternContext } from '@/lib/triage/prose-pattern';
 import { ownersOf } from '@/lib/triage/queue';
+import { ActionerPage } from './actioner-page';
 import { CenterCard, FinishCard } from './finish-card';
 import { KeysDialog } from './keys-dialog';
 import { RulingPane } from './ruling-pane';
@@ -20,6 +26,28 @@ export function TriagePage() {
 
   const queue = triage.queue;
   const pattern = useMemo(() => prosePattern(queue ? ownersOf(queue) : []), [queue]);
+
+  // What the screen shows: the actioner page while the actioner is busy, of itself over an empty
+  // stack and over any other once opened. An empty stack waits for the actioner's state.
+  const { actioner: opened } = useSearch({ from: '/' });
+  const navigate = useNavigate();
+  const actioner = useGetTriageActioner();
+  const busy = isBusy(actioner.data);
+  const shown =
+    busy && (opened || view === 'empty') ? 'actioner' : view === 'empty' && actioner.isPending ? 'loading' : view;
+
+  // Once the run has ended, the screen shows what it would otherwise show, and a run started later
+  // takes the stack's place only if the pill opens it again.
+  const idle = actioner.data?.state === 'idle';
+  useEffect(() => {
+    if (opened && idle) void navigate({ to: '/', replace: true });
+  }, [opened, idle, navigate]);
+
+  // A card's segment leaves the actioner page for that card.
+  const goto = (idx: number) => {
+    if (opened) void navigate({ to: '/' });
+    triage.go(idx);
+  };
 
   // The card starts below the pane, which lies over the scrolling area, and whatever scrolls into
   // view inside the card lands below it rather than behind it.
@@ -55,7 +83,7 @@ export function TriagePage() {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         // Not from the finish card, so a double press cannot send the batch: Submit is a click.
         event.preventDefault();
-        if (view === 'card') triage.rule();
+        if (shown === 'card') triage.rule();
         return;
       }
       if (event.key === 'Escape') {
@@ -70,13 +98,13 @@ export function TriagePage() {
         return;
       }
 
-      const onCard = view === 'card';
+      const onCard = shown === 'card';
       const key = event.key;
       if (onCard && key === 'y') triage.setVerb('yes');
       else if (onCard && key === 'n') triage.setVerb('no');
       else if (onCard && key === 'l') triage.setVerb('later');
       else if (onCard && key === 'Tab' && !event.shiftKey) noteRef.current?.focus();
-      else if (key === 'ArrowLeft') triage.previous();
+      else if (key === 'ArrowLeft' && shown !== 'actioner') triage.previous();
       else if (onCard && key === 'ArrowRight') triage.next();
       else if (key === '?') setKeysOpen(true);
       else return;
@@ -87,7 +115,9 @@ export function TriagePage() {
   });
 
   const content = (() => {
-    switch (view) {
+    switch (shown) {
+      case 'actioner':
+        return <ActionerPage />;
       case 'card':
         return <TriageCard item={current!} live={queue?.observations[current!.observation]} />;
       case 'finish':
@@ -133,19 +163,19 @@ export function TriagePage() {
       <TriageHeader
         order={triage.order}
         byId={triage.byId}
-        shown={view === 'card' ? triage.idx : -1}
+        shown={shown === 'card' ? triage.idx : -1}
         skipped={triage.skipped}
         ruledCount={triage.ruledCount}
-        showSubmit={view === 'card'}
+        showSubmit={shown === 'card'}
         prefs={triage.prefs}
-        onGoto={triage.go}
+        onGoto={goto}
         onFinish={() => triage.go(triage.order.length)}
         onKeys={() => setKeysOpen(true)}
         onPref={triage.setPref}
       />
       <div className="stage">
         <RulingPane
-          hidden={view !== 'card'}
+          hidden={shown !== 'card'}
           paneRef={paneRef}
           noteRef={noteRef}
           verbsRef={triage.verbsRef}

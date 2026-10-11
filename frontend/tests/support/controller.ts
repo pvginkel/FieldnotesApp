@@ -9,15 +9,19 @@
 import type { APIRequestContext } from '@playwright/test';
 import { expect } from '@playwright/test';
 
-/** An environment of the store's project; `start_as` is what a start brings a stopped one to. */
+/** An environment of the store's project; `start_as` is what a start brings a stopped one to.
+ *  `working` names headless sessions of a running one busy at the layout, which an actioner run's
+ *  follow sees past. */
 interface EnvironmentLayout {
   env_id: string;
   status?: 'running' | 'stopped';
   start_as?: 'running' | 'starting' | 'error' | 'admission-blocked';
+  working?: string[];
 }
 
-/** The next send's turn: its log lines, then its result, `pace` seconds apart; a `held` one
- *  stays in flight after its lines until `finish`. */
+/** A session's turn, the sitting's next send or the next actioner run's: its log lines, then its
+ *  result, `pace` seconds apart; a `held` one stays in flight after its lines until `finish`
+ *  (`runFinish` for a run's). */
 interface TurnLayout {
   lines?: string[];
   pace?: number;
@@ -27,11 +31,15 @@ interface TurnLayout {
 }
 
 /** `inbox` false: the inbox not configured. `runs`: the answer to each prompt run, the last one
- *  to every run after; 202 accepts it, another status refuses it, null fails to connect. */
+ *  to every run after; 202 accepts it, another status refuses it, null fails to connect. An
+ *  accepted run plays the next of `run_turns` in a new headless session of the first running
+ *  environment, else of the first stopped one, which it starts; with no environment it plays
+ *  nothing, and a run past `run_turns` plays no line and is over at once. */
 interface ControllerLayout {
   inbox?: boolean;
   environments?: EnvironmentLayout[];
   turns?: TurnLayout[];
+  run_turns?: TurnLayout[];
   runs?: (number | null)[];
 }
 
@@ -86,6 +94,17 @@ export class Controller {
   /** The sitting closed now as the idle expiry closes it: ended, or a lost one kept lost. */
   expire(): Promise<void> {
     return this.call('post', '/expire', {});
+  }
+
+  /** A line of the turn in flight of the last prompt run the controller accepted. */
+  runEmit(line: string): Promise<void> {
+    return this.call('post', '/run-emit', { line });
+  }
+
+  /** That run's turn ends with this result, and the controller ends its session; the run's end is
+   *  `runEnd`'s. */
+  runFinish(result = 'done'): Promise<void> {
+    return this.call('post', '/run-finish', { result });
   }
 
   /** The last prompt run the controller accepted ends as its webhook reports it: no outcome is a

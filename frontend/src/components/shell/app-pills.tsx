@@ -1,19 +1,19 @@
 // The app bar's pills, on both screens (FR-33): an inbox sitting the API holds, and the actioner.
 // Each shows only while it has something to show; its tooltip says what. Both are fetched on a
-// timer, sooner while something is in flight.
+// timer, sooner while something is in flight. The Inbox pill leads to the inbox screen; the
+// Actioner pill, while a start is pending or a run is held, to the actioner page on the triage
+// screen, and once the actioner is idle with a failure, to the failure's dialog.
 
+import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useGetInbox, useGetTriageActioner } from '@/lib/api/generated/hooks';
-import type {
-  ActionerState_0c09c4d,
-  ActionerState_0c09c4d_ActionerFailure,
-  InboxState_5430f38,
-} from '@/lib/api/generated/hooks';
+import type { InboxState_5430f38 } from '@/lib/api/generated/hooks';
 import { minutes } from '@/lib/inbox/text';
+import { failed, isBusy, type ActionerFailure, type ActionerState } from '@/lib/triage/actioner';
 import { stamp } from '@/lib/triage/time';
+import { ActionerFailureDialog } from './actioner-failure-dialog';
 
 type InboxState = InboxState_5430f38;
-type ActionerState = ActionerState_0c09c4d;
 
 function InboxPill() {
   const { data } = useGetInbox(undefined, {
@@ -36,40 +36,58 @@ function InboxPill() {
   );
 }
 
-/** A run that ended without succeeding, or a start the controller refused (FR-27). */
-function failed(failure: ActionerState_0c09c4d_ActionerFailure): string {
-  const what =
-    failure.outcome === 'refused'
-      ? "The controller refused the actioner's start"
-      : `The actioner's last run ${failure.outcome === 'skipped' ? 'was skipped' : 'failed'}`;
-  return `${what} at ${stamp(failure.at)}${failure.reason ? `: ${failure.reason}` : ''}`;
-}
-
 function ActionerPill() {
   const { data } = useGetTriageActioner(undefined, {
     refetchInterval: (q) => ((q.state.data as ActionerState | undefined)?.state === 'idle' ? 20000 : 5000),
   });
-  if (!data) return null;
-  let state: string;
-  let title: string;
-  if (data.state === 'running') {
-    state = 'working';
-    title = `The actioner is running, since ${stamp(data.since!)}`;
-  } else if (data.state === 'starting') {
-    // A start pending: asked of the controller, or a skipped run's, waiting to be tried again.
-    state = 'working';
-    title = data.failure ? `${failed(data.failure)}; it is tried again` : 'The actioner is starting';
-  } else if (data.failure) {
-    state = 'failed';
-    title = failed(data.failure);
-  } else {
-    return null;
+  // The failure the dialog shows: the pill's when it was clicked, which Close clears and no other.
+  const [shown, setShown] = useState<ActionerFailure | null>(null);
+
+  let pill = null;
+  if (data && isBusy(data)) {
+    // Starting is a start pending: asked of the controller, or a skipped run's, waiting to be tried
+    // again.
+    const title =
+      data.state === 'running'
+        ? `The actioner is running, since ${stamp(data.since!)}`
+        : data.failure
+          ? `${failed(data.failure)}; it is tried again`
+          : 'The actioner is starting';
+    pill = (
+      <Link
+        to="/"
+        search={{ actioner: true }}
+        className="app-pill"
+        data-state="working"
+        title={title}
+        data-testid="app-shell.pill.actioner"
+      >
+        <span className="dot" />
+        Actioner
+      </Link>
+    );
+  } else if (data?.failure) {
+    const failure = data.failure;
+    pill = (
+      <button
+        type="button"
+        className="app-pill"
+        data-state="failed"
+        title={failed(failure)}
+        aria-haspopup="dialog"
+        onClick={() => setShown(failure)}
+        data-testid="app-shell.pill.actioner"
+      >
+        <span className="dot" />
+        Actioner
+      </button>
+    );
   }
   return (
-    <span className="app-pill" data-state={state} title={title} data-testid="app-shell.pill.actioner">
-      <span className="dot" />
-      Actioner
-    </span>
+    <>
+      {pill}
+      {shown && <ActionerFailureDialog failure={shown} onDone={() => setShown(null)} />}
+    </>
   );
 }
 

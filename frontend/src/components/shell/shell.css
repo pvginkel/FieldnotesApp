@@ -1,5 +1,5 @@
-/* The app bar (FR-33), in both screens' headers: the screen tabs and the pills; and the working box
-   both screens show (working-box.tsx). In triage.css's idiom, and unlayered, so it wins over
+/* The app bar (FR-33), in both screens' headers: the screen tabs, the pills and the actioner
+   failure's dialog; and the working box both screens show (working-box.tsx). In triage.css's idiom, and unlayered, so it wins over
    Tailwind's preflight. White text meets WCAG AA on the header's orange (3.1:1) only as large text,
    as the wordmark is: the tabs are large, and the pills' text sits on a tint that takes it past
    4.5:1. */
@@ -35,14 +35,22 @@
   font-weight: 600;
   cursor: default;
 }
-a.app-pill { cursor: pointer; }
-a.app-pill:hover { background: rgb(0 0 0 / 0.3); text-decoration: none; }
+:is(a, button).app-pill { cursor: pointer; }
+:is(a, button).app-pill:hover { background: rgb(0 0 0 / 0.3); text-decoration: none; }
 .app-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
 .app-pill[data-state="working"] .dot { animation: breathe 1.4s ease-in-out infinite; }
 .app-pill[data-state="lost"] .dot, .app-pill[data-state="ended"] .dot { background: hsl(48 95% 62%); }
 .app-pill[data-state="failed"] .dot { background: hsl(0 90% 72%); }
 .app-pill:is([data-state="lost"], [data-state="ended"], [data-state="failed"]) { background: rgb(0 0 0 / 0.32); }
 @keyframes breathe { 50% { opacity: 0.25; } }
+
+/* ---- The actioner's failure, opened from its pill (actioner-failure-dialog.tsx) -------- */
+
+.failure-dialog { max-width: 460px; }
+.failure-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 14px; font-size: 14px; }
+.failure-facts dt { color: hsl(var(--muted-foreground)); }
+.failure-facts dd { margin: 0; overflow-wrap: anywhere; }
+.failure-note { margin: 0 0 18px; font-size: 14px; color: hsl(var(--muted-foreground)); }
 
 /* ---- The working box: up to four lines, the spinner beside the last ------------------- */
 

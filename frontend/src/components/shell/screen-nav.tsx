@@ -6,9 +6,10 @@ import { Link } from '@tanstack/react-router';
 export function ScreenNav() {
   return (
     <nav className="screens" aria-label="Screens" data-testid="app-shell.screens">
+      {/* Marked on the actioner page too (`/?actioner=true`), which a click on it leaves. */}
       <Link
         to="/"
-        activeOptions={{ exact: true }}
+        activeOptions={{ exact: true, includeSearch: false }}
         activeProps={{ className: 'active' }}
         data-testid="app-shell.screens.triage"
       >

@@ -1,8 +1,39 @@
 {
   "components": {
     "schemas": {
+      "ActionerFailure.0c09c4d": {
+        "description": "How the last run ended when it did not succeed, or the start the controller refused. A\nclear names the failure it clears by all three fields, as the operator's page showed them.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "at",
+          "outcome",
+          "reason"
+        ],
+        "title": "ActionerFailure",
+        "type": "object"
+      },
       "ActionerState.0c09c4d": {
-        "description": "The actioner as the app bar shows it (FR-33): `running` while a run is held, `run` and\n`since` naming it; `starting` while a start is pending, asked of the controller or waiting to\nbe tried again; `idle` otherwise. `failure` is the last failure, kept until the next run\nstarts.",
+        "description": "The actioner as the app bar and the actioner page show it (FR-33): `running` while a run is\nheld, `run` and `since` naming it and `lines` its last condensed log lines, oldest first, up\nto four, none until the follow has read one; `starting` while a start is pending, asked of the\ncontroller or waiting to be tried again; `idle` otherwise. `failure` is the last failure, kept\nuntil the next run starts or an editor clears it.",
         "properties": {
           "failure": {
             "anyOf": [
@@ -13,6 +44,13 @@
                 "type": "null"
               }
             ]
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "run": {
             "anyOf": [
@@ -50,13 +88,14 @@
           "state",
           "run",
           "since",
+          "lines",
           "failure"
         ],
         "title": "ActionerState",
         "type": "object"
       },
       "ActionerState.0c09c4d.ActionerFailure": {
-        "description": "How the last run ended when it did not succeed, or the start the controller refused.",
+        "description": "How the last run ended when it did not succeed, or the start the controller refused. A\nclear names the failure it clears by all three fields, as the operator's page showed them.",
         "properties": {
           "at": {
             "title": "At",
@@ -2234,6 +2273,22 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/controller/run-emit": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_run-emit",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "`{\"line\"}`: a log line of the turn in flight of the last run the controller accepted.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/controller/run-end": {
       "post": {
         "description": "",
@@ -2246,6 +2301,22 @@
           }
         ],
         "summary": "A `RunEndBody`: the last prompt run the controller accepted ends so, as its webhook reports it; a conflict when that run is not the one the actioner holds.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/run-finish": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_run-finish",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "`{\"result\", \"is_error\"}`: the turn in flight of the last run the controller accepted ends with this result, and the controller ends the run's session; the run's end stays `run-end`'s.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -2458,6 +2529,53 @@
           }
         ],
         "summary": "FR-33: the actioner's state, for the app bar: a start pending, the run held, and the last failure.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/triage/actioner/clear": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_triage_actioner_clear",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionerFailure.0c09c4d"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionerState.0c09c4d"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem.c1eb724"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "FR-33: the actioner's last failure cleared, if it is still the one the body names, as the operator's page showed it; the actioner's state as it then stands.",
         "tags": [],
         "x-required-role": "editor"
       }

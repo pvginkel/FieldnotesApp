@@ -1,7 +1,8 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { Verb } from '../triage-store';
 
-/** The triage screen (src/components/triage/): the stack, the ruling pane and the header. */
+/** The triage screen (src/components/triage/): the stack, the ruling pane, the header, and the
+ *  actioner page. */
 export class TriagePage {
   readonly card: Locator;
   readonly headline: Locator;
@@ -20,6 +21,12 @@ export class TriagePage {
   readonly finishRestart: Locator;
   readonly finishPrevious: Locator;
   readonly empty: Locator;
+  readonly actioner: Locator;
+  readonly actionerTitle: Locator;
+  readonly actionerWorking: Locator;
+  readonly actionerLines: Locator;
+  readonly actionerWaiting: Locator;
+  readonly actionerSpinner: Locator;
   readonly toasts: Locator;
   readonly keys: Locator;
   readonly main: Locator;
@@ -47,12 +54,19 @@ export class TriagePage {
     this.finishRestart = page.getByTestId('triage.finish.restart');
     this.finishPrevious = page.getByTestId('triage.finish.previous');
     this.empty = page.getByTestId('triage.empty');
+    this.actioner = page.getByTestId('triage.actioner');
+    this.actionerTitle = this.actioner.locator('h1');
+    this.actionerWorking = page.getByTestId('triage.actioner.working');
+    this.actionerLines = page.getByTestId('triage.actioner.working.line');
+    this.actionerWaiting = page.getByTestId('triage.actioner.working.waiting');
+    this.actionerSpinner = page.getByTestId('triage.actioner.working.spinner');
     this.toasts = page.getByTestId('triage.toast');
     this.keys = page.getByTestId('triage.keys');
     this.main = page.getByTestId('triage.main');
   }
 
-  /** Open the page and wait for the queue: a card, the finish card or the empty page. */
+  /** Open the page and wait for the queue: a card, the finish card, the empty page, or the
+   *  actioner page in its place. */
   async open(): Promise<void> {
     await this.page.goto(this.frontendUrl);
     await this.loaded();
@@ -64,7 +78,7 @@ export class TriagePage {
   }
 
   private async loaded(): Promise<void> {
-    await expect(this.card.or(this.finish).or(this.empty)).toBeVisible();
+    await expect(this.card.or(this.finish).or(this.empty).or(this.actioner)).toBeVisible();
   }
 
   verb(verb: Verb): Locator {

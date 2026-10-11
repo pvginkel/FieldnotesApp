@@ -1,6 +1,7 @@
 """The Playwright suite's controller, /api/testing/controller: the testing-mode backend serves the
 inbox and the actioner over a fake KubeCoder controller (FR-27 to FR-33), which a test lays out,
-plays the sitting's turns on, loses the sitting at and ends the actioner's runs through. Every
+plays the sitting's turns on, loses the sitting at, brings it to its idle end through and ends the
+actioner's runs through. Every
 environment, line and message is invented."""
 
 import time
@@ -100,9 +101,13 @@ def test_a_sitting_plays_the_turns_laid_out(backend, eventually):
     )
 
     assert begin(backend, "EX").status_code == 202
-    eventually(lambda: sitting(backend)["turn"]["log"] == LINES[0], "the first line")
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
     assert play(backend, "emit", line=LINES[1]).status_code == 204
-    eventually(lambda: sitting(backend)["turn"]["log"] == LINES[1], "the line emitted")
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-2:] == LINES, "the line emitted"
+    )
     assert play(backend, "finish", result=WRITE_UP).status_code == 204
     eventually(lambda: sitting(backend)["turn"] is None, "the first turn's result")
     assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
@@ -152,12 +157,71 @@ def test_a_sitting_lost_at_the_controller_is_lost(backend, eventually, what):
         turns=[{"lines": LINES[:1], "held": True}],
     )
     begin(backend)
-    eventually(lambda: sitting(backend)["turn"]["log"] == LINES[0], "the first line")
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
 
     assert play(backend, "lose", what=what).status_code == 204
 
     eventually(lambda: sitting(backend)["lost"] is not None, "the loss")
     assert sitting(backend)["transcript"][0]["text"] == "/dev:inbox"
+
+
+def test_a_sitting_is_brought_to_its_idle_end_now(backend, eventually):
+    """The suite has no clock to move: the expiry closes the sitting now, and keeps it ended."""
+    lay_out(backend, environments=[{"env_id": ENV, "status": "stopped"}])
+    begin(backend)
+    eventually(lambda: sitting(backend)["turn"] is None, "the prompt's result")
+
+    assert play(backend, "expire").status_code == 204
+
+    ended = sitting(backend)
+    assert ended["ended"]["idle_minutes"] == 30
+    assert ended["lost"] is None
+    assert ended["transcript"][0]["text"] == "/dev:inbox"
+    assert controller(backend)["environments"] == [
+        {"env_id": ENV, "status": "stopped", "sessions": []}
+    ]
+    again = play(backend, "expire")
+    assert again.status_code == 409
+    assert again.json()["type"] == "conflict"
+
+
+def test_a_lost_sitting_is_closed_and_kept_lost(backend, eventually):
+    lay_out(
+        backend,
+        environments=[{"env_id": ENV, "status": "stopped"}],
+        turns=[{"lines": LINES[:1], "held": True}],
+    )
+    begin(backend)
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
+    assert play(backend, "lose", what="session").status_code == 204
+    eventually(lambda: sitting(backend)["lost"] is not None, "the loss")
+
+    assert play(backend, "expire").status_code == 204
+
+    assert sitting(backend)["lost"] is not None
+    assert sitting(backend)["ended"] is None
+    assert controller(backend)["environments"][0]["status"] == "stopped"
+
+
+def test_a_sitting_with_a_turn_in_flight_or_none_is_not_expired(backend, eventually):
+    lay_out(
+        backend,
+        environments=[{"env_id": ENV}],
+        turns=[{"lines": LINES[:1], "held": True}],
+    )
+    nothing = play(backend, "expire")
+    begin(backend)
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
+    in_flight = play(backend, "expire")
+
+    assert (nothing.status_code, in_flight.status_code) == (409, 409)
+    assert sitting(backend)["ended"] is None
 
 
 def test_the_inbox_laid_out_not_configured_refuses_start(backend):
@@ -182,7 +246,9 @@ def test_a_layout_ends_the_last_sitting_and_starts_the_actioner_afresh(
         runs=[202],
     )
     begin(backend)
-    eventually(lambda: sitting(backend)["turn"]["log"] == LINES[0], "the first line")
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
     submitted(backend, eventually)
     last = fake(backend)
     assert actioner(backend)["state"] == "running"

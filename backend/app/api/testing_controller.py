@@ -7,13 +7,16 @@ environments and the turns given, the inbox configured or not, and the answers t
 prompt runs; the sitting the last one held is ended as End ends it, and the actioner starts
 afresh. A test then plays what the controller does while the screen is open: the log lines and
 the result of the sitting's turn in flight (`emit`, `finish`), the sitting lost under the API
-(`lose`), the actioner's run ending as the controller's webhook reports it (`run-end`). `GET`
-answers what the controller holds, for a test to read what the API did there.
+(`lose`), the actioner's run ending as the controller's webhook reports it (`run-end`). The suite
+has no clock to move, so the API's own expiry is played too: the sitting brought to its idle end
+now (`expire`). `GET` answers what the controller holds, for a test to read what the API did
+there.
 
 Every sitting a test plays is invented: FieldnotesApp is public.
 """
 
 import time
+from datetime import timedelta
 from typing import Annotated, Any, Literal
 
 from dependency_injector.wiring import Provide, inject
@@ -239,6 +242,20 @@ def lose(
         fake.forget_session(env_id, sitting.session)
     else:
         raise _conflict("the sitting holds no session the controller knows")
+    return "", 204
+
+
+@testing_controller_bp.route("/expire", methods=["POST"])
+@inject
+def expire(
+    service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
+) -> Any:
+    """The sitting closed as the expiry closes it once the idle time has passed, now: ended, or a
+    lost one kept lost; a conflict when it has a turn in flight, is closed already, or there is
+    none."""
+    runtime, _ = _served(service)
+    if not runtime.inbox.expire(timedelta(0)):
+        raise _conflict("the sitting has a turn in flight, is closed, or there is none")
     return "", 204
 
 

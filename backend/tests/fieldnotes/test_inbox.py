@@ -196,8 +196,9 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
             "started_environment": False,
             "began": AT,
             "moved": AT,
-            "turn": {"task": task_id, "began": AT, "log": None},
+            "turn": {"task": task_id, "began": AT, "lines": []},
             "lost": None,
+            "ended": None,
             "transcript": [message("operator", "/dev:inbox EX")],
         },
     }
@@ -208,6 +209,7 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
         "moved": AT,
         "turn": None,
         "lost": None,
+        "ended": None,
         "transcript": [
             message("operator", "/dev:inbox EX"),
             message("session", WRITE_UP),
@@ -419,7 +421,7 @@ def test_a_turn_sends_the_message_and_appends_the_sessions_answer(
 
     assert reply.status_code == 202
     sitting = reply.json()["sitting"]
-    assert sitting["turn"] == {"task": task_id, "began": LATER, "log": None}
+    assert sitting["turn"] == {"task": task_id, "began": LATER, "lines": []}
     assert sitting["moved"] == LATER
     assert sitting["transcript"][-1] == message(
         "operator", "close EX-7, slice EX-9", LATER
@@ -439,7 +441,7 @@ def test_a_turn_sends_the_message_and_appends_the_sessions_answer(
     assert result == {"message": message("session", ANSWER, LATER)}
 
 
-def test_a_turn_in_flight_shows_its_last_line_and_refuses_a_send(
+def test_a_turn_in_flight_shows_its_lines_and_refuses_a_send(
     start, kubecoder, eventually, environ
 ):
     kubecoder.add_environment(ENV)
@@ -447,9 +449,13 @@ def test_a_turn_in_flight_shows_its_last_line_and_refuses_a_send(
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         reply = send(api, "go")
-        eventually(lambda: inbox(api)["sitting"]["turn"]["log"] == LINES[0], "a line")
+        eventually(
+            lambda: inbox(api)["sitting"]["turn"]["lines"] == LINES[:1], "a line"
+        )
         kubecoder.emit(ENV, "claude", LINES[1])
-        eventually(lambda: inbox(api)["sitting"]["turn"]["log"] == LINES[1], "the next")
+        eventually(
+            lambda: inbox(api)["sitting"]["turn"]["lines"] == LINES[:2], "the next"
+        )
         mid = inbox(api)
         offset = sitting_file(environ).offset
         busy = send(api, "and EX-3?")
@@ -468,6 +474,37 @@ def test_a_turn_in_flight_shows_its_last_line_and_refuses_a_send(
         "go",
         ANSWER,
     ]
+
+
+def test_a_turn_in_flight_keeps_its_last_four_lines_a_starts_steps_included(
+    start, kubecoder, eventually, monkeypatch
+):
+    """R5 (FN-42): the turn's last four lines, oldest first, the top one scrolling out as a new one
+    comes, so a page that joins mid-turn starts with them; each is still the task's progress as it
+    is read."""
+    kubecoder.add_environment(ENV)
+    kubecoder.turns.append(FakeTurn(LINES[:2], held=True))
+    with start() as api:
+        heard = listen(api, monkeypatch)
+        task_id = begin(api).json()["sitting"]["turn"]["task"]
+        eventually(lambda: len(progress(heard, task_id)) == 5, "the start's lines")
+        joined = inbox(api)["sitting"]["turn"]["lines"]
+        kubecoder.emit(ENV, "claude", LINES[2])
+        eventually(lambda: len(progress(heard, task_id)) == 6, "the next line")
+        scrolled = inbox(api)["sitting"]["turn"]["lines"]
+        kubecoder.finish(ENV, "claude", WRITE_UP)
+        finished(api, eventually, task_id)
+        state = inbox(api)
+
+    steps = [
+        "Picking an environment of pvginkel/Fieldnotes",
+        f"Taking {ENV}, which is running",
+        "Creating the session",
+    ]
+    assert joined == [*steps[1:], *LINES[:2]]
+    assert scrolled == [steps[2], *LINES]
+    assert progress(heard, task_id) == [*steps, *LINES]
+    assert state["sitting"]["turn"] is None
 
 
 def test_a_send_without_a_sitting_is_a_conflict(start, kubecoder):
@@ -570,7 +607,9 @@ def test_end_mid_turn_clears_the_sitting_and_its_turn_writes_nothing_more(
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         reply = send(api, "go")
-        eventually(lambda: inbox(api)["sitting"]["turn"]["log"] == LINES[0], "a line")
+        eventually(
+            lambda: inbox(api)["sitting"]["turn"]["lines"] == LINES[:1], "a line"
+        )
         ended = end(api)
         result = finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
         state = inbox(api)

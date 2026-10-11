@@ -4,8 +4,9 @@ last offset by whichever pod notices its heartbeat stopped, on a read of the sit
 the result lands once and the first turn is sent once; every write is checked against the sitting
 and the follow, across both pods; a failure that is not a loss is tried again, a loss loses the
 sitting; a pod whose shutdown is announced leaves its turn at once, which the other pod takes over
-at its next read, and takes none over itself (FR-30); and the timer ends a sitting idle for the
-idle time (FR-31).
+at its next read, and takes none over itself (FR-30); and the timer closes a sitting idle for the
+idle time and keeps it ended (FR-31), and a lost one the idle time after its loss, kept lost
+(FR-32), each closed once.
 
 Two pods are two instances over one cache directory: the app's own, and a second `Inbox` beside it.
 A pod retired mid-turn is the file it left behind: a follow whose last heartbeat is two minutes
@@ -26,6 +27,7 @@ from app.fieldnotes.inbox import (
     Author,
     Follower,
     Inbox,
+    InboxEnd,
     InboxMessage,
     InboxTurn,
     Sitting,
@@ -163,7 +165,7 @@ def retired_turn(environ, clock, text, **changes) -> Sitting:
             "status": "busy",
             "subject": EDITOR,
             "moved": AT,
-            "turn": InboxTurn(task="retired-task", began=AT, log=None),
+            "turn": InboxTurn(task="retired-task", began=AT, lines=[]),
             "follower": gone(clock),
             "transcript": [
                 *current.transcript,
@@ -184,7 +186,7 @@ def starting(clock, **changes) -> Sitting:
         "subject": EDITOR,
         "began": AT,
         "moved": AT,
-        "turn": InboxTurn(task="retired-task", began=AT, log=None),
+        "turn": InboxTurn(task="retired-task", began=AT, lines=[]),
         "follower": gone(clock),
         "transcript": [InboxMessage(author=Author.operator, text="/dev:inbox", at=AT)],
     }
@@ -248,7 +250,7 @@ def test_a_turn_whose_follow_is_gone_is_taken_over_on_get_from_the_last_offset(
             clock,
             "close EX-7",
             offset=first,
-            turn=InboxTurn(task="retired-task", began=AT, log=LINES[0]),
+            turn=InboxTurn(task="retired-task", began=AT, lines=[LINES[0]]),
         )
         heard = listen(api, monkeypatch)
         state = inbox(api)
@@ -260,7 +262,11 @@ def test_a_turn_whose_follow_is_gone_is_taken_over_on_get_from_the_last_offset(
         after = inbox(api)
 
     assert task_id != "retired-task"
-    assert state["sitting"]["turn"] == {"task": task_id, "began": AT, "log": LINES[0]}
+    assert state["sitting"]["turn"] == {
+        "task": task_id,
+        "began": AT,
+        "lines": [LINES[0]],
+    }
     assert following is not None
     assert following.pod == api.runtime.inbox.pod
     streams = [c for c in kubecoder.calls if c.path.endswith("/response")]
@@ -341,7 +347,7 @@ def test_a_start_taken_over_after_its_pick_starts_the_environment_it_recorded(
                 turn=InboxTurn(
                     task="retired-task",
                     began=AT,
-                    log=f"Starting {ENV}, which was stopped",
+                    lines=[f"Starting {ENV}, which was stopped"],
                 ),
             ),
         )
@@ -413,7 +419,7 @@ def test_a_follow_whose_turn_another_pod_took_over_writes_nothing_more(
         heard = listen(api, monkeypatch)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         old = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         clock.tick(120)
         second(api, clock).sweep(tasks(api))
         taken = held(environ)
@@ -448,7 +454,7 @@ def test_a_pod_shut_down_mid_turn_leaves_it_at_once_to_the_other_pod(
         other, other_tasks = standby(api, clock)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         old = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         stopping = shut_down(api)
         stopping.join(5)
         prompt = not stopping.is_alive()
@@ -464,7 +470,7 @@ def test_a_pod_shut_down_mid_turn_leaves_it_at_once_to_the_other_pod(
     assert prompt
     # Left as it stood, held by no follow.
     assert left.follower is None
-    assert (left.status, left.turn.task, left.turn.log) == ("busy", old, LINES[0])
+    assert (left.status, left.turn.task, left.turn.lines) == ("busy", old, [LINES[0]])
     assert completed(heard, old) == [{"message": None}]
     assert progress(heard, old) == [LINES[0]]
     assert taken != old
@@ -591,7 +597,7 @@ def test_end_on_the_other_pod_racing_a_follows_write_leaves_the_sitting_ended(
         waited: list[bool] = []
 
         def raced(sitting):
-            if sitting is not None and sitting.turn.log == LINES[1] and not ending:
+            if sitting is not None and sitting.turn.lines == LINES[:2] and not ending:
                 ending.append(threading.Thread(target=other.end))
                 ending[0].start()
                 ending[0].join(0.2)
@@ -619,7 +625,7 @@ def test_a_follow_never_writes_into_the_sitting_a_start_on_the_other_pod_began(
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         old = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         other = second(api, clock)
         other.end()
         clock.tick(300)
@@ -742,7 +748,7 @@ def test_a_send_the_session_took_though_its_answer_was_lost_is_not_sent_again(
         monkeypatch.setattr(controller, "send", answer_lost)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         task_id = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         kubecoder.finish(ENV, "claude", ANSWER)
         result = finished(api, eventually, task_id)
 
@@ -783,7 +789,7 @@ def test_a_session_the_controller_no_longer_knows_is_the_sitting_lost(
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         task_id = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         kubecoder.forget_session(ENV, "claude")
         result = finished(api, eventually, task_id)
         state = inbox(api)
@@ -819,7 +825,7 @@ def test_an_environment_a_controller_run_stopped_is_the_sitting_lost_and_left_to
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         task_id = send(api, "go").json()["sitting"]["turn"]["task"]
         if when == "mid-turn":
-            eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+            eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
             kubecoder.stop_environment(ENV)
         result = finished(api, eventually, task_id)
         state = inbox(api)
@@ -836,35 +842,54 @@ def test_an_environment_a_controller_run_stopped_is_the_sitting_lost_and_left_to
 
 
 @pytest.mark.parametrize("found", ["running", "stopped"])
-def test_a_sitting_that_has_not_moved_for_the_idle_time_is_ended_as_end_ends_it(
+def test_a_sitting_that_has_not_moved_for_the_idle_time_is_closed_and_kept_ended(
     start, kubecoder, eventually, environ, clock, found
 ):
+    """R3 (FN-40): the expiry ends the session and stops an environment the API started, as End
+    does, and keeps the sitting, ended, its transcript read-only."""
     kubecoder.add_environment(ENV, found)
     with start() as api:
         opened(api, eventually, kubecoder)
         clock.tick(30 * 60 - 1)
         api.runtime.inbox.sweep(tasks(api))
-        kept = sitting_file(environ)
+        kept = held(environ)
         clock.tick(1)
         api.runtime.inbox.sweep(tasks(api))
         state = inbox(api)
+        refused = send(api, "and EX-3?")
 
-    assert kept is not None
-    assert state["sitting"] is None
-    assert sitting_file(environ) is None
+    assert (kept.status, kept.ended, kept.closed) == ("idle", None, False)
+    assert state["sitting"]["ended"] == {
+        "at": "2026-09-19T10:30:00Z",
+        "idle_minutes": 30,
+    }
+    assert (state["sitting"]["lost"], state["sitting"]["turn"]) == (None, None)
+    assert state["sitting"]["transcript"] == [
+        message("operator", "/dev:inbox"),
+        message("session", WRITE_UP),
+    ]
+    assert (held(environ).status, held(environ).closed) == ("ended", True)
+    assert refused.status_code == 409
+    assert refused.json()["type"] == "conflict"
     assert kubecoder.environments[ENV].sessions == {}
     # Stopped only when the API started it.
     assert kubecoder.environments[ENV].status == found
 
 
-def test_the_idle_time_is_configured(start, kubecoder, eventually, environ, clock):
+def test_the_idle_time_is_configured_and_the_ended_sitting_names_it(
+    start, kubecoder, eventually, environ, clock
+):
     kubecoder.add_environment(ENV)
     with start(FIELDNOTES_KUBECODER_INBOX_IDLE="5") as api:
         opened(api, eventually, kubecoder)
-        clock.tick(5 * 60)
+        clock.tick(5 * 60 - 1)
+        api.runtime.inbox.sweep(tasks(api))
+        kept = held(environ)
+        clock.tick(1)
         api.runtime.inbox.sweep(tasks(api))
 
-    assert sitting_file(environ) is None
+    assert kept.ended is None
+    assert held(environ).ended == InboxEnd(at=LATER, idle_minutes=5)
 
 
 def test_a_turn_in_flight_is_not_ended_however_long_it_runs(
@@ -884,29 +909,96 @@ def test_a_turn_in_flight_is_not_ended_however_long_it_runs(
         finished(api, eventually, task_id)
         clock.tick(30 * 60 - 1)
         api.runtime.inbox.sweep(tasks(api))
-        idle = sitting_file(environ)
+        idle = held(environ)
         clock.tick(1)
         api.runtime.inbox.sweep(tasks(api))
 
     assert kept.turn.task == task_id
+    assert kept.ended is None
     # Idle since the result, not since the send.
-    assert idle is not None
-    assert sitting_file(environ) is None
+    assert idle.ended is None
+    assert held(environ).status == "ended"
 
 
-def test_a_lost_sitting_is_ended_after_the_idle_time_too(
+def test_a_lost_sitting_is_closed_the_idle_time_after_its_loss_and_kept_lost(
     start, kubecoder, eventually, environ, clock
 ):
-    kubecoder.add_environment(ENV, "stopped", start_as="error")
+    """R3 (FN-40): the expiry no longer clears a lost sitting, but closes it, so an environment
+    the API started for it does not run on until the operator acts; its idle time counts from the
+    loss, not from the last send."""
+    kubecoder.add_environment(ENV, "stopped")
     with start() as api:
-        reply = api.post("/api/inbox/start", json={})
-        finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
-        lost = held(environ).lost
-        clock.tick(30 * 60)
+        quick(api.runtime.inbox)
+        opened(api, eventually, kubecoder)
+        kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
+        task_id = send(api, "go").json()["sitting"]["turn"]["task"]
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
+        clock.tick(20 * 60)
+        kubecoder.forget_session(ENV, "claude")
+        finished(api, eventually, task_id)
+        clock.tick(30 * 60 - 1)
         api.runtime.inbox.sweep(tasks(api))
+        waiting = held(environ)
+        running = kubecoder.environments[ENV].status
+        clock.tick(1)
+        api.runtime.inbox.sweep(tasks(api))
+        state = inbox(api)
 
-    assert lost is not None
-    assert sitting_file(environ) is None
+    assert waiting.moved == AT
+    assert (waiting.status, waiting.closed, running) == ("lost", False, "running")
+    assert state["sitting"]["lost"] == {
+        "at": "2026-09-19T10:20:00Z",
+        "reason": "no session with that name",
+    }
+    assert state["sitting"]["ended"] is None
+    assert [m["text"] for m in state["sitting"]["transcript"]] == [
+        "/dev:inbox",
+        WRITE_UP,
+        "go",
+    ]
+    assert (held(environ).status, held(environ).closed) == ("lost", True)
+    assert kubecoder.environments[ENV].status == "stopped"
+
+
+@pytest.mark.parametrize("then", ["sweep", "start", "end"])
+def test_a_sitting_the_expiry_closed_is_closed_once(
+    start, kubecoder, eventually, environ, clock, then
+):
+    """The environment the expiry stopped may since run for another caller, such as an actioner
+    run: a later sweep closes nothing, and Start and End clear the kept sitting and close
+    nothing."""
+    kubecoder.add_environment(ENV, "stopped")
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        clock.tick(30 * 60)
+        since = len(kubecoder.calls)
+        api.runtime.inbox.sweep(tasks(api))
+        closing = calls(kubecoder, since)
+        api.runtime.controller.start(ENV)  # another caller's
+        since = len(kubecoder.calls)
+        if then == "sweep":
+            clock.tick(60 * 60)
+            api.runtime.inbox.sweep(tasks(api))
+        elif then == "start":
+            opened(api, eventually, kubecoder)
+        else:
+            assert end(api).status_code == 204
+        after = calls(kubecoder, since)
+        state = inbox(api)
+
+    assert closing == ["DELETE claude", "GET sessions", "POST stop"]
+    assert not [c for c in after if c in ("DELETE claude", "POST stop")]
+    assert kubecoder.environments[ENV].status == "running"
+    if then == "sweep":
+        assert after == []
+        assert held(environ).status == "ended"
+    elif then == "start":
+        assert state["sitting"]["ended"] is None
+        assert state["sitting"]["started_environment"] is False
+        assert state["sitting"]["began"] == "2026-09-19T10:30:00Z"
+    else:
+        assert after == []
+        assert state["sitting"] is None
 
 
 def test_both_pods_sweeping_end_the_sitting_once(
@@ -926,7 +1018,7 @@ def test_both_pods_sweeping_end_the_sitting_once(
         for sweep in sweeps:
             sweep.join(5)
 
-    assert sitting_file(environ) is None
+    assert held(environ).status == "ended"
     assert calls(kubecoder, since) == ["DELETE claude"]
 
 
@@ -944,7 +1036,7 @@ def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires
         eventually(lambda: held(environ).turn is None, "the turn finished")
         answered = held(environ)
         clock.tick(30 * 60)
-        eventually(lambda: sitting_file(environ) is None, "the expiry")
+        eventually(lambda: held(environ).status == "ended", "the expiry")
 
     assert [m.text for m in answered.transcript][-2:] == ["close EX-7", ANSWER]
     assert answered.lost is None
@@ -962,7 +1054,7 @@ def test_a_stopped_pod_sweeps_no_more_and_leaves_its_turn_to_the_next(
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         task_id = send(api, "go").json()["sitting"]["turn"]["task"]
-        eventually(lambda: held(environ).turn.log == LINES[0], "the first line")
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
     result = finished(api, eventually, task_id)
     kubecoder.finish(ENV, "claude", ANSWER)
     clock.tick(30 * 60)

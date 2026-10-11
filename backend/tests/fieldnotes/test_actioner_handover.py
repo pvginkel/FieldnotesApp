@@ -14,7 +14,7 @@ invented."""
 
 import logging
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -99,6 +99,52 @@ def gone(clock) -> Follower:
 
 def warnings(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def beat(hold: Hold) -> datetime | None:
+    """The heartbeat of the follow holding the run's follow, as the hold's record has it."""
+    held = hold.read()
+    followed = held.follow if held is not None else None
+    follower = followed.follower if followed is not None else None
+    return follower.beat if follower is not None else None
+
+
+# -- a pod alive ---------------------------------------------------------------------------------
+
+
+def test_a_live_follow_beats_past_the_minute_and_the_other_pod_s_read_leaves_it_where_it_is(
+    start, remote, kubecoder, eventually, clock, other_pod, caplog
+):
+    """The app's pod follows the run with a quick heartbeat: once the clock has moved past the
+    one-minute takeover, its next beat brings the record's heartbeat to the clock's time, and the
+    other pod's read leaves the follow where it is. The app's pod reads on in the stream it
+    opened; no other is opened, and no takeover is logged."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.add_environment(ENV)
+    kubecoder.run_turns.append(FakeTurn(LINES[:1], held=True))
+    with start() as api, caplog.at_level(logging.INFO, "app.fieldnotes.actioner"):
+        other = other_pod(api, clock)
+        quick(api.runtime.actioner)
+        run_id = started(api, eventually)
+        eventually(lambda: lines(api) == LINES[:1], "the first line")
+        env, name = kubecoder.run_sessions[run_id]
+        clock.tick(61)
+        eventually(lambda: beat(other.hold) == clock.now, "a heartbeat past the minute")
+        read = other.state()
+        taken = other.following
+        kubecoder.emit(env, name, LINES[1])
+        eventually(lambda: lines(api) == LINES[:2], "the next line")
+        following = api.runtime.actioner.following
+        record = other.hold.read()
+
+    assert (read.state, read.run, read.lines) == ("running", run_id, LINES[:1])
+    assert taken is None
+    assert following == run_id
+    assert record is not None and record.follow is not None
+    assert record.follow.follower is not None
+    assert record.follow.follower.pod == api.runtime.actioner.pod
+    assert reads(kubecoder) == [(headless(env, name), "0")]
+    assert not any("taken over" in message for message in warnings(caplog))
 
 
 # -- a pod gone ----------------------------------------------------------------------------------

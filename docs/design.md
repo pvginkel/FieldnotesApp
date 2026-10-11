@@ -385,7 +385,9 @@ scope here.
     included) or a run is held, and a click on the pill then opens the actioner page, from either
     screen. The triage screen shows that page for as long as a start is pending or a run is held:
     of itself in place of "Nothing to rule on", and over items still to rule on once the pill has
-    opened it. The page is the inbox's working box (FR-28) over the run's log lines (FR-27), with its
+    opened it. The Triage tab and a click on a progress segment leave a page the pill opened for the
+    stack before the run ends, and the pill opens it again while the run lasts. The page is the
+    inbox's working box (FR-28) over the run's log lines (FR-27), with its
     waiting text while no line has come; a page that opens mid-run starts with the run's last four
     lines, and a new line reaches it within seconds of the API reading it. When the run ends, by
     success or failure, the screen shows what it would otherwise show: "Nothing to rule on", or the

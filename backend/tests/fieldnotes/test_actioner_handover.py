@@ -32,6 +32,7 @@ from tests.fieldnotes.test_actioner_follow import (
     after,
     headless,
     lines,
+    looks,
     reads,
     started,
     unfollowed,
@@ -244,6 +245,38 @@ def test_a_follow_taken_over_before_its_session_is_found_finds_it_past_the_note(
     ) in warnings(caplog)
 
 
+def test_a_follow_taken_over_after_its_session_was_found_reads_on_in_the_recorded_one(
+    start, kubecoder, eventually, environ, clock
+):
+    """The retired pod found the run's session, recorded it with the hold and kept its first
+    line; since the note, another headless session has started working, one a look would find
+    first. A read takes the follow over and reads the recorded session on from the record's
+    offset, looking for none, so no line of the other session is kept as the run's."""
+    kubecoder.add_environment(ENV)
+    kubecoder.add_session(ENV, "claude", headless=True, working=True)
+    kubecoder.add_session(ENV, "claude-2", headless=True, working=True)
+    kubecoder.emit(ENV, "claude", "[2s] [tool_use: Read] README.md")
+    for line in LINES[:2]:
+        kubecoder.emit(ENV, "claude-2", line)
+    hold = the_hold(environ)
+    hold.take(RUN, clock(), Followed(frozenset(), (ENV, "claude-2"), 0, gone(clock)))
+    assert hold.add_line(RUN, "retired-follow", LINES[0], int(after(LINES[0])))
+    with start() as api:
+        quick(api.runtime.actioner)
+        taken = state(api)
+        following = api.runtime.actioner.following
+        eventually(lambda: lines(api) == LINES[:2], "the run's next line")
+        record = hold.read()
+
+    assert (taken["state"], taken["run"]) == ("running", RUN)
+    assert following == RUN
+    assert record is not None and record.follow is not None
+    assert record.follow.session == (ENV, "claude-2")
+    assert record.follow.offset == int(after(*LINES[:2]))
+    assert reads(kubecoder) == [(headless(ENV, "claude-2"), after(LINES[0]))]
+    assert looks(kubecoder) == 0
+
+
 # -- a pod shutting down -------------------------------------------------------------------------
 
 
@@ -292,6 +325,43 @@ def test_a_pod_shut_down_mid_run_leaves_its_follow_at_once_to_the_other_pod(
         (headless(env, name), "0"),
         (headless(env, name), after(LINES[0])),
     ]
+
+
+def test_a_shutdown_announced_between_the_start_s_claim_and_its_hold_still_leaves_the_follow(
+    start, remote, kubecoder, eventually, clock, other_pod, monkeypatch
+):
+    """R2 (FN-39): the app's pod is drained after the start has claimed the run's follow and
+    before it holds the run, so the drain's leave finds no hold to write. The follow, released,
+    writes its leave once it ends: the run's follow is held by no follow, and the other pod takes
+    it over at its next read, the clock not moved, and reads the run's lines."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.add_environment(ENV)
+    kubecoder.run_turns.append(FakeTurn(LINES[:1], held=True))
+    with start() as api:
+        actioner = api.runtime.actioner
+        other = other_pod(api, clock)
+        claim = actioner._claim
+
+        def drained_after_the_claim(run_id: str, followed: Followed):
+            follow = claim(run_id, followed)
+            actioner.release()
+            return follow
+
+        monkeypatch.setattr(actioner, "_claim", drained_after_the_claim)
+        run_id = started(api, eventually)
+        eventually(
+            lambda: (held := other.hold.read()) is not None
+            and held.follow is not None
+            and held.follow.follower is None,
+            "the follow left",
+        )
+        taken = other.state()
+        following = other.following
+        eventually(lambda: other.state().lines == LINES[:1], "the run's first line")
+
+    assert (taken.state, taken.run) == ("running", run_id)
+    assert following == run_id
+    assert actioner.following is None
 
 
 def test_a_pod_shutting_down_takes_no_follow_over_and_says_nothing_of_it(

@@ -386,7 +386,9 @@ def test_a_start_mid_start_answers_the_sitting_in_flight(start, kubecoder, event
         again = begin(api)
         sent = send(api, "go")
         eventually(
-            lambda: "claude" in kubecoder.environments[ENV].sessions, "the session"
+            lambda: "claude" in kubecoder.environments[ENV].sessions
+            and kubecoder.session(ENV, "claude").status == "busy",
+            "the turn in flight at the session",
         )
         kubecoder.finish(ENV, "claude", WRITE_UP)
         finished(api, eventually, first.json()["sitting"]["turn"]["task"])

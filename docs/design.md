@@ -345,8 +345,10 @@ scope here.
     environment it starts, so its shutdown waits on no turn, and the other pod takes the turn over
     at its next read of the sitting or its next sweep (FR-31), without waiting for the follow to go
     stale. A pod that is shutting down takes no turn over, and quietly: its reads answer the sitting
-    as it stands, and its sweep logs no failure. A stream that drops is re-opened the same way; a
-    session or an environment the controller no longer knows is the sitting lost (FR-32).
+    as it stands, and its sweep logs no failure. A stream that drops is re-opened the same way, and
+    a call that fails otherwise, a 5xx or a controller out of reach, is tried again; a session or
+    an environment the controller no longer knows is the sitting lost (FR-32), and so is a call the
+    controller refuses outright.
 31. FR-31 End ends the session and, when the API started the environment, stops it; the file is
     cleared and the transcript with it. The app keeps no history of sittings past the one it holds:
     the tracker holds the rulings, as `Inbox <date>:` comments on the cards, and the skill's closing
@@ -361,8 +363,11 @@ scope here.
     its notification included; the session then waits idle for End or the expiry.
 32. FR-32 A sitting is lost when the controller no longer knows its session, because the worker
     restarted or the environment stopped or is gone, or when a call for it fails for want of the
-    environment. The transcript is kept and shown with a line saying so, Send is withdrawn, and the
-    sitting stays until the operator's Start or End: Start begins a new sitting, clearing the lost
+    environment. It is lost too when the controller refuses a call for it outright, as it would
+    every retry: a `400` or `422`, or a `401` or `403` for the API's token revoked or rotated; the
+    reason is "the controller refused the call", with the refusal's title. The transcript is kept
+    and shown with a line saying so and why, Send is withdrawn, and the sitting stays until the
+    operator's Start or End: Start begins a new sitting, clearing the lost
     one as End does. The expiry keeps it too: once the idle time (FR-31) has passed since the loss,
     not since the last send, the API stops an environment it started, as for an idle sitting, and
     keeps the sitting lost. Closing a lost sitting, by Start, End or the expiry, ends no session:

@@ -23,8 +23,8 @@ is announced, held by no follow: each follow stops where it stands, an environme
 included. A turn held by no follow, or whose heartbeat has stopped, is taken over by whichever pod
 notices first, on a read of the sitting or on the timer each pod runs, and goes on from where the
 file stands: a message the session has not taken is sent, once. A pod shutting down takes no turn
-over. A controller failure that is a loss loses the sitting (FR-32); any other is tried again for
-as long as the follow holds the turn. The same timer closes a sitting that has not moved for the
+over. A controller failure that is a loss, or a call the controller refuses outright, loses the
+sitting (FR-32); any other is tried again for as long as the follow holds the turn. The same timer closes a sitting that has not moved for the
 idle time and keeps it, ended (FR-31), and closes a lost one once the idle time has passed since
 its loss, kept lost (FR-32). A sitting it closed is closed once: Start and End clear it and close
 nothing. Closing a lost sitting ends no session: its own is gone, and its name may be another's.
@@ -670,7 +670,8 @@ class Inbox:
     def run(self, follow: _Follow, progress: ProgressHandle) -> InboxMessage | None:
         """Take the sitting's turn in flight to its result while `follow` holds it, from where the
         file stands, its heartbeat refreshed meanwhile; the session's message it came to. A
-        controller failure that is a loss loses the sitting; any other is tried again."""
+        controller failure that is a loss loses the sitting, and so does a call the controller
+        refuses outright, its refusal the reason; any other is tried again."""
         with self._lock:
             stopped = self._stopped.is_set()
             if not stopped:
@@ -699,6 +700,11 @@ class Inbox:
                         return None
                     if exc.lost:
                         self._lose(follow, exc.reason)
+                        return None
+                    if exc.refused:
+                        self._lose(
+                            follow, f"the controller refused the call: {exc.reason}"
+                        )
                         return None
                     logger.warning(
                         "inbox sitting %s: %s; trying again in %g s",

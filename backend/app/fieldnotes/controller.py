@@ -66,6 +66,12 @@ class ControllerError(RuntimeError):
         return self.problem in ("not-found", "conflict")
 
     @property
+    def refused(self) -> bool:
+        """The controller refuses the call outright, as it would every retry of it: a request it
+        rejects (`400`, `422`) or the API's token it does not take (`401`, `403`)."""
+        return self.status in (400, 401, 403, 422)
+
+    @property
     def busy(self) -> bool:
         """A turn is in flight already: a send is refused, never queued."""
         return self.problem == "session-busy"

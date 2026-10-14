@@ -3,7 +3,7 @@ follow, named with its pod and a heartbeat in the sitting's file, and taken over
 last offset by whichever pod notices its heartbeat stopped, on a read of the sitting or on the timer;
 the result lands once and the first turn is sent once; every write is checked against the sitting
 and the follow, across both pods; a failure that is not a loss is tried again, a loss loses the
-sitting; a pod whose shutdown is announced leaves its turn at once, which the other pod takes over
+sitting, and so does a call the controller refuses outright (FN-37); a pod whose shutdown is announced leaves its turn at once, which the other pod takes over
 at its next read, and takes none over itself (FR-30); and the timer closes a sitting idle for the
 idle time and keeps it ended (FR-31), and a lost one the idle time after its loss, kept lost
 (FR-32), each closed once.
@@ -778,6 +778,59 @@ def test_a_turn_tried_again_keeps_its_heartbeat_and_its_follow(
     assert kept == task_id
     assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
     assert result["message"]["text"] == ANSWER
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 422])
+def test_a_call_the_controller_refuses_outright_is_the_sitting_lost_not_tried_again(
+    start, kubecoder, eventually, status
+):
+    """FN-37: a refusal every retry would meet again ends the turn with its reason shown."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        quick(api.runtime.inbox)
+        opened(api, eventually, kubecoder)
+        since = len(kubecoder.calls)
+        kubecoder.turns.append(FakeTurn(LINES[:1], ANSWER))
+        kubecoder.faults = [status]
+        result = finished(
+            api, eventually, send(api, "go").json()["sitting"]["turn"]["task"]
+        )
+        state = inbox(api)
+
+    assert calls(kubecoder, since) == ["POST messages"]
+    assert result == {"message": None}
+    assert state["sitting"]["lost"] == {
+        "at": AT,
+        "reason": "the controller refused the call: the controller failed",
+    }
+    assert state["sitting"]["turn"] is None
+    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox"]
+
+
+def test_a_token_the_controller_no_longer_takes_is_the_sitting_lost_with_its_reason(
+    start, kubecoder, eventually
+):
+    """FN-37: the API's client token rotated mid-sitting is refused, `401`, on the turn's first
+    call, which loses the sitting instead of keeping the turn in flight."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        quick(api.runtime.inbox)
+        opened(api, eventually, kubecoder)
+        since = len(kubecoder.calls)
+        kubecoder.turns.append(FakeTurn(LINES[:1], ANSWER))
+        kubecoder.token = "rotated"
+        result = finished(
+            api, eventually, send(api, "go").json()["sitting"]["turn"]["task"]
+        )
+        state = inbox(api)
+
+    assert kubecoder.calls[since:] == []
+    assert result == {"message": None}
+    assert state["sitting"]["lost"] == {
+        "at": AT,
+        "reason": "the controller refused the call: no valid bearer token",
+    }
+    assert state["sitting"]["turn"] is None
 
 
 def test_a_session_the_controller_no_longer_knows_is_the_sitting_lost(

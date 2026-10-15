@@ -117,15 +117,15 @@ def test_a_sitting_plays_the_turns_laid_out(backend, eventually):
     )
     assert play(backend, "finish", result=WRITE_UP).status_code == 204
     eventually(lambda: sitting(backend)["turn"] is None, "the first turn's result")
-    assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
+    assert sitting(backend)["transcript"][-1]["messages"] == [WRITE_UP]
     assert send(backend, "Close it.").status_code == 202
     eventually(lambda: sitting(backend)["turn"] is None, "the paced turn's result")
 
-    assert [m["text"] for m in sitting(backend)["transcript"]] == [
-        "/dev:inbox EX",
-        WRITE_UP,
-        "Close it.",
-        ANSWER,
+    assert [m["messages"] for m in sitting(backend)["transcript"]] == [
+        ["/dev:inbox EX"],
+        [WRITE_UP],
+        ["Close it."],
+        [ANSWER],
     ]
     assert controller(backend)["environments"] == [
         {
@@ -142,6 +142,27 @@ def test_a_sitting_plays_the_turns_laid_out(backend, eventually):
             ],
         }
     ]
+
+
+def test_a_turn_laid_out_plays_its_messages_among_its_lines(backend, eventually):
+    """A message is laid out, or emitted, as a line of the log: the stream frames it as the
+    session's message of the turn in flight."""
+    lay_out(
+        backend,
+        environments=[{"env_id": ENV}],
+        turns=[{"lines": [{"text": "Let me look."}, LINES[0]], "held": True}],
+    )
+
+    assert begin(backend).status_code == 202
+    eventually(
+        lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
+    )
+    emitted = play(backend, "emit", line={"text": WRITE_UP, "final": True})
+    assert play(backend, "finish", result=WRITE_UP).status_code == 204
+    eventually(lambda: sitting(backend)["turn"] is None, "the turn's result")
+
+    assert emitted.status_code == 204
+    assert sitting(backend)["transcript"][-1]["messages"] == ["Let me look.", WRITE_UP]
 
 
 def test_a_stopped_environment_is_started_as_laid_out(backend, eventually):
@@ -171,7 +192,7 @@ def test_a_sitting_lost_at_the_controller_is_lost(backend, eventually, what):
     assert play(backend, "lose", what=what).status_code == 204
 
     eventually(lambda: sitting(backend)["lost"] is not None, "the loss")
-    assert sitting(backend)["transcript"][0]["text"] == "/dev:inbox"
+    assert sitting(backend)["transcript"][0]["messages"] == ["/dev:inbox"]
 
 
 def test_a_sitting_is_brought_to_its_idle_end_now(backend, eventually):
@@ -185,7 +206,7 @@ def test_a_sitting_is_brought_to_its_idle_end_now(backend, eventually):
     ended = sitting(backend)
     assert ended["ended"]["idle_minutes"] == 30
     assert ended["lost"] is None
-    assert ended["transcript"][0]["text"] == "/dev:inbox"
+    assert ended["transcript"][0]["messages"] == ["/dev:inbox"]
     assert controller(backend)["environments"] == [
         {"env_id": ENV, "status": "stopped", "sessions": []}
     ]
@@ -511,7 +532,7 @@ def test_emit_and_finish_straight_after_a_start_wait_for_its_turn(backend, event
 
     assert (emitted.status_code, finished.status_code) == (204, 204)
     eventually(lambda: sitting(backend)["turn"] is None, "the turn's result")
-    assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
+    assert sitting(backend)["transcript"][-1]["messages"] == [WRITE_UP]
 
 
 def test_after_the_turns_result_the_session_cannot_be_played(
@@ -532,7 +553,7 @@ def test_after_the_turns_result_the_session_cannot_be_played(
         reply = play(backend, verb, **body)
         assert reply.status_code == 409, verb
         assert reply.json()["type"] == "conflict"
-    assert sitting(backend)["transcript"][-1]["text"] == WRITE_UP
+    assert sitting(backend)["transcript"][-1]["messages"] == [WRITE_UP]
 
 
 @pytest.mark.parametrize(
@@ -543,6 +564,8 @@ def test_after_the_turns_result_the_session_cannot_be_played(
         {"environments": [{"env_id": ENV, "working": [""]}]},
         {"environments": [{"env_id": ENV, "status": "stopped", "working": ["audit"]}]},
         {"turns": [{"pace": -1}]},
+        {"turns": [{"lines": [{"final": True}]}]},
+        {"turns": [{"lines": [{"text": "Let me look.", "dimmed": True}]}]},
         {"run_turns": [{"held": "later"}]},
         {"runs": []},
         {"runs": [99]},

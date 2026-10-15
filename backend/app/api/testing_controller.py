@@ -6,10 +6,10 @@ bar's pills starts by laying it out. `PUT` replaces the controller with one hold
 environments, the headless sessions working in them, the sitting's turns and the actioner runs'
 turns given, the inbox configured or not, and the answers to the actioner's prompt runs; the
 sitting the last one held is ended as End ends it, and the actioner starts afresh. A test then
-plays what the controller does while the screen is open: the log lines and the result of the
-sitting's turn in flight (`emit`, `finish`) and of the actioner run's (`run-emit`, `run-finish`),
-the sitting lost under the API (`lose`), the actioner's run ending as the controller's webhook
-reports it (`run-end`). The suite has no clock to move, so the API's own expiry is played too: the
+plays what the controller does while the screen is open: the log lines, the messages and the
+result of the sitting's turn in flight (`emit`, `finish`) and of the actioner run's (`run-emit`,
+`run-finish`), the sitting lost under the API (`lose`), the actioner's run ending as the
+controller's webhook reports it (`run-end`). The suite has no clock to move, so the API's own expiry is played too: the
 sitting brought to its idle end now (`expire`). `GET` answers what the controller holds, for a
 test to read what the API did there.
 
@@ -29,7 +29,7 @@ from app.api.testing_guard import reject_if_not_testing
 from app.fieldnotes.actioner import RunReport
 from app.fieldnotes.errors import ProblemException, problem_response, validation_problem
 from app.fieldnotes.runtime import Runtime
-from app.fieldnotes.testing import FakeController, FakeTurn
+from app.fieldnotes.testing import FakeController, FakeMessage, FakeTurn
 from app.services.container import ServiceContainer
 from app.services.fieldnotes_service import FieldnotesService
 from app.services.task_service import TaskService
@@ -69,12 +69,21 @@ class EnvironmentLayout(_Body):
         return self
 
 
+class MessageLayout(_Body):
+    """A main-thread message of a turn, whole; `final` when its text is part of the turn's result,
+    which joins the final messages' texts with blank lines and is the layout's to match."""
+
+    text: str
+    final: bool = False
+
+
 class TurnLayout(_Body):
     """A turn of a session, the sitting's next send or the next run's prompt: its condensed log
-    lines, then its result, each `pace` seconds after the one before; a `held` turn stays in flight
-    after its lines until `finish` (`run-finish` for a run's)."""
+    lines and its messages, in the order the log holds them, then its result, each `pace` seconds
+    after the one before; a `held` turn stays in flight after its lines until `finish`
+    (`run-finish` for a run's)."""
 
-    lines: list[str] = []
+    lines: list[str | MessageLayout] = []
     pace: float = Field(default=0.0, ge=0, le=60)
     result: str = "done"
     is_error: bool = False
@@ -100,7 +109,9 @@ class ControllerLayout(_Body):
 
 
 class LogLineBody(_Body):
-    line: str
+    """A condensed log line, or a message."""
+
+    line: str | MessageLayout
 
 
 class ResultBody(_Body):
@@ -150,8 +161,18 @@ def _served(service: FieldnotesService) -> tuple[Runtime, FakeController]:
     return service.runtime, service.kubecoder
 
 
+def _line(line: str | MessageLayout) -> str | FakeMessage:
+    return line if isinstance(line, str) else FakeMessage(line.text, line.final)
+
+
 def _turn(turn: TurnLayout) -> FakeTurn:
-    return FakeTurn(turn.lines, turn.result, turn.is_error, turn.held, turn.pace)
+    return FakeTurn(
+        [_line(line) for line in turn.lines],
+        turn.result,
+        turn.is_error,
+        turn.held,
+        turn.pace,
+    )
 
 
 def _in_flight(
@@ -252,10 +273,10 @@ def lay_out_controller(
 def emit(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
 ) -> Any:
-    """`{"line"}`: a log line of the sitting's turn in flight."""
+    """`{"line"}`: a log line or a message of the sitting's turn in flight."""
     body = _body(LogLineBody)
     runtime, fake = _served(service)
-    fake.emit(*_sitting_session(runtime, fake), body.line)
+    fake.emit(*_sitting_session(runtime, fake), _line(body.line))
     return "", 204
 
 
@@ -276,10 +297,11 @@ def finish(
 def run_emit(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
 ) -> Any:
-    """`{"line"}`: a log line of the turn in flight of the last run the controller accepted."""
+    """`{"line"}`: a log line or a message of the turn in flight of the last run the controller
+    accepted."""
     body = _body(LogLineBody)
     _, fake = _served(service)
-    fake.emit(*_run_session(fake), body.line)
+    fake.emit(*_run_session(fake), _line(body.line))
     return "", 204
 
 

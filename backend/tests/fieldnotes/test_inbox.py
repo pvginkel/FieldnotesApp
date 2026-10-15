@@ -1,17 +1,20 @@
 """The inbox sitting from Start to End (FR-28 to FR-31; design, "The inbox sitting"): Start takes a
 running environment of the project, else starts a stopped one, creates the headless session and
 follows the prompt's turn; a turn sends the operator's message and follows it to its result over
-the task channel; End ends the session, stops an environment the API started unless another
+the task channel, the session's reply every message the turn's stream reported, the result's text
+after them only where they do not say it; End ends the session, stops an environment the API started unless another
 session works in it, and clears the sitting. All behind the operator's `editor` gate (NFR-4).
 Against the fake controller; every environment, line and message is invented."""
 
+import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from app.fieldnotes.inbox import DEFAULT_TRACKER, Sitting
+from app.fieldnotes.inbox import DEFAULT_TRACKER, PendingMessage, Sitting
 from app.fieldnotes.runtime import INBOX_SITTING
-from app.fieldnotes.testing import FakeTurn
+from app.fieldnotes.testing import FakeMessage, FakeTurn
 from app.schemas.task_schema import TaskStatus
 from tests.fieldnotes.test_triage import openapi_document
 
@@ -29,6 +32,12 @@ WRITE_UP = (
     " button     (Q1)\n```\n\n**Q1 (EX-9).** Slice it now? I'd say yes."
 )
 ANSWER = "EX-7 is closed and EX-9 sliced, each with a dated comment."
+NARRATION = "Let me pull the cards first."
+DISPATCHED = "Four lookups dispatched; I'll wait for them."
+# The CLI's own error result, and the worker's for a session that exits without one
+# (KubeCoder `worker/internal/headless/engine.go`).
+OVERLOADED = "API Error: the model is overloaded; try again later."
+UNENDED = "session ended before a terminal result"
 UNSET = {
     "FIELDNOTES_KUBECODER_URL": "",
     "FIELDNOTES_KUBECODER_TOKEN": "",
@@ -116,8 +125,9 @@ def sitting_file(environ) -> Sitting | None:
     return Sitting.model_validate_json(path.read_bytes()) if path.exists() else None
 
 
-def message(author, text, at=AT):
-    return {"author": author, "text": text, "at": at}
+def entry(author, *messages, at=AT):
+    """A transcript entry as `/api/inbox` answers it."""
+    return {"author": author, "messages": list(messages), "at": at}
 
 
 def opened(api, eventually, kubecoder, scope=None, connection=None):
@@ -199,7 +209,7 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
             "turn": {"task": task_id, "began": AT, "lines": []},
             "lost": None,
             "ended": None,
-            "transcript": [message("operator", "/dev:inbox EX")],
+            "transcript": [entry("operator", "/dev:inbox EX")],
         },
     }
     assert state["sitting"] == {
@@ -211,8 +221,8 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
         "lost": None,
         "ended": None,
         "transcript": [
-            message("operator", "/dev:inbox EX"),
-            message("session", WRITE_UP),
+            entry("operator", "/dev:inbox EX"),
+            entry("session", WRITE_UP),
         ],
     }
     session = kubecoder.session(ENV, "claude")
@@ -226,7 +236,7 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
         "Creating the session",
         *LINES,
     ]
-    assert result == {"message": message("session", WRITE_UP)}
+    assert result == {"reply": entry("session", WRITE_UP)}
     assert [e["event_type"] for e in heard if e["task_id"] == task_id][-1] == (
         "task_completed"
     )
@@ -315,13 +325,13 @@ def test_a_project_with_no_environment_to_take_is_the_sitting_lost(
         state = inbox(api)
         sent = send(api, "go")
 
-    assert result == {"message": None}
+    assert result == {"reply": None}
     assert state["sitting"]["lost"] == {
         "at": AT,
         "reason": "no environment of pvginkel/Fieldnotes is running or stopped",
     }
     assert state["sitting"]["turn"] is None
-    assert state["sitting"]["transcript"] == [message("operator", "/dev:inbox")]
+    assert state["sitting"]["transcript"] == [entry("operator", "/dev:inbox")]
     assert sent.status_code == 409
     assert sent.json()["type"] == "conflict"
 
@@ -425,22 +435,22 @@ def test_a_turn_sends_the_message_and_appends_the_sessions_answer(
     sitting = reply.json()["sitting"]
     assert sitting["turn"] == {"task": task_id, "began": LATER, "lines": []}
     assert sitting["moved"] == LATER
-    assert sitting["transcript"][-1] == message(
-        "operator", "close EX-7, slice EX-9", LATER
+    assert sitting["transcript"][-1] == entry(
+        "operator", "close EX-7, slice EX-9", at=LATER
     )
     assert state["sitting"]["turn"] is None
     assert state["sitting"]["moved"] == LATER
     assert state["sitting"]["transcript"] == [
-        message("operator", "/dev:inbox"),
-        message("session", WRITE_UP),
-        message("operator", "close EX-7, slice EX-9", LATER),
-        message("session", ANSWER, LATER),
+        entry("operator", "/dev:inbox"),
+        entry("session", WRITE_UP),
+        entry("operator", "close EX-7, slice EX-9", at=LATER),
+        entry("session", ANSWER, at=LATER),
     ]
     assert kubecoder.session(ENV, "claude").messages[-1] == "close EX-7, slice EX-9"
     streams = [c for c in kubecoder.calls if c.path.endswith("/response")]
     assert [c.params["offset"] for c in streams] == ["0", str(offset)]
     assert progress(heard, task_id) == ["[3s] [tool_use: update] EX-7"]
-    assert result == {"message": message("session", ANSWER, LATER)}
+    assert result == {"reply": entry("session", ANSWER, at=LATER)}
 
 
 def test_a_turn_in_flight_shows_its_lines_and_refuses_a_send(
@@ -470,11 +480,11 @@ def test_a_turn_in_flight_shows_its_lines_and_refuses_a_send(
     assert busy.status_code == 409
     assert busy.json()["type"] == "session-busy"
     assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
-    assert [m["text"] for m in state["sitting"]["transcript"]] == [
-        "/dev:inbox",
-        WRITE_UP,
-        "go",
-        ANSWER,
+    assert [m["messages"] for m in state["sitting"]["transcript"]] == [
+        ["/dev:inbox"],
+        [WRITE_UP],
+        ["go"],
+        [ANSWER],
     ]
 
 
@@ -507,6 +517,172 @@ def test_a_turn_in_flight_keeps_its_last_four_lines_a_starts_steps_included(
     assert scrolled == [steps[2], *LINES]
     assert progress(heard, task_id) == [*steps, *LINES]
     assert state["sitting"]["turn"] is None
+
+
+# -- the reply -----------------------------------------------------------------------------------
+
+
+def test_the_reply_is_every_message_of_the_turn_in_stream_order_the_result_not_again(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """R1: the session's reply is every message the turn's stream reported, final or not, the
+    narration before a tool call included, each its own; the result, the final messages joined
+    with blank lines, is not shown again. A message is no progress: the log carries its cut
+    `[text]` line."""
+    kubecoder.add_environment(ENV)
+    kubecoder.turns.append(
+        FakeTurn(
+            [
+                FakeMessage(NARRATION),
+                LINES[0],
+                FakeMessage(DISPATCHED, final=True),
+                LINES[1],
+                FakeMessage(WRITE_UP, final=True),
+                LINES[2],
+            ],
+            f"{DISPATCHED}\n\n{WRITE_UP}",
+        )
+    )
+    with start() as api:
+        heard = listen(api, monkeypatch)
+        task_id = begin(api).json()["sitting"]["turn"]["task"]
+        result = finished(api, eventually, task_id)
+        state = inbox(api)
+
+    reply = entry("session", NARRATION, DISPATCHED, WRITE_UP)
+    assert state["sitting"]["transcript"] == [entry("operator", "/dev:inbox"), reply]
+    assert result == {"reply": reply}
+    assert progress(heard, task_id)[-3:] == LINES
+    assert len(progress(heard, task_id)) == 6
+    held = sitting_file(environ)
+    assert held is not None
+    assert held.offset == kubecoder.session(ENV, "claude").log[-1][1]
+
+
+@pytest.mark.parametrize(
+    ("lines", "result", "is_error", "reply"),
+    [
+        ([LINES[0]], ANSWER, False, [ANSWER]),
+        (
+            [FakeMessage(NARRATION), LINES[0], FakeMessage(OVERLOADED, final=True)],
+            OVERLOADED,
+            True,
+            [NARRATION, OVERLOADED],
+        ),
+        (
+            [FakeMessage(NARRATION), LINES[0]],
+            UNENDED,
+            True,
+            [NARRATION, UNENDED],
+        ),
+        ([FakeMessage(NARRATION), LINES[0]], "", False, [NARRATION]),
+        ([LINES[0]], "", False, [""]),
+    ],
+    ids=["no-message", "cli-error", "worker-error", "no-result", "neither"],
+)
+def test_the_results_text_follows_the_messages_only_where_they_do_not_say_it(
+    start, kubecoder, eventually, lines, result, is_error, reply
+):
+    """A turn whose stream carries no message is its result's text, as before. The CLI's error
+    is a final message of its own, its text the error result's, shown once; the worker's own,
+    a session ended before a terminal result, no message carries, so it follows the messages.
+    An empty result adds nothing; a turn with neither is one empty message."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        kubecoder.turns.append(FakeTurn(lines, result, is_error))
+        task_id = send(api, "close EX-7").json()["sitting"]["turn"]["task"]
+        done = finished(api, eventually, task_id)
+        state = inbox(api)
+
+    assert state["sitting"]["transcript"][-1] == entry("session", *reply)
+    assert done == {"reply": entry("session", *reply)}
+
+
+def test_a_turn_in_flight_shows_no_message_and_keeps_them_on_file(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """Refinement D1: the reply lands whole at the turn's end. Until then the turn in flight on
+    `/api/inbox` carries no message, a message adds no line to it nor to the task's progress,
+    and the sitting's file keeps the messages read so far with the offset past them."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        heard = listen(api, monkeypatch)
+        kubecoder.turns.append(FakeTurn([LINES[0], FakeMessage(NARRATION)], held=True))
+        task_id = send(api, "go").json()["sitting"]["turn"]["task"]
+        eventually(
+            lambda: sitting_file(environ).turn.messages != [], "the message kept"
+        )
+        read = kubecoder.session(ENV, "claude").log[-1][1]
+        mid = inbox(api)
+        kept = sitting_file(environ)
+        kubecoder.emit(ENV, "claude", FakeMessage(ANSWER, final=True))
+        kubecoder.finish(ENV, "claude", ANSWER)
+        finished(api, eventually, task_id)
+        state = inbox(api)
+
+    assert mid["sitting"]["turn"] == {"task": task_id, "began": AT, "lines": [LINES[0]]}
+    assert mid["sitting"]["transcript"][-1] == entry("operator", "go")
+    assert kept is not None and kept.turn is not None
+    assert kept.turn.messages == [PendingMessage(text=NARRATION, final=False)]
+    assert kept.offset == read
+    assert progress(heard, task_id) == [LINES[0]]
+    assert state["sitting"]["transcript"][-1] == entry("session", NARRATION, ANSWER)
+
+
+def written_before(environ) -> None:
+    """The sitting's file rewritten in the layout before 2026-10-15: each entry's one text as
+    `text`."""
+    path = Path(environ["FIELDNOTES_CACHE_DIR"]) / INBOX_SITTING
+    raw = json.loads(path.read_text())
+    raw["transcript"] = [
+        {"author": e["author"], "text": e["messages"][0], "at": e["at"]}
+        for e in raw["transcript"]
+    ]
+    path.write_text(json.dumps(raw))
+
+
+def test_a_live_sitting_written_before_replies_held_messages_loads_and_goes_on(
+    start, kubecoder, eventually, environ
+):
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        written_before(environ)
+        loaded = inbox(api)
+        kubecoder.turns.append(FakeTurn([FakeMessage(NARRATION), LINES[0]], ANSWER))
+        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
+        state = inbox(api)
+
+    assert loaded["sitting"]["transcript"] == [
+        entry("operator", "/dev:inbox"),
+        entry("session", WRITE_UP),
+    ]
+    assert state["sitting"]["transcript"] == [
+        entry("operator", "/dev:inbox"),
+        entry("session", WRITE_UP),
+        entry("operator", "go"),
+        entry("session", NARRATION, ANSWER),
+    ]
+    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
+
+
+def test_a_kept_sitting_written_before_replies_held_messages_loads(
+    start, kubecoder, eventually, environ
+):
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        assert api.runtime.inbox.expire(timedelta(0))
+        written_before(environ)
+        state = inbox(api)
+
+    assert state["sitting"]["ended"] is not None
+    assert state["sitting"]["transcript"] == [
+        entry("operator", "/dev:inbox"),
+        entry("session", WRITE_UP),
+    ]
 
 
 def test_a_send_without_a_sitting_is_a_conflict(start, kubecoder):
@@ -617,7 +793,7 @@ def test_end_mid_turn_clears_the_sitting_and_its_turn_writes_nothing_more(
         state = inbox(api)
 
     assert ended.status_code == 204
-    assert result == {"message": None}
+    assert result == {"reply": None}
     assert state["sitting"] is None
     assert sitting_file(environ) is None
     assert kubecoder.environments[ENV].sessions == {}
@@ -640,7 +816,7 @@ def test_end_mid_start_has_the_start_end_the_session_it_made(
         result = finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
         state = inbox(api)
 
-    assert result == {"message": None}
+    assert result == {"reply": None}
     assert state["sitting"] is None
     assert sitting_file(environ) is None
     assert kubecoder.environments[ENV].sessions == {}
@@ -667,7 +843,7 @@ def test_end_mid_start_stops_the_environment_the_start_started(
         reply = begin(api)
         result = finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
 
-    assert result == {"message": None}
+    assert result == {"reply": None}
     assert kubecoder.environments[ENV].status == "stopped"
     assert kubecoder.environments[ENV].sessions == {}
 
@@ -781,10 +957,10 @@ def test_a_tasks_events_reach_only_the_connections_of_the_editor_who_began_it(
 
     assert heard["anonymous"] == heard["other"] == []
     assert [
-        e["data"]["message"]["text"]
+        e["data"]["reply"]["messages"]
         for e in heard["editor"]
         if e["event_type"] == "task_completed"
-    ] == [WRITE_UP, ANSWER]
+    ] == [[WRITE_UP], [ANSWER]]
     held = sitting_file(environ)
     assert held is not None
     assert held.subject == "inbox-editor"
@@ -836,10 +1012,10 @@ def test_a_page_whose_connection_is_bound_to_no_one_hears_the_tasks_it_begins(
         assert bound(api, "anonymous") is None
     assert heard["anonymous"] == []
     assert [
-        e["data"]["message"]["text"]
+        e["data"]["reply"]["messages"]
         for e in heard["editor"]
         if e["event_type"] == "task_completed"
-    ] == [WRITE_UP, ANSWER]
+    ] == [[WRITE_UP], [ANSWER]]
     assert progress(heard["editor"], task_id) == ["[3s] [tool_use: update] EX-7"]
 
 
@@ -862,10 +1038,10 @@ def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
 
         assert bound(api, "reopened") == "inbox-editor"
     assert [
-        e["data"]["message"]["text"]
+        e["data"]["reply"]["messages"]
         for e in heard["reopened"]
         if e["event_type"] == "task_completed"
-    ] == [ANSWER]
+    ] == [[ANSWER]]
     assert progress(heard["reopened"], task_id) == ["[3s] [tool_use: update] EX-7"]
 
 

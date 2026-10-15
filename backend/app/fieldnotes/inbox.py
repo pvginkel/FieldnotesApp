@@ -10,9 +10,10 @@ a task that takes a running environment of the project, else starts a stopped on
 it did, creates the headless session there, sends the prompt and follows that turn. A turn writes
 the operator's message and runs a task that sends it and follows it. Following reads the session's
 response stream: each condensed log line is the task's progress, one of the turn's last four lines
-and the sitting's offset, and the result is the session's message in the transcript. End clears the
-file, then closes the sitting: it ends the session and stops an environment the API started unless
-another session is working in it.
+and the sitting's offset; each message of the turn is kept with the turn in flight, the offset past
+it; and at the result the turn's messages are the session's reply in the transcript, the result's
+text after them where they do not already say it. End clears the file, then closes the sitting: it
+ends the session and stops an environment the API started unless another session is working in it.
 
 The turn in flight, a Start's included, is held by one follow: the file names it, the pod it runs
 in and its heartbeat, which it refreshes while it follows. Every write a follow makes is checked,
@@ -46,13 +47,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.exceptions import InvalidOperationException
 from app.fieldnotes.controller import (
     ControllerError,
     HttpController,
     LogLine,
+    TurnMessage,
     TurnResult,
 )
 from app.fieldnotes.errors import ProblemException
@@ -68,8 +70,7 @@ logger = logging.getLogger(__name__)
 
 # The skill's own command; the operator's scope is appended to it.
 DEFAULT_PROMPT = "/dev:inbox"
-# `/work`-relative: the store's checkout in its environment. Its CLAUDE.md tells the session that
-# the operator reads only a turn's last message.
+# `/work`-relative: the store's inbox directory in its environment.
 DEFAULT_CWD = "Fieldnotes/inbox"
 DEFAULT_IDLE = timedelta(minutes=30)
 # The turn in flight keeps this many of its last log lines, for a page that joins it mid-turn.
@@ -106,13 +107,26 @@ class Author(StrEnum):
     session = "session"
 
 
-class InboxMessage(_Model):
-    """A message of the sitting: one the API sent, the first being the inbox prompt with the
-    operator's scope, or one the session answered."""
+class InboxEntry(_Model):
+    """An entry of the sitting's transcript: what the API sent the session as a turn, the first
+    being the inbox prompt with the operator's scope, its one message; or the session's reply to a
+    turn, its messages in stream order. `at` is when the API sent it, or when the reply was
+    written at the turn's result."""
 
     author: Author
-    text: str
+    messages: list[str] = Field(min_length=1)
     at: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_text(cls, data: Any) -> Any:
+        # A sitting file of the layout before 2026-10-15 holds each entry's one text as `text`.
+        if isinstance(data, dict) and "text" in data:
+            return {
+                **{key: value for key, value in data.items() if key != "text"},
+                "messages": [data["text"]],
+            }
+        return data
 
 
 class InboxTurn(_Model):
@@ -123,6 +137,22 @@ class InboxTurn(_Model):
     task: str
     began: str
     lines: list[str]
+
+
+class PendingMessage(_Model):
+    """A message of the turn in flight, whole, as the response stream reported it; `final` when
+    its text is part of the turn's result."""
+
+    text: str
+    final: bool
+
+
+class TurnInFlight(InboxTurn):
+    """The turn in flight as the sitting's file holds it, with the messages of the turn read so
+    far, in stream order: on file for a follow that takes the turn over, and not on `/api/inbox`,
+    where they land whole as the turn's reply."""
+
+    messages: list[PendingMessage] = []
 
 
 class InboxLoss(_Model):
@@ -148,7 +178,7 @@ class InboxSitting(_Model):
     turn: InboxTurn | None
     lost: InboxLoss | None
     ended: InboxEnd | None
-    transcript: list[InboxMessage]
+    transcript: list[InboxEntry]
 
 
 class InboxState(_Model):
@@ -173,10 +203,10 @@ class TurnRequest(_Request):
 
 
 class InboxTurnDone(_Model):
-    """What a Start's or a turn's task comes to on the task channel: the session's message, or
-    none when the sitting was ended or lost under it."""
+    """What a Start's or a turn's task comes to on the task channel: the session's reply, or none
+    when the sitting was ended or lost under it."""
 
-    message: InboxMessage | None
+    reply: InboxEntry | None
 
 
 def _not_configured() -> ProblemException:
@@ -225,13 +255,13 @@ class Sitting(_Model):
     first turn, `busy` while a turn is in flight, `idle` between turns, `lost` once the sitting is
     lost and `ended` once the expiry has ended it. `closed`: the expiry has ended its session, a
     live one's, and stopped an environment the API started, which nothing does again. `moved` is the last send or
-    result. `offset` is the session log's byte offset after the last line read, where the next
-    read of the response stream begins. `turns` is the number of the session's last turn whose
-    result the transcript holds. `follower` is set only while a turn is in flight, and is None
-    for a turn in flight whose pod left it as it shut down. `subject` is the OIDC subject of the
-    operator whose request began the last turn: its task's events, the session's lines and
-    message, reach only their SSE connections (NFR-4); None, with OIDC off, reaches every
-    connection."""
+    result. `offset` is the session log's byte offset after the last log line or message read,
+    where the next read of the response stream begins. `turns` is the number of the session's last
+    turn whose reply the transcript holds; the turn in flight is the session's next. `follower` is
+    set only while a turn is in flight, and is None for a turn in flight whose pod left it as it
+    shut down. `subject` is the OIDC subject of the operator whose request began the last turn:
+    its task's events, the session's lines and reply, reach only their SSE connections (NFR-4);
+    None, with OIDC off, reaches every connection."""
 
     id: str
     status: Status
@@ -244,12 +274,12 @@ class Sitting(_Model):
     moved: str
     offset: int = 0
     turns: int = 0
-    turn: InboxTurn | None = None
+    turn: TurnInFlight | None = None
     follower: Follower | None = None
     lost: InboxLoss | None = None
     ended: InboxEnd | None = None
     closed: bool = False
-    transcript: list[InboxMessage] = []
+    transcript: list[InboxEntry] = []
 
     @property
     def live(self) -> bool:
@@ -257,12 +287,19 @@ class Sitting(_Model):
         return self.lost is None and self.ended is None
 
     def wire(self) -> InboxSitting:
+        """The sitting as `/api/inbox` answers it: its turn in flight without the messages read so
+        far."""
+        turn = None
+        if self.turn is not None:
+            turn = InboxTurn(
+                task=self.turn.task, began=self.turn.began, lines=self.turn.lines
+            )
         return InboxSitting(
             environment=self.environment,
             started_environment=self.started_environment,
             began=self.began,
             moved=self.moved,
-            turn=self.turn,
+            turn=turn,
             lost=self.lost,
             ended=self.ended,
             transcript=self.transcript,
@@ -350,6 +387,18 @@ def _mine(current: Sitting | None, sitting_id: str) -> Sitting | None:
     return current if current is not None and current.id == sitting_id else None
 
 
+def _reply(messages: list[PendingMessage], result: str) -> list[str]:
+    """The session's reply to a turn: every message the response stream reported for it, then the
+    result's text where it is not empty and the final messages do not already say it; one empty
+    message for a turn with neither. KubeCoder's result joins the turn's final messages with
+    blank lines (`docs/api/worker-api.md`, the result event)."""
+    said = [message.text for message in messages]
+    finals = "\n\n".join(message.text for message in messages if message.final)
+    if result and finals != result:
+        said.append(result)
+    return said or [""]
+
+
 # -- the relay ---------------------------------------------------------------------------------
 
 # How often the follow of a turn refreshes its heartbeat; a quiet response stream carries a
@@ -387,8 +436,7 @@ class _Follow(BaseTask):
         self.released = threading.Event()
 
     def execute(self, progress_handle: ProgressHandle, **kwargs: Any) -> BaseModel:
-        message = self.inbox.run(self, progress_handle)
-        return InboxTurnDone(message=message)
+        return InboxTurnDone(reply=self.inbox.run(self, progress_handle))
 
 
 class Inbox:
@@ -478,9 +526,11 @@ class Inbox:
                 subject=subject,
                 began=now,
                 moved=now,
-                turn=InboxTurn(task=task.task_id, began=now, lines=[]),
+                turn=TurnInFlight(task=task.task_id, began=now, lines=[]),
                 follower=self._follower(follow),
-                transcript=[InboxMessage(author=Author.operator, text=prompt, at=now)],
+                transcript=[
+                    InboxEntry(author=Author.operator, messages=[prompt], at=now)
+                ],
             )
             return (sitting, True), sitting
 
@@ -502,13 +552,13 @@ class Inbox:
                 raise _busy()
             follow = self._follow_of(current.id, fresh=True)
             task = tasks.start_task(follow, caller_subject=subject)
-            sent = InboxMessage(author=Author.operator, text=message, at=now)
+            sent = InboxEntry(author=Author.operator, messages=[message], at=now)
             sitting = current.model_copy(
                 update={
                     "status": "busy",
                     "subject": subject,
                     "moved": now,
-                    "turn": InboxTurn(task=task.task_id, began=now, lines=[]),
+                    "turn": TurnInFlight(task=task.task_id, began=now, lines=[]),
                     "follower": self._follower(follow),
                     "transcript": [*current.transcript, sent],
                 }
@@ -667,9 +717,9 @@ class Inbox:
 
     # The follows.
 
-    def run(self, follow: _Follow, progress: ProgressHandle) -> InboxMessage | None:
+    def run(self, follow: _Follow, progress: ProgressHandle) -> InboxEntry | None:
         """Take the sitting's turn in flight to its result while `follow` holds it, from where the
-        file stands, its heartbeat refreshed meanwhile; the session's message it came to. A
+        file stands, its heartbeat refreshed meanwhile; the session's reply it came to. A
         controller failure that is a loss loses the sitting, and so does a call the controller
         refuses outright, its refusal the reason; any other is tried again."""
         with self._lock:
@@ -738,7 +788,7 @@ class Inbox:
 
     def _advance(
         self, sitting: Sitting, follow: _Follow, progress: ProgressHandle
-    ) -> InboxMessage | None:
+    ) -> InboxEntry | None:
         """One attempt at the turn from where the file stands: an environment picked or started,
         the session created, the sitting's last message sent unless the session has taken it,
         and the response followed to the result."""
@@ -756,7 +806,7 @@ class Inbox:
         env, name = sitting.environment, sitting.session
         assert env is not None and name is not None
         if follow.unsent or not self._taken(sitting):
-            controller.send(env, name, sitting.transcript[-1].text)
+            controller.send(env, name, sitting.transcript[-1].messages[0])
             follow.unsent = False
         if sitting.status == "starting":
             sent = self._write(
@@ -864,11 +914,11 @@ class Inbox:
 
     def _follow(
         self, sitting: Sitting, follow: _Follow, progress: ProgressHandle
-    ) -> InboxMessage | None:
+    ) -> InboxEntry | None:
         """The turn's response stream from the sitting's offset to its result: each log line the
-        task's progress and one of the turn's last lines, with the sitting's offset, the result
-        the session's message. A follow released meanwhile stops at the stream's next event, a
-        keepalive included."""
+        task's progress and one of the turn's last lines, each message kept with the turn, each
+        with the sitting's offset past it; at the result, the session's reply. A follow released
+        meanwhile stops at the stream's next event, a keepalive included."""
         controller, _ = self._configured()
         assert sitting.environment is not None and sitting.session is not None
         env, name = sitting.environment, sitting.session
@@ -876,20 +926,29 @@ class Inbox:
         for event in controller.response(env, name, sitting.offset):
             if follow.released.is_set():
                 return None
+            read: Sitting | None = sitting
             if isinstance(event, LogLine):
                 read = self._step(follow, progress, event.line, offset=event.offset)
-                if read is None:
-                    return None
-                sitting = read
+            elif isinstance(event, TurnMessage):
+                read = self._hear(follow, sitting.turns + 1, event)
             elif isinstance(event, TurnResult):
                 result = event
+            if read is None:
+                return None
+            sitting = read
         assert result is not None, "an unbounded response stream ends with its result"
         conversation = sitting.conversation or controller.session(env, name).session_id
         now = stamp(self.clock())
-        message = InboxMessage(author=Author.session, text=result.result or "", at=now)
-        answered = self._write(
-            follow,
-            lambda s: s.model_copy(
+
+        def answer(current: Sitting) -> Sitting:
+            # The follow holding the turn writes only while its turn is in flight.
+            assert current.turn is not None
+            reply = InboxEntry(
+                author=Author.session,
+                messages=_reply(current.turn.messages, result.result or ""),
+                at=now,
+            )
+            return current.model_copy(
                 update={
                     "status": "idle",
                     "moved": now,
@@ -897,11 +956,35 @@ class Inbox:
                     "turn": None,
                     "follower": None,
                     "conversation": conversation,
-                    "transcript": [*s.transcript, message],
+                    "transcript": [*current.transcript, reply],
                 }
-            ),
-        )
-        return message if answered is not None else None
+            )
+
+        answered = self._write(follow, answer)
+        return answered.transcript[-1] if answered is not None else None
+
+    def _hear(self, follow: _Follow, turn: int, message: TurnMessage) -> Sitting | None:
+        """`message` kept with the turn in flight, the session's turn `turn`, and written with the
+        sitting's offset past it; None when the follow no longer holds the turn. A message of
+        another turn moves the offset alone: a stream replays every frame past its offset, an
+        earlier turn's included where the offset stands short of them. A message is no line of
+        the turn and no progress: the log carries a cut `[text]` line of each."""
+
+        def hear(current: Sitting) -> Sitting:
+            if message.turn != turn:
+                return current.model_copy(update={"offset": message.offset})
+            # The follow holding the turn writes only while its turn is in flight.
+            assert current.turn is not None
+            said = PendingMessage(text=message.text, final=message.final)
+            kept = current.turn.model_copy(
+                update={"messages": [*current.turn.messages, said]}
+            )
+            return current.model_copy(update={"turn": kept, "offset": message.offset})
+
+        heard = self._write(follow, hear)
+        if heard is not None:
+            follow.delay = self.retry
+        return heard
 
     def _hold(self, follow: _Follow) -> Sitting | None:
         """The sitting while `follow` holds its turn, the heartbeat refreshed; None once it does

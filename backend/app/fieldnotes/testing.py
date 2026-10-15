@@ -159,16 +159,29 @@ _CREATE_FIELDS = {
 }
 _WAITS = ("none", "ready", "settled")
 _ENV = r"/environments/(?P<env_id>[^/]+)"
+# What opens a message's line in the log, its record in JSON after it, as the worker writes it
+# (`worker/internal/headless/message.go`): the stream frames that line as a `message`.
+_MESSAGE_LINE = "[message] "
+
+
+@dataclass(frozen=True)
+class FakeMessage:
+    """A main-thread message of a turn, whole; `final` when its text is part of the turn's
+    result. The result is the test's to lay out: the worker's joins the final messages' texts
+    with blank lines."""
+
+    text: str
+    final: bool = False
 
 
 @dataclass
 class FakeTurn:
-    """A turn as a fake session plays it: its condensed log lines, then its result. A `held`
-    turn writes its lines and stays in flight until `FakeController.finish` ends it. With a
-    `pace`, each line and the result come that many seconds after the one before, the send
-    included, off the request."""
+    """A turn as a fake session plays it: its condensed log lines and its messages, in the order
+    the log holds them, then its result. A `held` turn writes its lines and stays in flight until
+    `FakeController.finish` ends it. With a `pace`, each line and the result come that many seconds
+    after the one before, the send included, off the request."""
 
-    lines: list[str] = field(default_factory=list)
+    lines: list[str | FakeMessage] = field(default_factory=list)
     result: str = "done"
     is_error: bool = False
     held: bool = False
@@ -187,7 +200,7 @@ class FakeSession:
     session_id: str = ""
     log: list[tuple[str, int]] = field(
         default_factory=list
-    )  # each line, the offset after it
+    )  # each line, a message's included, the offset after it
     result: dict[str, Any] | None = (
         None  # the last turn's result event, until the next send
     )
@@ -237,12 +250,17 @@ class FakeController:
     A test lays out `environments` with `add_environment`, an environment's start held until
     `settle` brings it up, and their sessions with `add_session`, and scripts each turn sent, of
     any session, with the next of `turns`:
-    its log lines and its result, at once or at a pace, or a turn held in flight until `finish`.
+    its log lines and messages and its result, at once or at a pace, or a turn held in flight
+    until `finish`.
     Each request to the other routes takes the next of `faults` while any are left: a status is
     the controller failing, `None` a connection that fails. Each response stream opened takes the
     next of `drops`, if any: it carries that many events and then its connection drops. A quiet
     stream carries a keepalive every `keepalive` seconds. `calls` holds every request to those
     routes made with the token.
+
+    A message is a line of the log, as the worker writes it, which the stream frames as a
+    `message` carrying its turn, the one in flight as it was written, and the offset after its
+    line: a stream opened at an offset replays log lines and messages alike from there.
 
     Where the documents are silent the fake follows the worker's code: a stream opened after its
     turn finished replays the log from its offset, then delivers that turn's result at once
@@ -325,8 +343,8 @@ class FakeController:
     def session(self, env_id: str, name: str) -> FakeSession:
         return self.environments[env_id].sessions[name]
 
-    def emit(self, env_id: str, name: str, line: str) -> None:
-        """A log line of the session's turn in flight."""
+    def emit(self, env_id: str, name: str, line: str | FakeMessage) -> None:
+        """A log line or a message of the session's turn in flight."""
         with self._cond:
             self._append(self.session(env_id, name), line)
             self._cond.notify_all()
@@ -748,9 +766,12 @@ class FakeController:
                 return
             self._finish(session, turn.result, turn.is_error)
 
-    def _append(self, session: FakeSession, line: str) -> None:
-        """A line of the log, which holds every turn's: its offset counts the line's bytes and
-        its newline."""
+    def _append(self, session: FakeSession, line: str | FakeMessage) -> None:
+        """A line of the log, which holds every turn's, a message's of the turn in flight its
+        message line: its offset counts the line's bytes and its newline."""
+        if isinstance(line, FakeMessage):
+            record = {"text": line.text, "final": line.final, "turn": session.turn + 1}
+            line = _MESSAGE_LINE + json.dumps(record, separators=(",", ":"))
         size = session.log[-1][1] if session.log else 0
         session.log.append((line, size + len(line.encode()) + 1))
 
@@ -813,8 +834,8 @@ class FakeController:
     def _stream(
         self, session: FakeSession, offset: int, wait: float | None, drop: int | None
     ) -> Iterator[bytes]:
-        """The log from `offset`, live as the turn writes it, then the turn's result; a session
-        gone ends it after what is left. Keepalives through quiet stretches; with `wait`, an
+        """The log from `offset`, live as the turn writes it, a message line framed as its
+        message, then the turn's result; a session gone ends it after what is left. Keepalives through quiet stretches; with `wait`, an
         `incomplete` once it has passed. After `drop` events the connection drops."""
         deadline = None if wait is None else time.monotonic() + wait
         delivered = 0
@@ -844,7 +865,11 @@ class FakeController:
                     woken = timeout > 0 and self._cond.wait(timeout)
             if lines:
                 for line, after in lines:
-                    yield frame("log", {"line": line, "offset": after})
+                    if line.startswith(_MESSAGE_LINE):
+                        record = json.loads(line[len(_MESSAGE_LINE) :])
+                        yield frame("message", {**record, "offset": after})
+                    else:
+                        yield frame("log", {"line": line, "offset": after})
                     offset = after
             elif terminal:
                 if result is not None:

@@ -25,7 +25,7 @@ from app.fieldnotes.actioner import (
 )
 from app.fieldnotes.inbox import Follower, InboxEnd, InboxLoss, Sitting, SittingFile
 from app.fieldnotes.runtime import ACTIONER_HOLD, INBOX_SITTING
-from app.fieldnotes.testing import FakeTurn
+from app.fieldnotes.testing import FakeMessage, FakeTurn
 from app.services.base_task import BaseTask, ProgressHandle
 from tests.fieldnotes.test_actioner import IDLE, clear, ended, state
 from tests.fieldnotes.test_inbox import listen
@@ -268,6 +268,38 @@ def test_the_run_s_last_four_lines_are_kept_with_its_hold_for_a_page_opening_mid
     assert reads(kubecoder) == [(headless(env, name), "0")]
     assert name not in kubecoder.environments[env].sessions
     assert not any(line in json.dumps(event) for event in heard for line in LINES)
+
+
+def test_a_run_s_messages_are_no_lines_of_its_hold(
+    start, remote, kubecoder, eventually
+):
+    """The run's session reports its messages on the same response stream: the follow keeps
+    its condensed log lines only."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    kubecoder.add_environment(ENV)
+    kubecoder.run_turns.append(
+        FakeTurn(
+            [
+                LINES[0],
+                FakeMessage("Pulling the store first."),
+                LINES[1],
+                FakeMessage("One item actioned.", final=True),
+                LINES[2],
+            ],
+            held=True,
+        )
+    )
+    with start() as api:
+        run_id = started(api, eventually)
+        eventually(lambda: lines(api) == LINES[:3], "the run's lines")
+        env, name = kubecoder.run_sessions[run_id]
+        kubecoder.finish(env, name, "One item actioned.")
+        unfollowed(api, eventually)
+        answered = state(api)
+        ended(api, kubecoder, run_id, "failed", "turn-error")
+
+    assert (answered["state"], answered["lines"]) == ("running", LINES[:3])
+    assert reads(kubecoder) == [(headless(env, name), "0")]
 
 
 def test_a_run_that_ends_before_a_line_is_read_shows_none_until_its_webhook(

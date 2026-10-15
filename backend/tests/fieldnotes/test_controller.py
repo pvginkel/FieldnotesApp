@@ -19,10 +19,11 @@ from app.fieldnotes.controller import (
     Keepalive,
     LogLine,
     StreamEvent,
+    TurnMessage,
     TurnResult,
 )
 from app.fieldnotes.runtime import Runtime
-from app.fieldnotes.testing import FakeModels, FakeTurn
+from app.fieldnotes.testing import FakeMessage, FakeModels, FakeTurn
 
 ENV = "pvginkel-fieldnotes-0a1b2c"
 SPARE = "pvginkel-fieldnotes-3d4e5f"
@@ -241,6 +242,56 @@ def test_a_stream_re_opened_after_its_turn_finished_replays_from_its_offset_then
         TurnResult(turn=2, result="second"),
     ]
     assert whole == [*logs(LINES), *second]
+
+
+def test_a_turn_streams_its_messages_whole_among_its_log_lines_in_the_logs_order(
+    kubecoder, controller
+):
+    """`worker-api.md`, the message event: each main-thread message whole, final or not, with
+    its turn and the log's byte offset after its line, in the order the log holds it and before
+    the turn's result; a stream opened at an offset replays both kinds from there."""
+    name = sitting(kubecoder, controller)
+    narration = "Let me pull the cards first, then read what each of them asks for before I sort."
+    reply = "Two cards wait. Rule them?"
+    kubecoder.turns = [
+        FakeTurn(
+            [
+                LINES[0],
+                FakeMessage(narration),
+                LINES[1],
+                FakeMessage(reply, final=True),
+                LINES[2],
+            ],
+            reply,
+        ),
+        FakeTurn([FakeMessage("Recorded.", final=True)], "Recorded."),
+    ]
+
+    controller.send(ENV, name, "/dev:inbox")
+    first = drain(controller.response(ENV, name))
+    after = [offset for _, offset in kubecoder.session(ENV, name).log]
+    resumed = drain(controller.response(ENV, name, offset=after[1]))
+    controller.send(ENV, name, "Accept both.")
+    second = drain(controller.response(ENV, name, offset=after[-1]))
+
+    assert first == [
+        LogLine(line=LINES[0], offset=after[0]),
+        TurnMessage(text=narration, final=False, turn=1, offset=after[1]),
+        LogLine(line=LINES[1], offset=after[2]),
+        TurnMessage(text=reply, final=True, turn=1, offset=after[3]),
+        LogLine(line=LINES[2], offset=after[4]),
+        TurnResult(turn=1, result=reply),
+    ]
+    assert resumed == first[2:]
+    assert second == [
+        TurnMessage(
+            text="Recorded.",
+            final=True,
+            turn=2,
+            offset=kubecoder.session(ENV, name).log[-1][1],
+        ),
+        TurnResult(turn=2, result="Recorded."),
+    ]
 
 
 def test_a_live_stream_carries_lines_as_they_come_and_keepalives_through_quiet(

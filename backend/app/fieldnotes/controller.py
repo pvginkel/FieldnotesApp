@@ -7,11 +7,12 @@ sessions) and `docs/api/worker-api.md` (the headless drive surface). Every route
 client token. A non-2xx answer is a problem+json whose `type` is a slug; `ControllerError` carries
 its status and slug, both `None` when the controller could not be reached.
 
-The response stream carries a turn's condensed log lines, each with the log's byte offset after
-it, and then the turn's result. The log accumulates across the session's turns, so a stream opened
-at offset 0 replays every turn's lines; a stream re-opened at the last offset read resumes exactly,
-and one opened after its turn finished replays the log from there and then delivers that turn's
-result at once.
+The response stream carries a turn's condensed log lines and its messages, each message whole with
+its turn and whether it is final, in the order the log holds them, each frame with the log's byte
+offset after its line, and then the turn's result. The log accumulates across the session's turns,
+so a stream opened at offset 0 replays every turn's lines and messages; a stream re-opened at the
+last offset read resumes exactly, and one opened after its turn finished replays the log from there
+and then delivers that turn's result at once.
 """
 
 from __future__ import annotations
@@ -152,6 +153,17 @@ class LogLine(_Wire):
     offset: int
 
 
+class TurnMessage(_Wire):
+    """A main-thread message the session wrote in turn `turn`, its text whole, and the log's byte
+    offset after its line. `final`: its text is part of the turn's result, which joins the turn's
+    final messages with blank lines. Every message of a turn comes before the turn's result."""
+
+    text: str
+    final: bool
+    turn: int
+    offset: int
+
+
 class TurnResult(_Wire):
     """The turn's end: its number, its text, and whether it failed or was interrupted. The worker
     leaves out a field that is empty or false."""
@@ -174,7 +186,7 @@ class Keepalive:
     """A quiet stream's heartbeat."""
 
 
-StreamEvent = LogLine | TurnResult | Incomplete | Keepalive
+StreamEvent = LogLine | TurnMessage | TurnResult | Incomplete | Keepalive
 
 
 def _problem(response: httpx.Response) -> dict[str, Any]:
@@ -220,6 +232,8 @@ def _events(lines: Iterable[str]) -> Iterator[StreamEvent]:
             payload = json.loads("\n".join(data))
             if kind == "log":
                 yield LogLine.model_validate(payload)
+            elif kind == "message":
+                yield TurnMessage.model_validate(payload)
             elif kind == "result":
                 yield TurnResult.model_validate(payload)
             elif kind == "incomplete":
@@ -365,9 +379,9 @@ class HttpController:
         offset: int = 0,
         wait: timedelta | None = None,
     ) -> Iterator[StreamEvent]:
-        """The response stream of the session's turn from the log's byte `offset`: its log lines,
-        keepalives through quiet stretches, and its result, which ends it. With `wait`, a stream
-        whose turn has not finished by then ends `Incomplete` instead. A stream that is refused,
+        """The response stream of the session's turn from the log's byte `offset`: its log lines
+        and its messages, keepalives through quiet stretches, and its result, which ends it. With
+        `wait`, a stream whose turn has not finished by then ends `Incomplete` instead. A stream that is refused,
         drops, or ends before either raises `ControllerError`."""
         path = f"/environments/{env_id}/sessions/headless/{name}/response"
         params: dict[str, int] = {"offset": offset}

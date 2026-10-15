@@ -67,7 +67,7 @@ Everything below follows from that.
 | Matching | Brute-force over the whole store on the embeddings' cosine plus a weighted lexical overlap (BM25), cut by thresholds read from the eval; no reranker; reporter LLM decides. | Measured at gate 1: the cross-encoder reranker the design first had scored topic, not sameness. It told duplicates from same-topic observations worse than the embeddings' cosine did, at ten times the latency, and the operator ruled it out. The lexical weight found a fifth more duplicates than the cosine alone at the same false alarms, which no swap of embedding model did, and the operator ruled it in. |
 | Models | Self-hosted Text Embeddings Inference: `BAAI/bge-base-en-v1.5`. English only. | A small CPU model matches API quality for paraphrase detection; no egress dependency. |
 | Actioner start | Submit has the API ask the KubeCoder controller for a prompt run of the actioner's prompt in the store's project, and the run's outcome comes back as the controller's webhook. The API holds one run at a time, in a file on the volume both pods mount; a hold whose webhook does not come expires after 30 minutes. A run skipped for want of a free environment is tried again five minutes later; a failure is logged and counted. While a run is held the API follows its session for the run's log lines: the controller names no run's session, so the API finds it in the store project's environments as the headless session that starts working after the run was asked for, neither the inbox sitting's own nor one already working then. The follow decides nothing: the webhook alone says how the run ended. | Ruled 2026-10-01: the actioner depends on no timer. The controller refuses no second prompt run, so the API keeps it to one; the file outlives a pod and is shared through a rollout's overlap. Runs take minutes (1.5 to 4.5 from submit to the last stamp, measured), and a lost webhook almost always means a lost run. A prompt run's failure sends no Telegram message and has no **Run now**: the log and the metrics are enough, and a session in the store's environment is the retry. Ruled 2026-10-11 for the follow: finding the session by elimination needs no KubeCoder change; a session another caller starts in the project at the same moment can be taken for the run's, and a run too short to show a line shows none. |
-| Inbox | The tracker's inbox sitting, the `dev` plugin's `/dev:inbox`, runs as a KubeCoder headless session in the store's environment, and the operator holds it from a second screen of the app, a chat: Start sends the skill its first turn, the sorted inbox and its questions arrive as one message, the operator answers in their own words, and the session records the rulings on the tracker as it does today. The API is the relay: it picks or starts the environment, creates the session, sends each turn, follows the response stream and ends the session, one sitting at a time, held with its transcript in a file on the volume both pods mount; a sitting the API ended for idleness, or lost, is kept, its transcript read-only, until the operator starts another or ends it. The skill and the tracker convention do not change; the store gains the sitting's working directory, `inbox/`, whose CLAUDE.md tells the session the operator reads only a turn's last message. | Ruled 2026-10-10. The sitting is a write-up with a few questions, answered in a message or two, and the shape to keep is that exchange. Two other shapes were set aside: inbox items run through the triage pipeline as a second kind of item, which turns one message into a stack of cards and multiplies the operator's work; and a live tracker view in the UI, with or without a clerk session's annotations, which puts the tracker's conventions and a write credential into the API. A headless session keeps the judgment in the plugin's versioned skill, and the API decides nothing about a card. The controller streams a turn's condensed log, not its text, so the answer arrives whole, with what the session is doing shown meanwhile. A headless turn's result is its last message only, so the session is told to repeat what matters there; a KubeCoder change carrying every message was set aside (operator, 2026-10-10). Ruled 2026-10-11: a sitting the API ended or lost while the operator was away is kept until they have looked at it. |
+| Inbox | The tracker's inbox sitting, the `dev` plugin's `/dev:inbox`, runs as a KubeCoder headless session in the store's environment, and the operator holds it from a second screen of the app, a chat: Start sends the skill its first turn, the sorted inbox and its questions arrive as the session's reply, the operator answers in their own words, and the session records the rulings on the tracker as it does today. The API is the relay: it picks or starts the environment, creates the session, sends each turn, follows the response stream and ends the session, one sitting at a time, held with its transcript in a file on the volume both pods mount; a sitting the API ended for idleness, or lost, is kept, its transcript read-only, until the operator starts another or ends it. The session's reply to a turn is every message the response stream carries for that turn, final or not, in the order the stream gives them, one reply per turn, landing whole when the turn ends; the turn's result, which repeats its final messages, is not shown again. The skill and the tracker convention do not change; the store gains the sitting's working directory, `inbox/`, whose CLAUDE.md tells the session it is the inbox sitting. | Ruled 2026-10-10. The sitting is a write-up with a few questions, answered in a message or two, and the shape to keep is that exchange. Two other shapes were set aside: inbox items run through the triage pipeline as a second kind of item, which turns one message into a stack of cards and multiplies the operator's work; and a live tracker view in the UI, with or without a clerk session's annotations, which puts the tracker's conventions and a write credential into the API. A headless session keeps the judgment in the plugin's versioned skill, and the API decides nothing about a card. Ruled 2026-10-11: a sitting the API ended or lost while the operator was away is kept until they have looked at it. Ruled 2026-10-15, the reply as every message of the turn, overruling the first ruling: the stream then carried a turn's text only as its result, the turn's final messages, so a message written before a later tool call reached the operator only as a log line cut to 80 characters; the session was told to repeat what mattered in its last message, and a KubeCoder change carrying every message was set aside. The operator: "KubeCoder didn't support it at the time, and I didn't want to progress it yet. But now I have a second need for it, so the feature got implemented. This is you adopting the new feature." The result is not reprinted: "That would be a duplicate of the last one you get in the stream." The reply lands whole at the turn's end, with what the session is doing shown meanwhile from its condensed log, rather than message by message as they arrive: the operator left it to the build ("I don't mind either way"), and whole is the simpler. |
 | App bar | Both screens' headers hold the screen tabs (Triage, Inbox) and two pills, each shown only while it has something to show, its tooltip saying what. The Inbox pill shows while the API holds a sitting: its dot breathes while a turn is in flight, is steady while the session waits for the operator's answer and turns amber once the sitting is lost or the idle expiry has ended it; the pill links to the inbox screen. The Actioner pill, fed by `GET /api/triage/actioner`, has a dot that breathes while a start is pending (asked of the controller, or waiting to be tried again) or a run is held, and a click on it then opens the actioner page on the triage screen (Triage UI); after a run that ended without succeeding (failed, or skipped), or a start the controller refused, it shows a red dot until the next start or until the operator closes the failure: a click on the pill, the actioner idle, opens a dialog with the failure, whose Close clears it and the pill with it and whose Cancel leaves both; idle with no failure shows nothing. The app fetches both on a timer, sooner while something is in flight, and a submit fetches the actioner's at once. | Ruled 2026-10-10. The operator: now that there is a reason to wait for the actioner to finish (with the inbox screen there), it has value to show the actioner's state in the app; a sitting in progress should show from the triage screen too. Ruled 2026-10-11: a sitting the expiry ended is amber because it is something the operator needs to look at, and a failure stays until the operator has seen it and closed it. |
 | Topology | One model pod (a TEI container per model behind NGINX, today one) on a pinned high-performance node, deployed from the homelab's chart repo and owned by no application. One Fieldnotes pod: the API, the MCP server, the UI's nginx, the SSE gateway and a webhook relay as five containers. A rollout starts the new pod beside the old one and retires the old one only once the new one is ready, so for that overlap two pods serve. A pod whose shutdown is announced lets go at once of the sessions it follows, an inbox turn and the actioner's run, and the other pod goes on with them; a pod that is shutting down takes over none. Each pod clones a store checkout of its own and writes through it; the embedding cache is on a volume both mount. The API starts no skill on a schedule of its own, only on the operator's submit (FR-27) and Start (FR-29); the pull of the store's tip it makes on a timer is a fetch, with no judgment in it. | The models are shared infrastructure. The API and the MCP server stay separate processes with an authenticated HTTP boundary between them, so the MCP server stays thin; one pod is all a proof of concept needs. Agents post and react at any time, so a rollout leaves a ready pod behind the ingress throughout. What a pod follows is recorded in the files both pods share, so a retiring pod's shutdown waits on none of it. The store already has several writers, the skills among them, sharing the remote as git writers do, so a second pod's checkout is one more writer on GitHub, never a second writer in a checkout. |
 | GitHub webhook | Deliveries reach the API through the homelab's `webhook-relay`, the only internet-facing container; the API itself is never public. | What an unauthenticated caller reaches is an HMAC check in a binary that holds no credential, not the service that holds the store's git credential. |
@@ -303,9 +303,11 @@ scope here.
     in monospace with the skill's alignment kept and a wrapped line continuing under its own text
     (a card's ask wraps under the ask); around it paragraphs, nested lists, bold, code spans and
     links. Every card id they name is linked to its issue on the tracker, whose address the API
-    serves with the sitting; the operator's messages are shown as they typed them, and each
-    message's time under it, with no label for who wrote it. The text field shows no placeholder and
-    grows with its text to eight lines, then scrolls; Ctrl+Enter sends, as Send's tooltip says, and
+    serves with the sitting; the operator's messages are shown as they typed them. The session's
+    reply to a turn is shown as its messages in order, each a block of its own, set further apart
+    than paragraphs are, and all alike, final or not. Each message of the operator's, and each
+    reply, has its time under it, with no label for who wrote it. The text field shows no
+    placeholder and grows with its text to eight lines, then scrolls; Ctrl+Enter sends, as Send's tooltip says, and
     Enter breaks the line. While a turn is in flight Send is withheld but the text field stays open,
     so the answer can be drafted meanwhile, and the session's condensed log is shown under the
     transcript, as what the session is doing, with no elapsed time: the working box grows to four
@@ -320,8 +322,8 @@ scope here.
     configured project, the store's: a running one, else a stopped one it starts and waits for, and
     records as its own. In it the API creates a headless session with the configured model and
     reasoning effort, in the configured working directory, the store's `inbox/`, whose CLAUDE.md
-    tells the session that the operator reads only the last message of each turn, so it repeats there
-    everything pertinent, its answers to stated questions included, and sends the first turn: the
+    tells the session that it is the inbox sitting, relayed to the app's inbox screen, and that it
+    works on the tracker only, nothing in the store being its to edit, and sends the first turn: the
     configured inbox prompt, with the scope the operator typed appended when they typed one. One
     sitting is held at a time, in a file on the volume both pods mount, naming the environment, the
     session, the conversation id once the controller reports it, whether the API started the
@@ -332,15 +334,21 @@ scope here.
     does and begins a new one. Without the controller's address, the token and
     the project the sitting is not configured: the screen says so and Start is refused.
 30. FR-30 A turn: Send posts the operator's message to the session as its next turn, and the API
-    follows the session's response stream to the turn's result, which it appends to the transcript
-    as the session's message. The stream's condensed log lines reach the page as the turn's
-    progress and the result as its completion, over the template's task channel, and a page that
-    joins a sitting mid-turn subscribes to the turn in flight, which the sitting names. A send
-    while a turn is in flight is refused (`session-busy`), and so is one without a live sitting
-    (`conflict`); the page offers neither. The pod that took a send follows its stream and writes
-    the file, which carries the last offset the follower read and the turn's last four lines, so
-    when that pod is retired mid-turn the other pod re-opens the stream from there and finishes the
-    turn, its result landing in the transcript once. A pod lets go of its follow as soon as its
+    follows the session's response stream to the turn's result. Every message the stream carries
+    for the turn, final or not, in the order the stream gives them, makes the session's reply,
+    which the API appends to the transcript when the turn ends; a message of another turn is
+    never part of it. The result's text, the turn's final messages joined, is not shown again: it
+    is the reply of a turn whose stream carries no message, and it follows the messages of a turn
+    that ends in an error no message carries. The stream's condensed log lines reach the page as
+    the turn's progress and the reply as its completion, over the template's task channel, and no
+    message reaches the page before the turn ends; a page that joins a sitting mid-turn subscribes
+    to the turn in flight, which the sitting names. A send while a turn is in flight is refused
+    (`session-busy`), and so is one without a live sitting (`conflict`); the page offers neither.
+    The pod that took a send follows its stream and writes the file, which carries the last offset
+    the follower read, past log lines and messages alike, the turn's last four lines and the
+    messages read so far, so when that pod is retired mid-turn the other pod re-opens the stream
+    from there and finishes the turn, its reply landing in the transcript once, with every message
+    of the turn in it once. A pod lets go of its follow as soon as its
     shutdown is announced, wherever the follow stands, reading the stream or waiting for an
     environment it starts, so its shutdown waits on no turn, and the other pod takes the turn over
     at its next read of the sitting or its next sweep (FR-31), without waiting for the follow to go
@@ -529,7 +537,7 @@ takes its own inbound bearer token from agents and holds the `mcp` client token 
 | `skills/reconciler/` | `SKILL.md` plus Python helpers |
 | `skills/actioner/` | `SKILL.md` plus Python helpers |
 | `CLAUDE.md` | Says what a session in the store is: the reconciler, the actioner or, started in `inbox/`, the inbox sitting |
-| `inbox/CLAUDE.md` | The inbox sitting's working directory: tells the headless session that the operator reads only a turn's last message and to repeat in it everything pertinent (FR-29) |
+| `inbox/CLAUDE.md` | The inbox sitting's working directory: tells the headless session that it is the inbox sitting, relayed to the app's inbox screen, and that it works on the tracker only (FR-29) |
 | `.kubecoder/` | Makes the store a KubeCoder project, so its timer can run the reconciler, the API's prompt runs the actioner, and the API's headless session holds the inbox sitting (FR-29), in an environment of it |
 
 Embedded text is `area + ": " + canonical`. Comments and reactions never change it, so they never
@@ -689,8 +697,8 @@ the shared home, run as a headless session in the store's environment (FR-29). N
 changes: it reads the tracker, puts the sorted inbox to the operator in one message, takes their
 answers in their words, records the rulings and notifies. What changes is where the operator types:
 the app's inbox screen, instead of a session they attend. The session starts in the store's
-`inbox/`, whose CLAUDE.md, the one thing the sitting adds to the store, tells it that the operator
-reads only the last message of each turn.
+`inbox/`, whose CLAUDE.md, the one thing the sitting adds to the store, tells it that it is the
+inbox sitting and works on the tracker only.
 
 ### The inbox sitting
 
@@ -698,11 +706,20 @@ The sitting is the `dev` plugin's `/dev:inbox` skill, unchanged, in a KubeCoder 
 API is its relay and the inbox screen its chat (FR-28 to FR-32). The controller's headless routes
 carry all of it: a session is created on one environment and answers its status; a turn is sent and
 answers `202`, or `409 session-busy` while one is in flight; the response stream carries `log`
-events, each a condensed log line with the byte offset after it, and one `result` event with the
-turn's text, which is the model's last message (each of the turn's `result` events, joined), so a
-message written before a later tool call reaches only the log, cut to 80 characters;
-`inbox/CLAUDE.md` has the session repeat what matters in its last message (FR-29); a session is ended
-by name. A headless session is per environment where a prompt run is per project, so the API does the
+events, each a condensed log line with the byte offset after it, `message` events, each a message
+the session wrote, whole, with its turn, whether it is final and an offset in the log's byte
+space, and one `result` event that ends the turn, with its text, the turn's final messages joined;
+a session is ended by name. The session's reply to a turn is the turn's messages, in stream
+order, each kept apart, the narration written before a tool call among them, which the log carries
+only cut to 80 characters. The result's text is not shown again where the messages say it: it is
+the reply of a turn whose stream carries no message, and it follows the messages where it is an
+error no message carries, the worker's own when the session ends before a result. The messages
+read so far are kept on file with the turn in flight, written together with the offset past them,
+so a pod that takes the turn over resumes after them and loses none; a message of another turn,
+which a stream opened at an offset can replay, is never kept. The reply lands whole when the turn
+ends: while it runs, the page has only the condensed log (FR-30).
+
+A headless session is per environment where a prompt run is per project, so the API does the
 picking the controller does for a prompt run: list the project's environments, take a running one,
 else start a stopped one with the controller's wait and record that it did, so that End stops it
 again. The client credential the API holds for the actioner's runs covers every route; no fleet
@@ -713,11 +730,12 @@ a rename, as the hold is: the environment, the session's name, the conversation 
 started the environment, when the sitting began and last moved, its status (`starting`, `busy`,
 `idle`, `lost`, `ended`), for a lost or ended sitting when and why and whether the expiry has
 closed it, the log offset the next read of the response stream begins at, the number of the
-last turn whose result the transcript holds, the subject of the editor whose request began the last
-turn, the turn in flight (its task id, when it began and its last four log lines), the follow
-holding that turn (its pod, its id and its heartbeat) and the transcript, a list of
-`{author, text, at}` with `author` `operator` or `session`. Both pods read and write it, taking
-turns on a lock beside it, and only the follow the file names writes a turn's result. A pod lets go
+last turn whose reply the transcript holds, the subject of the editor whose request began the last
+turn, the turn in flight (its task id, when it began, its last four log lines and the messages
+read so far), the follow holding that turn (its pod, its id and its heartbeat) and the transcript,
+each entry written by the `operator` or the `session`, with its time and its messages: the one the
+operator sent, or the session's reply. Both pods read and write it, taking turns on a lock beside
+it, and only the follow the file names writes a turn's reply. A pod lets go
 of the follow it holds as soon as its shutdown is announced, which the chart's preStop drain does
 before anything waits on the pod's work, and a pod that is shutting down takes no follow over
 (FR-30). The wire carries the environment, null until Start has picked one, whether the API
@@ -741,7 +759,7 @@ page's access token, or, when the connect left it bound to no one, as it does fo
 connected before its token was refreshed, by the page's next request that authenticates (NFR-4).
 
 A turn is a task of the template's task service, so the page takes its progress, the log lines, and
-its completion, the result, over the SSE gateway it already uses, by task id; a page that joins
+its completion, the reply, over the SSE gateway it already uses, by task id; a page that joins
 mid-turn takes the id from `GET /inbox`. The prompt, model and reasoning effort are
 `FIELDNOTES_KUBECODER_INBOX_PROMPT`, `_INBOX_MODEL` and `_INBOX_EFFORT`, the working directory
 `_INBOX_CWD`, `Fieldnotes/inbox` by default, the idle time `_INBOX_IDLE`, in minutes, 30 by
@@ -788,8 +806,8 @@ are issues, they'll surface soon enough").
 | Reconciler (gate 2) | Run the skill with `--dry-run` on the store the replay produced | Triage items the operator can rule on without asking questions back; every listed item has evidence and a recommendation |
 | Actioner start | Rule an item in the triage UI on prd and submit | One prompt run starts; its webhook clears the hold; `fieldnotes_actioner_runs_total{outcome="success"}` counts it; the item is stamped |
 | Actioner idempotency | Submit rulings on items, run the actioner twice | Second run creates nothing and reports zero actions |
-| Inbox sitting | Start a sitting on prd, answer the write-up, End | One headless session in the store's environment; the write-up arrives as one message, the working box showing the session's latest log lines under it meanwhile, up to four, each on one line, and the session's last message carries the answers to the operator's questions; the rulings land on the cards as `Inbox <date>:` comments; End ends the session, and an environment the API started is stopped |
-| Inbox rejoin | Reload the page mid-turn, then open it in a second browser | Both show the transcript and the turn in flight, and the result when it lands |
+| Inbox sitting | Start a sitting on prd, answer the write-up, End | One headless session in the store's environment; the write-up arrives whole at the turn's end as the session's reply, every message of the turn in it, the narration before its tool calls included, and the result's text not repeated, the working box showing the session's latest log lines under it meanwhile, up to four, each on one line; the rulings land on the cards as `Inbox <date>:` comments; End ends the session, and an environment the API started is stopped |
+| Inbox rejoin | Reload the page mid-turn, then open it in a second browser | Both show the transcript and the turn in flight, and the reply when it lands |
 | Inbox idle | Leave a sitting 30 minutes after the session's answer | The API ends it; an environment it started is stopped; the screen keeps the transcript read-only, closing on "Ended at HH:MM after 30 minutes idle.", Send withdrawn and the Inbox pill amber, until Start or End clears it |
 | App bar | Start a sitting and open the triage screen; then rule an item and submit, and watch the run from the triage screen, then from the inbox screen through the Actioner pill; after a failed run, click the pill and Close the dialog | The Inbox pill shows the sitting's state and leads to the inbox screen; the Actioner pill shows from the submit until the run's webhook and opens the actioner page, which shows the run's lines while it runs and gives way to "Nothing to rule on", or the stack, when it ends; a failed run leaves the pill red until the next start or the dialog's Close |
 
@@ -822,8 +840,5 @@ Each has a trigger that would justify it.
 - Resuming a lost inbox sitting by its conversation id — trigger: a worker restart mid-sitting costs
   more than Start again.
 - Interrupting an inbox turn — trigger: a turn that runs away; until then End covers it.
-- Every message of a headless turn in its result, a KubeCoder change — set aside by the operator
-  2026-10-10 for the instruction in `inbox/CLAUDE.md`. Trigger: a sitting's last message leaves out
-  what an earlier one said.
 - The inbox screen for a second skill, the close-out or the actioner by hand — trigger: the operator
   asks for one; the code behind the screen is written so a second is configuration.

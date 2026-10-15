@@ -72,12 +72,12 @@ Other repos the work touches:
   `reconciler` and `actioner` skills. It is data plus skills, not application code, and nothing of it
   lives here.
 - **`pvginkel/FieldnotesDeploy`** holds the `fieldnotes` chart and its prd values, which CI pins the
-  image into; Argo CD syncs it. **`pvginkel/ModelsDeploy`** holds `models` (the Text Embeddings
-  Inference pod, which no application owns). Both left `pvginkel/HelmCharts` on 2026-09-26.
+  image into; Argo CD syncs it. **`pvginkel/HomelabAppsDeploy`** holds `models` in `models/` (the
+  Text Embeddings Inference pod, which no application owns), since ModelsDeploy merged into it.
   **`pvginkel/DockerImages`** holds `webhook-relay`.
 
 The environment is composed by this repo's `.kubecoder/config.yaml`, which checks the spec repo, the
-store, FieldnotesDeploy and ModelsDeploy out as siblings. The toolchain is the `modern-app` sidecar
+store, FieldnotesDeploy and HomelabAppsDeploy out as siblings. The toolchain is the `modern-app` sidecar
 (Node, pnpm, uv), so an ad-hoc command is `cexec modern-app …`. The `kc project` verbs are cwd-bound: run them from this repo's root.
 
 ## Template ownership

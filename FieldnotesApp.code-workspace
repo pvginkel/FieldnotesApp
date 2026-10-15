@@ -7,7 +7,7 @@
     { "path": "../FieldnotesAppSpecs" },
     { "path": "../Fieldnotes" },
     { "path": "../FieldnotesDeploy" },
-    { "path": "../ModelsDeploy" }
+    { "path": "../HomelabAppsDeploy" }
   ],
   // Only the repo's own dev runner needs a task. Starting a Claude session and
   // every `kc project` verb are commands the KubeCoder VS Code extension already

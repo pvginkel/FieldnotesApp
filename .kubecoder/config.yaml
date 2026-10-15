@@ -10,10 +10,11 @@ repos:
   - url: https://github.com/pvginkel/FieldnotesAppSpecs
     shared: true
   # Where Fieldnotes deploys: the `fieldnotes` chart and its prd values, which
-  # CI pins the images into, and the `models` chart (the Text Embeddings
-  # Inference pod). Argo CD syncs both.
+  # CI pins the images into, and HomelabAppsDeploy, whose `models/` directory
+  # holds the `models` chart (the Text Embeddings Inference pod). Argo CD syncs
+  # both.
   - url: https://github.com/pvginkel/FieldnotesDeploy
-  - url: https://github.com/pvginkel/ModelsDeploy
+  - url: https://github.com/pvginkel/HomelabAppsDeploy
   # The Fieldnotes store: observations, triage docs and the install, reconciler
   # and actioner skills. scripts/dev-instance-setup.sh seeds the dev instance's
   # scratch store from this checkout.
@@ -29,7 +30,7 @@ tools:
   - use: modern-app
   # The store's `kc project lint` (ruff), which it runs from here.
   - use: python
-  # FieldnotesDeploy's and ModelsDeploy's Helm and Terraform gates.
+  # FieldnotesDeploy's and HomelabAppsDeploy's Helm and Terraform gates.
   - use: iac
   # Their architecture gates: gen-architecture and arch-validate.
   - use: aac-tools
@@ -63,8 +64,8 @@ preamble:
     Fieldnotes' environment: the application (/work/FieldnotesApp), with its
     design, dataset and slices in /work/FieldnotesAppSpecs. Its work also
     touches /work/Fieldnotes (the store: observations and skills),
-    /work/FieldnotesDeploy (the `fieldnotes` chart) and /work/ModelsDeploy
-    (the `models` chart).
+    /work/FieldnotesDeploy (the `fieldnotes` chart) and
+    /work/HomelabAppsDeploy (the `models` chart, in `models/`).
 
     Four toolchain sidecars:
 

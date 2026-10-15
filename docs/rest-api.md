@@ -348,12 +348,16 @@ the screen's links) and `sitting`, the one sitting the API holds, or null:
 - `began`, and `moved`: the last send or result.
 - `turn`: the turn in flight, a Start's included, or null: `task`, the id of the task-service task
   the page follows for it; `began`; and `lines`, the last four of its progress texts (below), a
-  Start's steps and the condensed log lines read, oldest first, `[]` as the turn begins.
+  Start's steps and the condensed log lines read, oldest first, `[]` as the turn begins. No
+  message of the turn is on it: the messages land whole, as its reply.
 - `lost`: `{at, reason}` once the sitting is lost, else null.
 - `ended`: `{at, idle_minutes}` once the idle expiry has ended the sitting, else null: when the
   sweep ended it, and the configured idle time in minutes.
-- `transcript`: every message, `{author, text, at}`, `author` being `operator` or `session`. The
-  first is the prompt the API sent.
+- `transcript`: every entry, `{author, messages, at}`, `author` being `operator` or `session` and
+  `messages` never empty. An operator's entry has one message, what the API sends the session: the
+  first entry is the prompt, each later one the operator's words for a turn, `at` the time of the
+  Start or the turn. A session's entry is its reply to a turn (below), `at` the time of the turn's
+  result.
 
 **Start** with a live sitting, neither lost nor ended, answers it, `200`, and starts nothing; a
 lost or ended one it clears first, as End does. Otherwise it writes a new sitting whose first
@@ -373,16 +377,24 @@ refused with `session-busy`, and without a live sitting, none, a lost one or an 
 `conflict`.
 
 **Following** a turn reads the session's response stream from the log offset the sitting last
-read: each condensed log line becomes the task's progress text and the latest of the turn's
-`lines`, the oldest dropped past four, and the turn's result is appended to the transcript as the
-session's message, which clears the turn. The task completes with `{message}`, null when the
-sitting was ended, lost or taken over under it.
+read, past log lines and messages alike. Each condensed log line becomes the task's progress text
+and the latest of the turn's `lines`, the oldest dropped past four. Each message of the turn,
+whole, is kept on file with the turn in flight, and is neither a progress text nor a line; a
+message of another turn, which a stream opened at an offset can replay, moves the offset alone. At
+the turn's result the session's reply is appended to the transcript, which clears the turn: every
+message the stream carried for the turn, final or not, in stream order, one of the entry's
+`messages` each. The result's text is KubeCoder's join of the turn's final messages, with blank
+lines, and is not shown again: it follows the messages only where it is not empty and differs from
+that join, so it is the reply of a turn whose stream carried no message and follows the messages
+of a turn that ends in an error no message carried. A turn with neither has one empty message. The
+task completes with `{reply}`, the transcript's new entry, null when the sitting was ended, lost or
+taken over under it.
 
 **The page's events.** A task's events carry the session's words, so they reach only the SSE
 connections bound to the editor whose request began the turn, a takeover's task's included (with
 OIDC off, every connection). How a page's connection comes to be bound is under
 [Listening and authentication](#listening-and-authentication). A page that hears nothing still
-gets the result by fetching `GET /api/inbox` again.
+gets the reply by fetching `GET /api/inbox` again.
 
 **Both pods.** The sitting is `inbox-sitting.json` in `FIELDNOTES_CACHE_DIR`, beside the actioner's
 hold, written whole through a rename. Its writers, on either pod, take turns on an exclusive
@@ -390,14 +402,16 @@ hold, written whole through a rename. Its writers, on either pod, take turns on 
 made for, so a task never brings back a sitting End cleared or writes into a newer one. Beyond the
 wire, the file holds its status (`starting`, `busy`, `idle`, `lost` or `ended`), the subject of the
 editor whose request began the last turn, the session's name, the conversation id once known, the
-log offset, the number of the last turn whose result it holds, whether the expiry has closed it,
-and the follow holding the turn in flight: its pod and a heartbeat it refreshes every 15 seconds. A
-turn no follow holds, or whose heartbeat is a minute old, its pod retired or gone, is taken over by
-whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs every 15 seconds,
+log offset after the last log line or message read, the number of the session's last turn whose
+reply the transcript holds, whether the expiry has closed it, the messages of the turn in flight
+read so far, and the follow holding that turn: its pod and a heartbeat it refreshes every 15
+seconds. A turn no follow holds, or whose heartbeat is a minute old, its pod retired or gone, is
+taken over by whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs every 15 seconds,
 as a new task (`turn.task` changes) that goes on from the file: a message the session has not
-taken is sent, once, and the stream is read from the last offset. Only the follow the file names
-writes the result, so it lands once. Through a rollout's overlap a page on the pod not following
-the turn gets no progress, and its next read brings the result.
+taken is sent, once, and the stream is read from the last offset, past the messages on file,
+which the reply keeps. Only the follow the file names writes the reply, so it lands once, with
+every message of the turn in it once. Through a rollout's overlap a page on the pod not following
+the turn gets no progress, and its next read brings the reply.
 
 **Shutdown.** A pod lets go of its follows as its shutdown is announced (the chart's preStop
 drain), before the shutdown waits on anything: its sweep stops, and a follow holding the turn is
@@ -409,7 +423,7 @@ announcement leaves at once. A pod shutting down takes no turn over, and quietly
 
 **Failures.** A controller answer that it does not know the environment or the session (`404
 not-found`), or that the environment is not running (`409 conflict`), loses the sitting: `lost` is
-set, the turn cleared with no result, and the transcript kept. A Start also loses it when the
+set, the turn cleared with no reply, and the transcript kept. A Start also loses it when the
 project has no running or stopped environment, or the one it started did not settle. Any other
 failure, a `5xx`, an unreachable controller or a dropped stream, is tried again after 2 seconds,
 the wait doubling up to 60, for as long as the follow holds the turn.
@@ -475,15 +489,21 @@ untyped, as the template's testing endpoints are:
 - `/api/testing/controller`: `PUT {inbox, environments, turns, run_turns, runs}` replaces the fake
   controller with one holding those environments of the store's project, each with the names of
   the headless sessions `working` in it (a running one only), the turns the session's next sends
-  play (their log lines, their result, a pace between them, or held until `finish`), the turn each
+  play (their log lines and messages, in the order the log holds them, their result, a pace between
+  them, or held until `finish`), the turn each
   accepted actioner run's session plays, in order, and the answers to the actioner's prompt runs,
   the inbox configured or not; the sitting the old one held is ended as End ends it, and the
   actioner starts afresh, with no hold and no failure. The backend starts with no environment, so a
   test that opens the inbox, or wants a run's lines, lays one out. An accepted run plays in a new
   headless session of the first running environment, else of the first stopped one, which it
   starts; a run past `run_turns` plays no line and is over at once. The layout has the run's
-  follow look every quarter of a second. `POST …/emit {line}` and `POST …/finish {result,
-  is_error}` play the log and the result of the sitting's turn in flight, and `POST …/run-emit` and
+  follow look every quarter of a second. A turn's line is a string, a condensed log line, or a
+  message, `{text, final}`, `final` false unless given: the fake writes a message into the session's
+  log as the worker does, and the stream frames it as a `message` of the turn in flight with the
+  offset after its line. The turn's result is the layout's own, so a test whose reply should not
+  repeat it lays it out as the final messages' texts joined with blank lines. `POST …/emit {line}`
+  and `POST …/finish {result, is_error}` play a line and the result of the sitting's turn in
+  flight, and `POST …/run-emit` and
   `POST …/run-finish`, with the same bodies, those of the last run the fake accepted, whose session
   `run-finish` ends; each waits up to 5 seconds for its turn to be in flight. `POST …/lose {what:
   session|environment}` loses the sitting at the controller, `POST …/expire` closes the sitting as

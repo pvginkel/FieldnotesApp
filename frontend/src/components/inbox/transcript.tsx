@@ -1,22 +1,23 @@
-// The sitting's transcript (FR-28): the inbox prompt as the sitting's opening line, the session's
-// messages as the skill writes them (markdown.tsx), the operator's as they typed them, each with
-// its time under it; under the last one, while a turn is in flight, the working box over the
-// session's condensed log. A sitting the expiry ended (FR-31) or a lost one (FR-32) ends on a line
-// saying so.
+// The sitting's transcript (FR-28): the inbox prompt as the sitting's opening line; each reply of
+// the session's as its messages in order, each a block as the skill writes it (markdown.tsx), set
+// further apart than paragraphs are and all alike; the operator's messages as they typed them; each
+// entry with its time under it. Under the last one, while a turn is in flight, the working box over
+// the session's condensed log, and no message of the turn. A sitting the expiry ended (FR-31) or a
+// lost one (FR-32) ends on a line saying so.
 
 import { TimerOff, TriangleAlert } from 'lucide-react';
 import { WorkingBox } from '@/components/shell/working-box';
-import type { Message, Sitting } from '@/hooks/use-inbox';
+import type { Entry, Sitting } from '@/hooks/use-inbox';
 import { clock, minutes } from '@/lib/inbox/text';
 import { stamp } from '@/lib/triage/time';
 import { Markdown } from './markdown';
 
-function Opening({ sitting, prompt }: { sitting: Sitting; prompt: Message }) {
+function Opening({ sitting, prompt }: { sitting: Sitting; prompt: Entry }) {
   return (
     <div className="opening" data-testid="inbox.opening">
       <span className="rule" />
       <span>
-        <code>{prompt.text}</code> · began {clock(prompt.at)}
+        <code>{prompt.messages[0]}</code> · began {clock(prompt.at)}
         {sitting.environment && ` in ${sitting.environment}`}
         {sitting.started_environment && ', started for this sitting'}
       </span>
@@ -25,7 +26,7 @@ function Opening({ sitting, prompt }: { sitting: Sitting; prompt: Message }) {
   );
 }
 
-/** When the message was sent or answered, under it; the date in the tooltip. */
+/** When the entry was sent or answered, under it; the date in the tooltip. */
 function MessageTime({ at }: { at: string }) {
   return (
     <time className="msg-time" dateTime={at} title={stamp(at)} data-testid="inbox.message.time">
@@ -47,18 +48,20 @@ export function Transcript({ sitting, tracker, lines }: TranscriptProps) {
   return (
     <div className="transcript" data-testid="inbox.transcript">
       {prompt && <Opening sitting={sitting} prompt={prompt} />}
-      {rest.map((message, i) =>
-        message.author === 'session' ? (
+      {rest.map((entry, i) =>
+        entry.author === 'session' ? (
           <section key={i} className="msg session" data-testid="inbox.message.session">
             <div className="session-md">
-              <Markdown text={message.text} tracker={tracker} />
+              {entry.messages.map((text, j) => (
+                <Markdown key={j} text={text} tracker={tracker} />
+              ))}
             </div>
-            <MessageTime at={message.at} />
+            <MessageTime at={entry.at} />
           </section>
         ) : (
           <section key={i} className="msg operator" data-testid="inbox.message.operator">
-            <div className="operator-text">{message.text}</div>
-            <MessageTime at={message.at} />
+            <div className="operator-text">{entry.messages[0]}</div>
+            <MessageTime at={entry.at} />
           </section>
         ),
       )}

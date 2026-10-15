@@ -310,6 +310,33 @@
         "title": "InboxEnd",
         "type": "object"
       },
+      "InboxState.5430f38.InboxEntry": {
+        "description": "An entry of the sitting's transcript: what the API sent the session as a turn, the first\nbeing the inbox prompt with the operator's scope, its one message; or the session's reply to a\nturn, its messages in stream order. `at` is when the API sent it, or when the reply was\nwritten at the turn's result.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "author": {
+            "$ref": "#/components/schemas/InboxState.5430f38.Author"
+          },
+          "messages": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "author",
+          "messages",
+          "at"
+        ],
+        "title": "InboxEntry",
+        "type": "object"
+      },
       "InboxState.5430f38.InboxLoss": {
         "description": "FR-32: why the sitting was lost, and when.",
         "properties": {
@@ -327,29 +354,6 @@
           "reason"
         ],
         "title": "InboxLoss",
-        "type": "object"
-      },
-      "InboxState.5430f38.InboxMessage": {
-        "description": "A message of the sitting: one the API sent, the first being the inbox prompt with the\noperator's scope, or one the session answered.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "author": {
-            "$ref": "#/components/schemas/InboxState.5430f38.Author"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "author",
-          "text",
-          "at"
-        ],
-        "title": "InboxMessage",
         "type": "object"
       },
       "InboxState.5430f38.InboxSitting": {
@@ -399,7 +403,7 @@
           },
           "transcript": {
             "items": {
-              "$ref": "#/components/schemas/InboxState.5430f38.InboxMessage"
+              "$ref": "#/components/schemas/InboxState.5430f38.InboxEntry"
             },
             "title": "Transcript",
             "type": "array"
@@ -2220,7 +2224,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "`{\"line\"}`: a log line of the sitting's turn in flight.",
+        "summary": "`{\"line\"}`: a log line or a message of the sitting's turn in flight.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -2284,7 +2288,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "`{\"line\"}`: a log line of the turn in flight of the last run the controller accepted.",
+        "summary": "`{\"line\"}`: a log line or a message of the turn in flight of the last run the controller accepted.",
         "tags": [],
         "x-required-role": "editor"
       }

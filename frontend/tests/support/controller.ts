@@ -19,11 +19,19 @@ interface EnvironmentLayout {
   working?: string[];
 }
 
-/** A session's turn, the sitting's next send or the next actioner run's: its log lines, then its
- *  result, `pace` seconds apart; a `held` one stays in flight after its lines until `finish`
- *  (`runFinish` for a run's). */
+/** A message of a turn, whole; `final` when its text is part of the turn's result. */
+interface MessageLayout {
+  text: string;
+  final?: boolean;
+}
+
+/** A session's turn, the sitting's next send or the next actioner run's: its log lines and its
+ *  messages, in the order the log holds them, then its result, `pace` seconds apart; a `held` one
+ *  stays in flight after its lines until `finish` (`runFinish` for a run's). The result is the
+ *  layout's to match: the worker's joins the final messages' texts with blank lines, and a reply
+ *  shows it only where it differs from them. */
 interface TurnLayout {
-  lines?: string[];
+  lines?: (string | MessageLayout)[];
   pace?: number;
   result?: string;
   is_error?: boolean;
@@ -68,8 +76,9 @@ export class Controller {
     return this.call('put', '', layout);
   }
 
-  /** A line of the sitting's turn in flight, as the session's condensed log writes it. */
-  emit(line: string): Promise<void> {
+  /** A line of the sitting's turn in flight, as the session's condensed log writes it, or a
+   *  message of it. */
+  emit(line: string | MessageLayout): Promise<void> {
     return this.call('post', '/emit', { line });
   }
 

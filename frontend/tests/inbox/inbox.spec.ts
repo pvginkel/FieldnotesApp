@@ -1,7 +1,8 @@
 /**
- * The inbox screen (FR-28 to FR-32): Start, the transcript with the working box under it, the
- * composer, a lost sitting, one the idle expiry ended, and End. The worker backend's fake
- * controller plays the sitting's session. Every sitting, card id and title is invented.
+ * The inbox screen (FR-28 to FR-32): Start, the transcript with the working box under it, a reply
+ * as its turn's messages, the composer, a lost sitting, one the idle expiry ended, and End. The
+ * worker backend's fake controller plays the sitting's session. Every sitting, card id and title
+ * is invented.
  */
 
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
@@ -411,6 +412,143 @@ test.describe('the transcript', () => {
       expect(under.y).toBeGreaterThanOrEqual(text.y + text.height);
     }
     await expect(inbox.transcript.getByText(/^(Session|You)$/)).toHaveCount(0);
+  });
+
+  test("a reply is every message of its turn in order, each a block set further apart than paragraphs and all alike, final or not, with one time under the lot; the result, the final messages joined, is not shown again", async ({ controller, inbox }) => {
+    const narration = 'Let me pull the cards first.';
+    const waited = 'Four lookups dispatched; I will wait for them.';
+    const answer = 'Two new cards.\n\nOne question: EX-12, fix now?';
+    await controller.layOut({
+      environments: [{ env_id: 'env-1' }],
+      turns: [
+        {
+          lines: [
+            'Reading the inbox',
+            { text: narration },
+            'Bash: yt search EX',
+            { text: waited, final: true },
+            'Agent: look up EX-12',
+            { text: answer, final: true },
+          ],
+          result: `${waited}\n\n${answer}`,
+        },
+      ],
+    });
+    await inbox.open();
+    await inbox.begin();
+
+    await expect(inbox.sessionMessages).toHaveCount(1);
+    const reply = inbox.sessionMessages.first();
+    const blocks = reply.getByTestId('inbox.message.block');
+    await expect(blocks).toHaveText([narration, waited, /^Two new cards\.\s*One question: EX-12, fix now\?$/]);
+    await expect(blocks.nth(2).locator('p')).toHaveText(['Two new cards.', 'One question: EX-12, fix now?']);
+    await expect(inbox.transcript.getByText(waited, { exact: true })).toHaveCount(1);
+    await expect(inbox.transcript.getByText('Two new cards.', { exact: true })).toHaveCount(1);
+
+    // The reply's box holds its blocks and nothing else, its one time under it.
+    const parts = reply.locator(':scope > *');
+    await expect(parts).toHaveCount(2);
+    await expect(parts.first().locator(':scope > *')).toHaveCount(3);
+    const time = reply.getByTestId('inbox.message.time');
+    await expect(time).toHaveCount(1);
+    const last = (await blocks.last().boundingBox())!;
+    expect((await time.boundingBox())!.y).toBeGreaterThanOrEqual(last.y + last.height);
+
+    const layout = await reply.evaluate((el) => {
+      const blocks = Array.from(el.querySelectorAll('[data-testid="inbox.message.block"]'));
+      const boxes = blocks.map((block) => block.getBoundingClientRect());
+      const [first, second] = Array.from(blocks[2].querySelectorAll(':scope > p')).map((p) => p.getBoundingClientRect());
+      const look = (node: Element) => {
+        const style = getComputedStyle(node);
+        return [style.color, style.opacity, style.fontStyle, style.fontWeight, style.fontSize, style.backgroundColor, style.borderStyle, style.paddingLeft].join(' ');
+      };
+      return {
+        gaps: boxes.slice(1).map((box, i) => box.top - boxes[i].bottom),
+        paragraph: second.top - first.bottom,
+        looks: blocks.map((block) => `${block.className} | ${look(block)} | ${look(block.querySelector('p')!)}`),
+      };
+    });
+    expect(layout.paragraph).toBeGreaterThan(0);
+    for (const gap of layout.gaps) expect(gap).toBeGreaterThan(layout.paragraph);
+    expect(new Set(layout.looks).size).toBe(1);
+  });
+
+  test("while the turn runs, the working box shows its log lines and no message of the turn, a reload included; the reply lands whole at the turn's end", async ({ controller, inbox, page, request, backendUrl }) => {
+    await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }] });
+    await inbox.open();
+    await inbox.begin();
+    await controller.finish('One question.');
+    await inbox.send('Yes.');
+
+    await controller.emit({ text: 'Let me read your answers.' });
+    await controller.emit('Reading EX-1');
+    await controller.emit({ text: 'EX-1 recorded as yes.', final: true });
+    await controller.emit('Reading EX-2');
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await readHolding(page, ['Reading EX-1', 'Reading EX-2']);
+    const unshown = page.getByText(/Let me read your answers|recorded as yes/);
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await expect(inbox.sessionMessages).toHaveCount(1);
+    await expect(unshown).toHaveCount(0);
+    const turn = (await inboxState(request, backendUrl)).sitting!.turn!;
+    expect(Object.keys(turn).sort()).toEqual(['began', 'lines', 'task']);
+
+    await inbox.reload();
+    await expect(inbox.workingLines).toHaveText(['Reading EX-1', 'Reading EX-2']);
+    await expect(inbox.sessionMessages).toHaveCount(1);
+    await expect(unshown).toHaveCount(0);
+
+    await controller.finish('EX-1 recorded as yes.');
+    await expect(inbox.sessionMessages).toHaveCount(2);
+    await expect(inbox.working).toHaveCount(0);
+    await expect(inbox.sessionMessages.last().getByTestId('inbox.message.block')).toHaveText([
+      'Let me read your answers.',
+      'EX-1 recorded as yes.',
+    ]);
+  });
+
+  test("a turn whose stream carries no message is shown by its result's text, one block, as a reply always was", async ({ controller, inbox }) => {
+    await controller.layOut({
+      environments: [{ env_id: 'env-1' }],
+      turns: [{ lines: ['Reading EX-1'], result: 'Recorded.\n\nNothing else to rule on.' }],
+    });
+    await inbox.open();
+    await inbox.begin();
+
+    const blocks = inbox.sessionMessages.first().getByTestId('inbox.message.block');
+    await expect(blocks).toHaveCount(1);
+    await expect(blocks.locator('p')).toHaveText(['Recorded.', 'Nothing else to rule on.']);
+  });
+
+  test("a turn that ends in an error shows its messages, then the error once: the CLI's, which a final message carries, and the worker's own, which none does", async ({ controller, inbox }) => {
+    const overloaded = 'The model is overloaded; try again later.';
+    const ended = 'session ended before a terminal result';
+    await controller.layOut({
+      environments: [{ env_id: 'env-1' }],
+      turns: [
+        {
+          lines: [{ text: 'Recording the rulings.' }, 'Bash: yt comment EX-12', { text: overloaded, final: true }],
+          result: overloaded,
+          is_error: true,
+        },
+        { lines: [{ text: 'Let me check EX-12.' }, 'Reading EX-12'], result: ended, is_error: true },
+      ],
+    });
+    await inbox.open();
+    await inbox.begin();
+    await expect(inbox.sessionMessages.first().getByTestId('inbox.message.block')).toHaveText([
+      'Recording the rulings.',
+      overloaded,
+    ]);
+
+    await inbox.send('Try again.');
+    await expect(inbox.sessionMessages).toHaveCount(2);
+    await expect(inbox.sessionMessages.last().getByTestId('inbox.message.block')).toHaveText([
+      'Let me check EX-12.',
+      ended,
+    ]);
+    await expect(inbox.transcript.getByText(overloaded, { exact: true })).toHaveCount(1);
+    await expect(inbox.transcript.getByText(ended, { exact: true })).toHaveCount(1);
   });
 
   test('the sorted inbox in monospace, its alignment kept and a wrapped line under its own text; the markdown around it; every card id linked to the tracker', async ({ controller, inbox, page, request, backendUrl }) => {

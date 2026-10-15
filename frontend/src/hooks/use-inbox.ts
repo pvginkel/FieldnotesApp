@@ -13,13 +13,13 @@ import { api } from '@/lib/api/client';
 import { useGetInbox } from '@/lib/api/generated/hooks';
 import type {
   InboxState_5430f38,
-  InboxState_5430f38_InboxMessage,
+  InboxState_5430f38_InboxEntry,
   InboxState_5430f38_InboxSitting,
 } from '@/lib/api/generated/hooks';
 
 type InboxState = InboxState_5430f38;
 export type Sitting = InboxState_5430f38_InboxSitting;
-export type Message = InboxState_5430f38_InboxMessage;
+export type Entry = InboxState_5430f38_InboxEntry;
 
 /** The lines the task said since the sitting was fetched at `fetched`. */
 interface Heard {

@@ -23,12 +23,14 @@
 .msg { display: flex; flex-direction: column; }
 .msg-time { margin-top: 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
 
-/* The session's text, as the skill writes it (markdown.tsx). */
+/* A reply of the session's: its messages, each as the skill writes it (markdown.tsx), set further
+   apart than a message's paragraphs (.md > * + *). */
 .session-md {
   padding: 14px 18px;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
 }
+.session-md > .md + .md { margin-top: 32px; }
 
 .fenced {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

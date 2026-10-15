@@ -139,5 +139,9 @@ export function Markdown({ text, tracker }: { text: string; tracker: string | nu
       out.push(<p key={key}>{inline(para.join(' '), tracker)}</p>);
     }
   }
-  return <div className="md">{out}</div>;
+  return (
+    <div className="md" data-testid="inbox.message.block">
+      {out}
+    </div>
+  );
 }

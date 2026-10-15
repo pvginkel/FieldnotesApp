@@ -406,9 +406,9 @@ log offset after the last log line or message read, the number of the session's 
 reply the transcript holds, whether the expiry has closed it, the messages of the turn in flight
 read so far, and the follow holding that turn: its pod and a heartbeat it refreshes every 15
 seconds. A turn no follow holds, or whose heartbeat is a minute old, its pod retired or gone, is
-taken over by whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs every 15 seconds,
-as a new task (`turn.task` changes) that goes on from the file: a message the session has not
-taken is sent, once, and the stream is read from the last offset, past the messages on file,
+taken over by whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs
+every 15 seconds, as a new task (`turn.task` changes) that goes on from the file: a message the
+session has not taken is sent, once, and the stream is read from the last offset, past the messages on file,
 which the reply keeps. Only the follow the file names writes the reply, so it lands once, with
 every message of the turn in it once. Through a rollout's overlap a page on the pod not following
 the turn gets no progress, and its next read brings the reply.

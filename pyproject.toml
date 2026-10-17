@@ -14,7 +14,7 @@ run-suite = "tools.suite_runner.local:cli"
 
 [dependency-groups]
 dev = [
-    "ruff==0.11.13",
+    "ruff==0.15.22",
 ]
 
 [build-system]

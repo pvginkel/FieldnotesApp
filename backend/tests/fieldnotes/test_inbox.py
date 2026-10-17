@@ -387,8 +387,10 @@ def test_a_start_mid_start_answers_the_sitting_in_flight(start, kubecoder, event
         again = begin(api)
         sent = send(api, "go")
         eventually(
-            lambda: "claude" in kubecoder.environments[ENV].sessions
-            and kubecoder.session(ENV, "claude").status == "busy",
+            lambda: (
+                "claude" in kubecoder.environments[ENV].sessions
+                and kubecoder.session(ENV, "claude").status == "busy"
+            ),
             "the turn in flight at the session",
         )
         kubecoder.finish(ENV, "claude", WRITE_UP)
@@ -989,7 +991,9 @@ def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
         opened(api, eventually, kubecoder)
         heard["reopened"] = []
         manager = api.app.container.sse_connection_manager()
-        manager.on_connect("reopened", "reopened", "http://sse.invalid/?request_id=reopened")
+        manager.on_connect(
+            "reopened", "reopened", "http://sse.invalid/?request_id=reopened"
+        )
         manager.bind_identity("reopened", "inbox-editor")
         kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
         task_id = send(api, "close EX-7").json()["sitting"]["turn"]["task"]

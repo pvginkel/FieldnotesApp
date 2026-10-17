@@ -218,8 +218,10 @@ def shut_down(api) -> threading.Thread:
 def finished_on(service: TaskService, eventually, task_id):
     """`finished`, for a task of `service`."""
     eventually(
-        lambda: service.get_task_status(task_id).status
-        in (TaskStatus.COMPLETED, TaskStatus.FAILED),
+        lambda: (
+            service.get_task_status(task_id).status
+            in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+        ),
         "the task's end",
     )
     info = service.get_task_status(task_id)

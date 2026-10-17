@@ -516,9 +516,11 @@ class Inbox:
         sitting is answered as it is; a lost one is cleared as End clears it, first."""
         _, settings = self._configured()
         kept = self.file.change(
-            lambda current: (current, None)
-            if current is not None and not current.live
-            else (None, current)
+            lambda current: (
+                (current, None)
+                if current is not None and not current.live
+                else (None, current)
+            )
         )
         if kept is not None:
             logger.info(

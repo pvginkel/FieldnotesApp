@@ -171,9 +171,12 @@ class FieldnotesService:
             return CheckResult(CheckStatus.OK)
         if runtime.failed:
             return CheckResult(
-                CheckStatus.ERROR, "startup failed: the store could not be cloned or indexed"
+                CheckStatus.ERROR,
+                "startup failed: the store could not be cloned or indexed",
             )
-        return CheckResult(CheckStatus.ERROR, "starting: cloning and indexing the store")
+        return CheckResult(
+            CheckStatus.ERROR, "starting: cloning and indexing the store"
+        )
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
         if self.runtime is None:

@@ -350,9 +350,11 @@ def test_a_shutdown_announced_between_the_start_s_claim_and_its_hold_still_leave
         monkeypatch.setattr(actioner, "_claim", drained_after_the_claim)
         run_id = started(api, eventually)
         eventually(
-            lambda: (held := other.hold.read()) is not None
-            and held.follow is not None
-            and held.follow.follower is None,
+            lambda: (
+                (held := other.hold.read()) is not None
+                and held.follow is not None
+                and held.follow.follower is None
+            ),
             "the follow left",
         )
         taken = other.state()

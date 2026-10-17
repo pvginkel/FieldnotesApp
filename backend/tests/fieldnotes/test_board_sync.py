@@ -201,8 +201,9 @@ def test_a_comment_event_queues_a_sync_too(carded, auth, clock, youtrack, eventu
             api, {"event": "commentAdded", "id": "FN-12", "comments": [{"text": "…"}]}
         )
         eventually(
-            lambda: observation(api, auth, id_)["card_updated"]
-            == "2026-09-19T10:11:00Z",
+            lambda: (
+                observation(api, auth, id_)["card_updated"] == "2026-09-19T10:11:00Z"
+            ),
             "the queued sync",
         )
     assert reply.json() == {"action": "queued"}

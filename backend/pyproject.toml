@@ -9,8 +9,8 @@ dependencies = [
     "flask>=3.0.0,<4",
     "pydantic>=2.5.0,<3",
     "pydantic-settings>=2.1.0,<3",
-    "spectree>=1.2.0,<2",
-    "flask-cors>=4.0.0,<5",
+    "spectree>=2.0.0,<3",
+    "flask-cors>=6.0.0,<7",
     "waitress>=3.0.0,<4",
     "paste>=3.10.1,<4",
     "dependency-injector>=4.48.1,<5",
@@ -36,19 +36,20 @@ check = "scripts.check:main"
 [dependency-groups]
 dev = [
     "copier>=9.0.0,<10",
-    "ruff>=0.11.0,<0.12",
+    "ruff>=0.15.0,<0.16",
     "mypy>=1.8.0,<2",
-    "pytest>=8,<9",
+    "pytest>=9.0.0,<10",
     # The MCP server's async tests (asyncio_mode = "auto" below).
     "pytest-asyncio>=1,<2",
-    "pytest-cov>=4.1.0,<5",
-    "types-flask-cors>=4.0.0,<5",
+    "pytest-cov>=7.0.0,<8",
+    "types-flask-cors>=6.0.0,<7",
     "types-requests>=2.31.0,<3",
     "types-pyyaml>=6,<7",
     # The replay and eval harness: a workspace member for the suites, never in the image.
     "fieldnotes-eval",
     "types-waitress>=3.0.1.20250801,<4",
     "vulture>=2.14,<3",
+    "watchdog[watchmedo]>=6.0.0,<7",
 ]
 
 # Only app/ is a package; run.py and scripts/ are reached through the editable
@@ -76,7 +77,7 @@ fieldnotes-eval = { workspace = true }
 [tool.ruff]
 target-version = "py313"
 line-length = 88
-exclude = ["vulture_whitelist.py"]
+extend-exclude = ["vulture_whitelist.py"]
 
 [tool.ruff.format]
 # The template-owned files the ModernAppTemplate ships unformatted at this line length: they
@@ -90,6 +91,7 @@ exclude = [
     "app/api/sse.py",
     "app/api/tasks.py",
     "app/api/testing_auth.py",
+    "app/api/testing_guard.py",
     "app/api/testing_logs.py",
     "app/api/testing_sse.py",
     "app/config.py",
@@ -102,14 +104,17 @@ exclude = [
     "app/services/auth_service.py",
     "app/services/base_task.py",
     "app/services/frontend_version_service.py",
+    "app/services/health_service.py",
     "app/services/metrics_service.py",
     "app/services/oidc_client_service.py",
     "app/services/sse_connection_manager.py",
     "app/services/task_service.py",
     "app/utils/auth.py",
     "app/utils/flask_error_handlers.py",
+    "app/utils/http_metrics.py",
     "app/utils/lifecycle_coordinator.py",
     "app/utils/log_capture.py",
+    "app/utils/log_formatter.py",
     "app/utils/request_parsing.py",
     "app/utils/spectree_config.py",
     "app/utils/sse_utils.py",

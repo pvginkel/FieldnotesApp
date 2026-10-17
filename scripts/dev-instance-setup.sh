@@ -7,6 +7,10 @@
 # backend/.run/dev, so rulings made here never reach the real one. The `.env` is rewritten every
 # time; the scratch store is seeded only when it is missing, so what was ruled on it survives a
 # restart. Refresh it (stack stopped): rm -rf backend/.run/dev and run this again.
+#
+# An environment without the store's checkout gets no dev instance: ModernAppTemplate's environment
+# checks FieldnotesApp out for template syncs only, and failing here would stop `kc project setup`
+# before the backend and frontend are set up.
 
 set -euo pipefail
 
@@ -16,8 +20,8 @@ STORE_SOURCE=/work/Fieldnotes # the store's checkout, a repo of this environment
 
 if [[ ! -d "$DEV/remote.git" ]]; then
     if [[ ! -d "$STORE_SOURCE/.git" ]]; then
-        echo "no store checkout at $STORE_SOURCE: the dev instance has no store" >&2
-        exit 1
+        echo "no store checkout at $STORE_SOURCE: skipping the dev instance" >&2
+        exit 0
     fi
     rm -rf "$DEV/checkout" # a checkout of an earlier scratch store would not match this one
     mkdir -p "$DEV"

@@ -27,8 +27,7 @@ two items, which wait on real use, are the only ones open.
 ## Repo structure
 
 A ModernAppTemplate monorepo (root, `backend/`, `frontend/`, each with its `.copier-answers.yml`),
-on uv rather than the template's Poetry: the operator's ruling, carried in the template-owned files
-too (see "Template ownership" below). `kc project` runs `root`, `backend` and `frontend`.
+on uv, as the template is. `kc project` runs `root`, `backend` and `frontend`.
 
 - **Root**: the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
@@ -97,10 +96,9 @@ template-owned file to add app behaviour; use the extension points instead:
 
 If the template lacks an extension point you need, add it to the template first.
 
-The one exception, the operator's ruling: the app is on uv, not Poetry, and the uv migration edits
-template-owned files (`Jenkinsfile`, `tools/suite_runner/local.py`, `Procfile.dev`,
-`scripts/dev.py`, `backend/scripts/dev-server.sh` and `testing-server.sh`). A `copier update`
-three-way merges them; resolve a conflict there to the uv side. The template takes uv on later.
+The one standing edit to a template-owned file: `backend/.gitignore` ignores `.run/`, the eval
+harness's output, which holds the private dataset's text. A `copier update` three-way merges it;
+keep it.
 
 ## Working rules
 

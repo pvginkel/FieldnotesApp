@@ -43,8 +43,12 @@ class AuthState:
     """State for OIDC authorization flow with PKCE."""
 
     code_verifier: str  # PKCE code verifier
-    redirect_url: str  # Original URL to redirect after login
+    redirect_url: str  # Path on the app's origin to redirect to after login
     nonce: str  # Random nonce for CSRF protection
+    # The origin (scheme://host) the login came in on. The callback builds
+    # the same redirect_uri from it. None only in a state made before the
+    # field existed, which the callback reads as BASEURL.
+    origin: str | None = None
 
 
 @dataclass
@@ -56,6 +60,14 @@ class TokenResponse:
     refresh_token: str | None
     token_type: str
     expires_in: int
+
+
+def callback_uri(origin: str) -> str:
+    """Return the OAuth ``redirect_uri`` for an origin (scheme://host).
+
+    The IdP must have it registered for every hostname the app is served on.
+    """
+    return f"{origin}/api/auth/callback"
 
 
 class OidcClientService:
@@ -189,7 +201,7 @@ class OidcClientService:
 
         return challenge
 
-    def create_auth_state(self, redirect_url: str) -> AuthState:
+    def create_auth_state(self, redirect_url: str, origin: str) -> AuthState:
         """Create PKCE auth state for a new login flow.
 
         Generates a random code verifier and nonce.  The caller is responsible
@@ -197,7 +209,8 @@ class OidcClientService:
         OAuth ``state`` parameter).
 
         Args:
-            redirect_url: URL to redirect to after successful authentication
+            redirect_url: Path to redirect to after successful authentication
+            origin: The origin (scheme://host) the login came in on
 
         Returns:
             AuthState with fresh PKCE parameters
@@ -208,10 +221,11 @@ class OidcClientService:
             code_verifier=code_verifier,
             redirect_url=redirect_url,
             nonce=nonce,
+            origin=origin,
         )
 
     def build_authorization_url(
-        self, auth_state: AuthState, state_value: str
+        self, auth_state: AuthState, state_value: str, origin: str
     ) -> str:
         """Build the OIDC authorization URL for the given auth state.
 
@@ -219,12 +233,14 @@ class OidcClientService:
             auth_state: AuthState containing the PKCE code verifier
             state_value: Value for the OAuth ``state`` query parameter
                 (typically the encrypted auth state blob)
+            origin: The origin (scheme://host) the login came in on; the
+                ``redirect_uri`` is its ``/api/auth/callback``
 
         Returns:
             Full authorization URL to redirect the user to
         """
         code_challenge = self.generate_pkce_challenge(auth_state.code_verifier)
-        redirect_uri = f"{self.config.baseurl}/api/auth/callback"
+        redirect_uri = callback_uri(origin)
 
         params = {
             "client_id": self.config.oidc_client_id,
@@ -246,32 +262,16 @@ class OidcClientService:
 
         return authorization_url
 
-    def generate_authorization_url(
-        self, redirect_url: str
-    ) -> tuple[str, AuthState]:
-        """Generate OIDC authorization URL with PKCE.
-
-        Convenience wrapper that creates auth state, uses the nonce as
-        the OAuth ``state`` parameter, and returns both.
-
-        Args:
-            redirect_url: URL to redirect to after successful authentication
-
-        Returns:
-            Tuple of (authorization_url, auth_state)
-        """
-        auth_state = self.create_auth_state(redirect_url)
-        authorization_url = self.build_authorization_url(auth_state, auth_state.nonce)
-        return authorization_url, auth_state
-
     def exchange_code_for_tokens(
-        self, code: str, code_verifier: str
+        self, code: str, code_verifier: str, origin: str
     ) -> TokenResponse:
         """Exchange authorization code for tokens.
 
         Args:
             code: Authorization code from callback
             code_verifier: PKCE code verifier from auth state
+            origin: The origin the authorization request was built for; the
+                ``redirect_uri`` must match that request's exactly
 
         Returns:
             TokenResponse with access token and optional refresh token
@@ -279,7 +279,7 @@ class OidcClientService:
         Raises:
             AuthenticationException: If token exchange fails
         """
-        redirect_uri = f"{self.config.baseurl}/api/auth/callback"
+        redirect_uri = callback_uri(origin)
 
         # Prepare token request
         data = {

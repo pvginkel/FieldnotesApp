@@ -19,36 +19,38 @@ from app import create_app
 from app.app_config import AppSettings
 from app.config import Settings
 
-# Load test environment variables from .env.test
-_TEST_ENV_FILE = Path(__file__).parent.parent / ".env.test"
+# .env holds the base configuration and .env.test overrides it for tests: the
+# same two layers scripts/testing-server.sh gives the Playwright backends.
+_PROJECT_ROOT = Path(__file__).parent.parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
+_TEST_ENV_FILE = _PROJECT_ROOT / ".env.test"
+if _ENV_FILE.exists():
+    load_dotenv(_ENV_FILE)
 if _TEST_ENV_FILE.exists():
     load_dotenv(_TEST_ENV_FILE, override=True)
 
 
+def _clear_prometheus_registry() -> None:
+    """Unregister every collector from the Prometheus registry."""
+    for collector in list(REGISTRY._collector_to_names.keys()):
+        try:
+            REGISTRY.unregister(collector)
+        except (KeyError, ValueError):
+            # Collector may have already been unregistered or not exist
+            pass
+
+
 @pytest.fixture(autouse=True)
-def clear_prometheus_registry():
+def clear_prometheus_registry() -> Generator[None]:
     """Clear Prometheus registry before and after each test to ensure isolation.
 
     This is necessary for tests that create multiple Flask app instances or services
     that register Prometheus metrics, as metrics cannot be registered twice in the
     same registry. Clearing before AND after each test ensures proper isolation.
     """
-    # Clear collectors before test
-    collectors = list(REGISTRY._collector_to_names.keys())
-    for collector in collectors:
-        try:
-            REGISTRY.unregister(collector)
-        except (KeyError, ValueError):
-            # Collector may have already been unregistered or not exist
-            pass
+    _clear_prometheus_registry()
     yield
-    # Clean up after test
-    collectors = list(REGISTRY._collector_to_names.keys())
-    for collector in collectors:
-        try:
-            REGISTRY.unregister(collector)
-        except (KeyError, ValueError):
-            pass
+    _clear_prometheus_registry()
 
 
 def _build_test_settings() -> Settings:
@@ -95,7 +97,7 @@ def _build_test_app_settings() -> AppSettings:
 
 @pytest.fixture
 def test_settings() -> Settings:
-    """Create test settings with in-memory database."""
+    """Create test settings."""
     return _build_test_settings()
 
 
@@ -103,7 +105,6 @@ def test_settings() -> Settings:
 def test_app_settings() -> AppSettings:
     """Create test app settings."""
     return _build_test_app_settings()
-
 
 @pytest.fixture
 def app(test_settings: Settings, test_app_settings: AppSettings) -> Generator[Flask]:
@@ -120,6 +121,12 @@ def app(test_settings: Settings, test_app_settings: AppSettings) -> Generator[Fl
 
 
 @pytest.fixture
+def container(app: Flask):
+    """Access to the DI container for testing."""
+    return app.container
+
+
+@pytest.fixture
 def client(app: Flask):
     """Create test client."""
     return app.test_client()
@@ -129,14 +136,6 @@ def client(app: Flask):
 def runner(app: Flask):
     """Create test CLI runner."""
     return app.test_cli_runner()
-
-
-@pytest.fixture
-def container(app: Flask):
-    """Access to the DI container for testing with session provided."""
-    container = app.container
-
-    return container
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +252,7 @@ def oidc_app(
     mock_oidc_discovery: dict[str, Any],
     generate_test_jwt: Any,
 ) -> Generator[Flask]:
-    """Create Flask app with OIDC enabled, using the standard template clone pattern.
+    """Create Flask app with OIDC enabled.
 
     Keeps httpx.get and PyJWKClient mocks active so that AuthService can
     discover endpoints and validate tokens throughout the test.
@@ -292,4 +291,3 @@ def oidc_app(
 def oidc_client(oidc_app: Flask) -> Any:
     """Create test client for the OIDC-enabled app."""
     return oidc_app.test_client()
-

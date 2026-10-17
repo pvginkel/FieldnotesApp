@@ -23,23 +23,27 @@ cd "$BACKEND_DIR" || {
 # Default server configuration
 HOST="0.0.0.0"
 PORT="$TESTING_BACKEND_PORT"
-SQLITE_DB_PATH=""
+DATABASE_URL_OVERRIDE=""
 
 print_usage() {
     cat <<'EOF'
-Usage: testing-server.sh [--sqlite-db PATH] [--host HOST] [--port PORT]
+Usage: testing-server.sh [--database-url URL] [--host HOST] [--port PORT]
+
+  --database-url URL   Database to serve
+  --host HOST          Host to bind to (default: 0.0.0.0)
+  --port PORT          Port to bind to
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sqlite-db)
+        --database-url)
             if [[ -z "${2:-}" ]]; then
-                echo "Error: --sqlite-db requires a value." >&2
+                echo "Error: --database-url requires a value." >&2
                 print_usage
                 exit 1
             fi
-            SQLITE_DB_PATH="$2"
+            DATABASE_URL_OVERRIDE="$2"
             shift 2
             ;;
         --host)
@@ -72,20 +76,33 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "$SQLITE_DB_PATH" ]]; then
-    export DATABASE_URL="sqlite:////${SQLITE_DB_PATH}"
-    echo "Using SQLite database at $SQLITE_DB_PATH"
+# The settings come from .env, then .env.test over it, as in pytest
+# (tests/conftest_infrastructure.py). The app reads .env itself; .env.test is
+# exported here so that it wins.
+if [[ -f .env.test ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.test
+    set +a
+    echo "Loaded test overrides from .env.test"
+fi
+
+# The command line wins over both files.
+if [[ -n "$DATABASE_URL_OVERRIDE" ]]; then
+    export DATABASE_URL="$DATABASE_URL_OVERRIDE"
+    echo "Using the database given by --database-url"
     echo
 fi
 
 # Mark the process as running in testing mode
 export FLASK_ENV=testing
 
-# Run the Flask server
+# Run the server through the project's dev entry point (run.py), so it gets
+# the same lifecycle coordinator and logging as dev and production.
 echo
 echo "Starting backend in testing mode..."
 echo "Server will run on http://$HOST:$PORT"
 echo "Press Ctrl+C to stop"
 echo
 
-exec uv run python -m flask run --host="$HOST" --port="$PORT"
+exec env HOST="$HOST" PORT="$PORT" uv run dev

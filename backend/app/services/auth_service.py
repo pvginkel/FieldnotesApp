@@ -76,6 +76,7 @@ class AuthService:
         write_role: str | None = None,
         admin_role: str | None = None,
         additional_roles: list[str] | None = None,
+        role_hierarchy: dict[str, list[str]] | None = None,
     ) -> None:
         """Initialize auth service with OIDC and role configuration.
 
@@ -104,12 +105,22 @@ class AuthService:
                 write endpoints fall back to requiring admin_role.
             admin_role: Role name for admin access, or None.
             additional_roles: Extra non-hierarchical role names the app
-                recognizes (e.g. "pipeline").  These are never expanded.
+                recognizes (e.g. "pipeline").  These are not expanded,
+                unless role_hierarchy says so.
+            role_hierarchy: Implications on top of the tier chain, off by
+                default.  Maps a role to the roles it implies:
+                ``{"editor": ["portal"]}`` lets an editor pass endpoints
+                that require ``portal``.  Every role named must be
+                configured.  Implications are transitive and combine with
+                the tier chain, so an admin above editor gets ``portal``
+                too.  An entry implying itself is harmless.
 
         Raises:
             ValueError: If read_role is set but neither write_role nor
-                admin_role is set (no one above reader can write), or if
-                OIDC is enabled but required OIDC config is missing.
+                admin_role is set (no one above reader can write), if
+                role_hierarchy names a role that isn't configured or makes
+                a cycle (on its own or through the tier chain), or if OIDC
+                is enabled but required OIDC config is missing.
         """
         self.config = config
 
@@ -154,6 +165,13 @@ class AuthService:
                 implied.add(read_role)
             self._hierarchy_map[admin_role] = implied
 
+        # Fold the cross-cutting implications into the map
+        self._role_hierarchy: dict[str, list[str]] = {
+            role: list(implied) for role, implied in (role_hierarchy or {}).items()
+        }
+        if self._role_hierarchy:
+            self._merge_role_hierarchy()
+
         # JWKS client instance (initialized once if OIDC enabled)
         self._jwks_client: PyJWKClient | None = None
         self._jwks_uri: str | None = None
@@ -197,6 +215,82 @@ class AuthService:
     def hierarchy_roles(self) -> set[str]:
         """Return only the hierarchical role names (read/write/admin), excluding additional_roles."""
         return self._hierarchy_roles
+
+    @property
+    def role_hierarchy(self) -> dict[str, list[str]]:
+        """Return a copy of the role_hierarchy as given (empty when off)."""
+        return {role: list(implied) for role, implied in self._role_hierarchy.items()}
+
+    def _merge_role_hierarchy(self) -> None:
+        """Validate role_hierarchy and fold it into the hierarchy map.
+
+        The tier chain and role_hierarchy form one graph of direct
+        implications.  Every role role_hierarchy names must be configured,
+        the graph must have no cycle, and each role then implies itself and
+        every role it reaches.
+
+        Raises:
+            ValueError: If role_hierarchy names an unknown role, or the
+                graph has a cycle
+        """
+        referenced: set[str] = set(self._role_hierarchy)
+        for implied in self._role_hierarchy.values():
+            referenced.update(implied)
+        unknown = referenced - self._configured_roles
+        if unknown:
+            raise ValueError(
+                f"role_hierarchy references unknown roles: {sorted(unknown)}. "
+                f"Configured roles: {sorted(self._configured_roles)}"
+            )
+
+        # Direct implications, without the harmless self-references
+        edges: dict[str, set[str]] = {
+            role: implied - {role} for role, implied in self._hierarchy_map.items()
+        }
+        for role, implied_list in self._role_hierarchy.items():
+            edges.setdefault(role, set()).update(set(implied_list) - {role})
+
+        # Depth-first search with three colours: reaching a role that is
+        # still on the current path closes a cycle.
+        white, grey, black = 0, 1, 2
+        colour: dict[str, int] = {}
+        path: list[str] = []
+
+        def visit(role: str) -> None:
+            colour[role] = grey
+            path.append(role)
+            for implied_role in sorted(edges.get(role, ())):
+                state = colour.get(implied_role, white)
+                if state == grey:
+                    cycle = [*path[path.index(implied_role):], implied_role]
+                    raise ValueError(
+                        f"role_hierarchy contains a cycle: {' -> '.join(cycle)}"
+                    )
+                if state == white:
+                    visit(implied_role)
+            path.pop()
+            colour[role] = black
+
+        for role in sorted(edges):
+            if colour.get(role, white) == white:
+                visit(role)
+
+        # Transitive closure: each role implies itself and all it reaches
+        for role in edges:
+            reached = {role}
+            stack = list(edges[role])
+            while stack:
+                current = stack.pop()
+                if current not in reached:
+                    reached.add(current)
+                    stack.extend(edges.get(current, ()))
+            self._hierarchy_map[role] = reached
+
+        logger.info(
+            "Role hierarchy merged: input=%s, resolved_map=%s",
+            self._role_hierarchy,
+            {role: sorted(implied) for role, implied in self._hierarchy_map.items()},
+        )
 
     def expand_roles(self, raw_roles: set[str]) -> set[str]:
         """Expand raw roles using the hierarchy map.

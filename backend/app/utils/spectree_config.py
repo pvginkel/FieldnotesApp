@@ -132,10 +132,11 @@ def annotate_openapi_security(app: Any) -> None:
             app.openapi_role_map = role_map
 
             # Build the role configuration summary for the spec root
-            auth_roles: dict[str, str | None] = {
+            auth_roles: dict[str, Any] = {
                 "read": auth_service.read_role,
                 "write": auth_service.write_role,
                 "admin": auth_service.admin_role,
+                "hierarchy": auth_service.role_hierarchy,
             }
             app.openapi_auth_roles = auth_roles
 

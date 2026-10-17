@@ -1,22 +1,7 @@
-FROM python:3.13-slim AS build
-
-# uv uses the image's own Python and never downloads one; copy mode, because
-# the cache and the venv are on different filesystems in a build.
-ENV UV_PYTHON_DOWNLOADS=never
-ENV UV_LINK_MODE=copy
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-# system deps only if you need to compile wheels; many projects don't
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      curl \
-      ca-certificates \
-      build-essential \
-      libffi-dev libssl-dev pkg-config \
-   && rm -rf /var/lib/apt/lists/*
-
-RUN pip install uv
+# The build image (DockerImages, modern-app-backend-build) carries Python 3.13,
+# uv, the -dev packages wheels compile against, and uv's settings: the image's
+# own Python, never a downloaded one, and copy mode.
+FROM registry:5000/modern-app-backend-build AS build
 
 WORKDIR /app
 
@@ -36,14 +21,14 @@ RUN uv sync --locked --no-dev --no-install-project --no-editable
 COPY *.py /app/
 COPY app /app/app
 
-# Now let's build the runtime image from the builder.
-#   We'll just copy the env and the PATH reference.
-FROM python:3.13-slim
+# The runtime image (DockerImages, modern-app-backend) carries tini, netcat and
+# the shared libraries: libmagic, the image codecs and libpq.
+FROM registry:5000/modern-app-backend
 
 # git because the store is a real checkout the API fetches, commits to and pushes through the
 # git CLI; ca-certificates so the HTTPS remote, the models pod and YouTrack all verify.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tini netcat-openbsd git ca-certificates \
+    apt-get install -y --no-install-recommends git ca-certificates \
    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 3401

@@ -15,4 +15,9 @@ from app.api.tasks import tasks_bp  # noqa: E402
 
 api_bp.register_blueprint(tasks_bp)
 
+# Deployment facts for the frontend (under /api/ui-setup)
+from app.api.ui_setup import ui_setup_bp  # noqa: E402
+
+api_bp.register_blueprint(ui_setup_bp)
+
 # App-specific blueprints are registered in app/startup.py:register_blueprints()

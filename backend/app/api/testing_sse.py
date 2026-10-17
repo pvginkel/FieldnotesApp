@@ -1,13 +1,15 @@
 """Testing endpoints for SSE integration tests.
 
-Provides endpoints to start demo tasks, trigger version events, and send
-fake task events, enabling integration tests to exercise the SSE Gateway
-pipeline without requiring real domain logic.
+Provides endpoints to start demo tasks, trigger version events, send
+fake task events and force the next connect callback to refuse, enabling
+integration tests to exercise the SSE Gateway pipeline without requiring
+real domain logic.
 
 All endpoints are guarded by reject_if_not_testing() so they are
 only available when FLASK_ENV=testing.
 """
 
+import logging
 import time
 from typing import Any
 
@@ -20,6 +22,7 @@ from app.schemas.task_schema import TaskEvent, TaskEventType
 from app.schemas.testing_sse import (
     DeploymentTriggerRequestSchema,
     DeploymentTriggerResponseSchema,
+    ForceSSECallbackErrorQuerySchema,
     TaskEventRequestSchema,
     TaskEventResponseSchema,
     TaskStartRequestSchema,
@@ -29,10 +32,12 @@ from app.schemas.testing_sse import (
 from app.services.base_task import BaseTask, ProgressHandle
 from app.services.container import ServiceContainer
 from app.services.frontend_version_service import FrontendVersionService
-from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.sse_connection_manager import SSEConnectionManager, Target
 from app.services.task_service import TaskService
-from app.utils.auth import get_auth_context
+from app.services.testing_service import TestingService
 from app.utils.spectree_config import api
+
+logger = logging.getLogger(__name__)
 
 testing_sse_bp = Blueprint("testing_sse", __name__, url_prefix="/api/testing")
 
@@ -111,9 +116,11 @@ def start_test_task(
     else:
         return jsonify({"error": f"Unknown task_type: {payload.task_type}"}), 400
 
-    auth = get_auth_context()
-    caller_subject = auth.subject if auth else None
-    result = task_service.start_task(task, caller_subject=caller_subject, **payload.params)
+    # This blueprint sits outside api_bp, so no auth hook runs here and the
+    # task gets no subject. Its events go to the local admin's connections with
+    # OIDC off (how the Playwright backend and the integration tests run), and
+    # to nobody with OIDC on.
+    result = task_service.start_task(task, caller_subject=None, **payload.params)
     response = TaskStartResponseSchema(task_id=result.task_id, status="started")
     return jsonify(response.model_dump()), 200
 
@@ -179,7 +186,7 @@ def send_task_event(
     )
 
     success = sse_connection_manager.send_event(
-        payload.request_id,
+        Target.connection(payload.request_id),
         event.model_dump(mode="json"),
         event_name="task_event",
         service_type="task",
@@ -198,3 +205,30 @@ def send_task_event(
         delivered=True,
     )
     return jsonify(response.model_dump()), 200
+
+
+@testing_sse_bp.route("/sse/force-callback-error", methods=["POST"])
+@api.validate(query=ForceSSECallbackErrorQuerySchema)
+@inject
+def force_sse_callback_error(
+    testing_service: TestingService = Provide[ServiceContainer.testing_service],
+) -> tuple[str, int]:
+    """Make the next SSE Gateway connect callback refuse the connection.
+
+    Single-shot: the callback after it behaves normally again. The gateway
+    turns the refusal into an in-stream ``rejected`` event, which drives the
+    frontend's refresh-and-reconnect path.
+
+    Query Parameters:
+        status: 401 or 403 (the schema refuses anything else with 400)
+
+    Returns:
+        204: Hook armed
+    """
+    query = ForceSSECallbackErrorQuerySchema.model_validate(request.args.to_dict())
+
+    testing_service.set_forced_sse_callback_error(query.status)
+
+    logger.info("Configured forced SSE callback error: status=%d", query.status)
+
+    return "", 204

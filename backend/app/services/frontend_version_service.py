@@ -10,7 +10,11 @@ from typing import Any, cast
 import requests
 
 from app.config import Settings
-from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.sse_connection_manager import (
+    BROADCAST_TARGET,
+    SSEConnectionManager,
+    Target,
+)
 from app.utils.lifecycle_coordinator import LifecycleCoordinatorProtocol, LifecycleEvent
 
 logger = logging.getLogger(__name__)
@@ -31,17 +35,26 @@ class FrontendVersionService:
         self.sse_connection_manager = sse_connection_manager
 
         self._lock = threading.RLock()
-        self._pending_version: dict[str, dict[str, Any]] = {}  # request_id -> {version, changelog}
+        # request_id -> {version, changelog}: the version queued for a
+        # connection, sent again when it reconnects. Dropped when the
+        # connection goes, so the dict holds live connections only.
+        self._pending_version: dict[str, dict[str, Any]] = {}
         self._is_shutting_down = False
 
-        # Register observer callback with SSEConnectionManager
+        # Register observer callbacks with SSEConnectionManager
         self.sse_connection_manager.register_on_connect(self._on_connect_callback)
+        self.sse_connection_manager.register_on_disconnect(self._on_disconnect_callback)
 
         # Register for lifecycle notifications
         lifecycle_coordinator.register_lifecycle_notification(self._handle_lifecycle_event)
 
-    def _fetch_frontend_version(self) -> dict[str, Any]:
-        """Fetch frontend version from configured URL."""
+    def _fetch_frontend_version(self) -> dict[str, Any] | None:
+        """Fetch frontend version from configured URL.
+
+        Returns the parsed payload, or ``None`` when the fetch or the parse
+        fails. The failure is logged here; callers send nothing for ``None``
+        rather than a made-up version.
+        """
         try:
             url = self.settings.frontend_version_url
             response = requests.get(url, timeout=2)
@@ -50,13 +63,15 @@ class FrontendVersionService:
 
         except (requests.RequestException, json.JSONDecodeError) as e:
             logger.warning(f"Failed to fetch frontend version: {e}")
-            return {"version": "unknown", "error": str(e)}
+            return None
 
     def _on_connect_callback(self, request_id: str) -> None:
         """Observer callback invoked when a connection is established.
 
         This method is called by SSEConnectionManager after a connection is registered.
-        It sends either the pending version (if queued) or fetches the current version.
+        It sends the pending version if one is queued. Otherwise, outside a local
+        stage, it fetches the current version and sends it; a failed fetch sends
+        nothing.
 
         Args:
             request_id: Request ID from the established connection
@@ -71,13 +86,22 @@ class FrontendVersionService:
         if pending_version:
             version_payload = pending_version
             logger.debug(f"Sending pending version for request_id {request_id}")
+        elif self.settings.stage.is_local():
+            # A local stage has no deployed version.json to fetch; a queued
+            # (pending) version is the only one it sends.
+            logger.debug(f"No version sent in a local stage for request_id {request_id}")
+            return
         else:
-            version_payload = self._fetch_frontend_version()
+            fetched = self._fetch_frontend_version()
+            if fetched is None:
+                # The fetch failure is already logged; send nothing.
+                return
+            version_payload = fetched
             logger.debug(f"Fetched current version for request_id {request_id}")
 
         # Send version event via SSEConnectionManager
         success = self.sse_connection_manager.send_event(
-            request_id,
+            Target.connection(request_id),
             version_payload,
             event_name="version",
             service_type="version"
@@ -90,6 +114,11 @@ class FrontendVersionService:
             )
 
 
+    def _on_disconnect_callback(self, request_id: str) -> None:
+        """Drop the connection's pending version when it disconnects."""
+        with self._lock:
+            self._pending_version.pop(request_id, None)
+
     def queue_version_event(
         self,
         request_id: str,
@@ -99,7 +128,9 @@ class FrontendVersionService:
         """Queue a version notification for broadcast and store as pending.
 
         Broadcasts the version event to all connected clients and stores it as
-        the pending version for this request_id (overwriting any previous pending version).
+        the pending version for this request_id (overwriting any previous pending
+        version). The pending version is sent when that request_id connects, and
+        dropped when it disconnects.
 
         Returns True when the event was broadcast to connections, False if shutting down.
         """
@@ -119,13 +150,13 @@ class FrontendVersionService:
 
         # Broadcast to all connected clients
         self.sse_connection_manager.send_event(
-            None,  # None = broadcast to all connections
+            BROADCAST_TARGET,  # the version concerns every client
             event_payload,
             event_name="version",
             service_type="version"
         )
 
-        # Store as pending version (persists until overwritten, per plan)
+        # Store as pending version (kept until overwritten or the connection goes)
         with self._lock:
             self._pending_version[request_id] = event_payload
 

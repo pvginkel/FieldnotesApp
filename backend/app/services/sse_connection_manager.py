@@ -2,12 +2,13 @@
 
 This service manages the bidirectional mapping between request IDs
 and SSE Gateway tokens. It handles connection lifecycle events and provides
-an interface for sending events (targeted or broadcast) via HTTP to the SSE Gateway.
+an interface for sending events via HTTP to the SSE Gateway.
 
 Key responsibilities:
 - Maintain bidirectional mappings: request_id <-> token
 - Handle connection replacement (close old, register new)
-- Send events via HTTP POST to SSE Gateway (targeted or broadcast)
+- Send events via HTTP POST to SSE Gateway, to the connections a ``Target``
+  names; every send names one, and there is no implicit broadcast
 - Notify observers when connections are established
 - Clean up stale connections on failures
 """
@@ -18,7 +19,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 import requests
 from prometheus_client import Counter, Gauge, Histogram
@@ -27,6 +28,7 @@ from app.schemas.sse_gateway_schema import (
     SSEGatewayEventData,
     SSEGatewaySendRequest,
 )
+from app.services.health_service import CheckResult, CheckStatus, HealthService
 
 # SSE Gateway metrics
 SSE_GATEWAY_CONNECTIONS_TOTAL = Counter(
@@ -57,6 +59,48 @@ SSE_IDENTITY_BINDING_TOTAL = Counter(
 logger = logging.getLogger(__name__)
 
 
+TargetKind = Literal["connection", "subject", "local_admin", "broadcast"]
+
+
+@dataclass(frozen=True)
+class Target:
+    """Who an SSE event is for. Every ``send_event`` names one.
+
+    Build targets with the factories and constants, not the constructor:
+
+    - ``Target.connection(request_id)``: that one connection.
+    - ``Target.subject(subject)``: every connection bound to that OIDC
+      subject, plus the local admin's connections. The local admin (OIDC off,
+      subject ``local-user``) sees every subject's events, as it owns every
+      task through ``/api/tasks``.
+    - ``LOCAL_ADMIN_TARGET``: only the local admin's connections, so nobody
+      when OIDC is on. A task started without a subject sends here.
+    - ``BROADCAST_TARGET``: every connection. For infrastructure events that
+      concern every client (the frontend version), never for domain events.
+    """
+
+    kind: TargetKind
+    value: str | None = None
+
+    @staticmethod
+    def connection(request_id: str) -> "Target":
+        """Target the one connection with this request ID."""
+        if not request_id:
+            raise ValueError("Target.connection needs a request ID")
+        return Target("connection", request_id)
+
+    @staticmethod
+    def subject(subject: str) -> "Target":
+        """Target the connections bound to this OIDC subject (and the local admin's)."""
+        if not subject:
+            raise ValueError("Target.subject needs a subject")
+        return Target("subject", subject)
+
+
+LOCAL_ADMIN_TARGET = Target("local_admin")
+BROADCAST_TARGET = Target("broadcast")
+
+
 @dataclass
 class ConnectionInfo:
     """Information about an active SSE connection."""
@@ -71,13 +115,16 @@ class SSEConnectionManager:
     def __init__(
         self,
         gateway_url: str,
-        http_timeout: float = 5.0
+        http_timeout: float = 5.0,
+        health_service: HealthService | None = None,
     ):
         """Initialize SSEConnectionManager.
 
         Args:
             gateway_url: Base URL for SSE Gateway (e.g., "http://localhost:3000")
             http_timeout: Timeout for HTTP requests to SSE Gateway in seconds
+            health_service: Where to register the non-critical ``sse_gateway``
+                readiness check; passed only when the app uses SSE.
         """
         self.gateway_url = gateway_url.rstrip("/")
         self.http_timeout = http_timeout
@@ -90,6 +137,9 @@ class SSEConnectionManager:
 
         # Identity map: request_id -> OIDC subject
         self._identity_map: dict[str, str] = {}
+        # Request IDs bound as the local admin (OIDC off): they receive every
+        # subject's events
+        self._local_admin_ids: set[str] = set()
 
         # Observer callbacks for connection events
         self._on_connect_callbacks: list[Callable[[str], None]] = []
@@ -97,6 +147,18 @@ class SSEConnectionManager:
 
         # Thread safety
         self._lock = threading.RLock()
+
+        # Not critical: the app serves without live updates, and the gateway
+        # has its own readiness probe.
+        if health_service is not None:
+            health_service.register_check("sse_gateway", self.check_readiness, critical=False)
+
+    def check_readiness(self) -> CheckResult:
+        """Readiness check: the SSE Gateway answers its own readyz with 200."""
+        response = requests.get(f"{self.gateway_url}/readyz", timeout=self.http_timeout)
+        if response.status_code != 200:
+            return CheckResult(CheckStatus.ERROR, f"gateway readyz answered {response.status_code}")
+        return CheckResult(CheckStatus.OK)
 
     def register_on_connect(self, callback: Callable[[str], None]) -> None:
         """Register a callback to be notified when connections are established.
@@ -155,6 +217,11 @@ class SSEConnectionManager:
                 )
                 # Remove old reverse mapping
                 self._token_to_request_id.pop(old_token_to_close, None)
+
+            # A new connection starts unbound: the old one's identity is not
+            # carried over to whoever connects with the same request_id
+            self._identity_map.pop(request_id, None)
+            self._local_admin_ids.discard(request_id)
 
             # Register new connection (atomic update of both mappings)
             self._connections[request_id] = {
@@ -240,6 +307,7 @@ class SSEConnectionManager:
             del self._connections[request_id]
             del self._token_to_request_id[token]
             self._identity_map.pop(request_id, None)
+            self._local_admin_ids.discard(request_id)
 
             # Record disconnect metric
             SSE_GATEWAY_CONNECTIONS_TOTAL.labels(action="disconnect").inc()
@@ -286,7 +354,7 @@ class SSEConnectionManager:
         with self._lock:
             return request_id in self._connections
 
-    def bind_identity(self, request_id: str, subject: str) -> None:
+    def bind_identity(self, request_id: str, subject: str, *, local_admin: bool = False) -> None:
         """Associate an OIDC subject with a connected request_id.
 
         The caller is responsible for token extraction and validation;
@@ -296,6 +364,11 @@ class SSEConnectionManager:
         Args:
             request_id: SSE connection request ID (must already be connected)
             subject: Validated OIDC subject string
+            local_admin: The connection is the local admin's (OIDC off, no
+                test session), which receives every subject's events. Only
+                the connect callback decides this; a subject string alone,
+                ``local-user`` included, never makes a connection the local
+                admin's.
         """
         with self._lock:
             if request_id not in self._connections:
@@ -306,35 +379,15 @@ class SSEConnectionManager:
                 )
                 return
             self._identity_map[request_id] = subject
+            if local_admin:
+                self._local_admin_ids.add(request_id)
+            else:
+                self._local_admin_ids.discard(request_id)
 
         SSE_IDENTITY_BINDING_TOTAL.labels(status="success").inc()
         logger.info(
             "Identity bound for SSE connection",
-            extra={"request_id": request_id, "subject": subject},
-        )
-
-    def bind_unbound_identity(self, request_id: str, subject: str) -> None:
-        """Bind a connection this process holds to an OIDC subject, if it is bound to no one.
-
-        Called for an API request that authenticated and names its page's
-        connection, so a connection the connect callback left unbound (the
-        page connected before its access token was refreshed) is bound to the
-        request's user. A bound connection is never rebound, and a request_id
-        this process does not hold is ignored.
-
-        Args:
-            request_id: SSE connection request ID named by the request
-            subject: Subject the request authenticated as
-        """
-        with self._lock:
-            if request_id not in self._connections or request_id in self._identity_map:
-                return
-            self._identity_map[request_id] = subject
-
-        SSE_IDENTITY_BINDING_TOTAL.labels(status="success").inc()
-        logger.info(
-            "Identity bound for SSE connection by an API request",
-            extra={"request_id": request_id, "subject": subject},
+            extra={"request_id": request_id, "subject": subject, "local_admin": local_admin},
         )
 
     def get_connection_info(self, request_id: str) -> ConnectionInfo | None:
@@ -356,80 +409,97 @@ class SSEConnectionManager:
 
     def send_event(
         self,
-        request_id: str | None,
+        target: Target,
         event_data: dict[str, Any],
         event_name: str,
         service_type: str,
-        target_subject: str | None = None,
     ) -> bool:
-        """Send an event to the SSE Gateway for delivery to client(s).
+        """Send an event to the SSE Gateway for delivery to the target's connections.
 
         Args:
-            request_id: Request identifier for targeted send, or None for broadcast
+            target: Who the event is for; see ``Target``. There is no
+                default and no implicit broadcast.
             event_data: Event payload (will be JSON-serialized)
             event_name: SSE event name
             service_type: Service type for metrics ("task" or "version")
-            target_subject: When broadcasting (request_id=None), restrict delivery
-                to connections whose bound subject matches this value or the
-                ``"local-user"`` sentinel. None means broadcast to all.
 
         Returns:
             True if event sent successfully to at least one connection, False otherwise
+
+        Raises:
+            TypeError: If target is not a Target (a request ID or None, as
+                the old signature took)
         """
-        # Broadcast mode: send to all (or subject-filtered) active connections
-        if request_id is None:
-            with self._lock:
-                if target_subject is not None:
-                    tokens_to_send = [
-                        (req_id, conn["token"])
-                        for req_id, conn in self._connections.items()
-                        if self._identity_map.get(req_id) == target_subject
-                        or self._identity_map.get(req_id) == "local-user"
-                    ]
-                else:
-                    tokens_to_send = [
-                        (req_id, conn["token"])
-                        for req_id, conn in self._connections.items()
-                    ]
-
-            if not tokens_to_send:
-                logger.debug("Broadcast event: no active connections")
-                return False
-
-            logger.debug(
-                "Broadcasting event to connections",
-                extra={"event_name": event_name, "connection_count": len(tokens_to_send)}
+        if not isinstance(target, Target):
+            raise TypeError(
+                f"send_event needs a Target, got {type(target).__name__}: "
+                "use Target.connection(request_id), Target.subject(subject), "
+                "LOCAL_ADMIN_TARGET or BROADCAST_TARGET"
             )
 
-            # Send to each connection serially
-            success_count = 0
-            for req_id, token in tokens_to_send:
-                if self._send_event_to_token(token, event_data, event_name, service_type, req_id):
-                    success_count += 1
-
-            logger.debug(
-                "Broadcast complete",
-                extra={
-                    "event_name": event_name,
-                    "success_count": success_count,
-                    "total_count": len(tokens_to_send)
-                }
-            )
-            return success_count > 0
-
-        # Targeted mode: send to specific request_id
         with self._lock:
-            conn_info = self._connections.get(request_id)
-            if not conn_info:
+            recipients = self._resolve_target(target)
+
+        if not recipients:
+            if target.kind == "connection":
                 logger.warning(
                     "Cannot send event: no connection for request_id",
-                    extra={"request_id": request_id}
+                    extra={"request_id": target.value, "event_name": event_name}
                 )
-                return False
+            else:
+                logger.debug(
+                    "Event not sent: no connections for target",
+                    extra={"event_name": event_name, "target": repr(target)}
+                )
+            return False
 
-            token = conn_info["token"]
+        # Send to each connection serially
+        success_count = 0
+        for req_id, token in recipients:
+            if self._send_event_to_token(token, event_data, event_name, service_type, req_id):
+                success_count += 1
 
-        return self._send_event_to_token(token, event_data, event_name, service_type, request_id)
+        if target.kind != "connection":
+            logger.debug(
+                "Sent event to target",
+                extra={
+                    "event_name": event_name,
+                    "target": repr(target),
+                    "success_count": success_count,
+                    "total_count": len(recipients),
+                }
+            )
+        return success_count > 0
+
+    def _resolve_target(self, target: Target) -> list[tuple[str, str]]:
+        """Return (request_id, token) for each connection the target names.
+
+        Must be called with the lock held.
+        """
+        if target.kind == "connection":
+            assert target.value is not None
+            conn = self._connections.get(target.value)
+            return [(target.value, conn["token"])] if conn else []
+
+        if target.kind == "subject":
+            return [
+                (req_id, conn["token"])
+                for req_id, conn in self._connections.items()
+                if req_id in self._local_admin_ids
+                or self._identity_map.get(req_id) == target.value
+            ]
+
+        if target.kind == "local_admin":
+            return [
+                (req_id, conn["token"])
+                for req_id, conn in self._connections.items()
+                if req_id in self._local_admin_ids
+            ]
+
+        if target.kind == "broadcast":
+            return [(req_id, conn["token"]) for req_id, conn in self._connections.items()]
+
+        raise ValueError(f"Unknown target kind: {target.kind}")
 
     def _send_event_to_token(
         self,
@@ -485,6 +555,8 @@ class SSEConnectionManager:
                     with self._lock:
                         self._connections.pop(request_id, None)
                         self._token_to_request_id.pop(token, None)
+                        self._identity_map.pop(request_id, None)
+                        self._local_admin_ids.discard(request_id)
                 SSE_GATEWAY_EVENTS_SENT_TOTAL.labels(service=service_type, status="error").inc()
                 return False
 

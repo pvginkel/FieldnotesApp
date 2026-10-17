@@ -6,7 +6,7 @@ from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, jsonify, request
 from spectree import Response as SpectreeResponse
 
-from app.schemas.health_schema import HealthResponse
+from app.schemas.health_schema import HealthResponse, ReadyzResponse
 from app.services.container import ServiceContainer
 from app.services.health_service import HealthService
 from app.utils.spectree_config import api
@@ -15,16 +15,17 @@ health_bp = Blueprint("health", __name__, url_prefix="/health")
 
 
 @health_bp.route("/readyz", methods=["GET"])
-@api.validate(resp=SpectreeResponse(HTTP_200=HealthResponse, HTTP_503=HealthResponse))
+@api.validate(resp=SpectreeResponse(HTTP_200=ReadyzResponse, HTTP_503=ReadyzResponse))
 @inject
 def readyz(
     health_service: HealthService = Provide[ServiceContainer.health_service],
 ) -> Any:
     """Readiness probe endpoint for Kubernetes.
 
-    Returns 503 when the application is shutting down, or any registered
-    readiness check fails. This signals Kubernetes to remove the pod
-    from service endpoints.
+    Reports every registered check. Returns 503 when the application is
+    shutting down or a critical check fails, which signals Kubernetes to
+    remove the pod from service endpoints; a failing non-critical check
+    leaves it in service (status "degraded").
     """
     result, status = health_service.check_readyz()
     return jsonify(result), status

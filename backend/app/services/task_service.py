@@ -18,7 +18,11 @@ from app.schemas.task_schema import (
     TaskStatus,
 )
 from app.services.base_task import BaseTask
-from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.sse_connection_manager import (
+    LOCAL_ADMIN_TARGET,
+    SSEConnectionManager,
+    Target,
+)
 from app.utils.lifecycle_coordinator import LifecycleCoordinatorProtocol, LifecycleEvent
 
 # Task shutdown metric -- owned by TaskService because it knows the
@@ -31,6 +35,18 @@ ACTIVE_TASKS_AT_SHUTDOWN = Gauge(
 logger = logging.getLogger(__name__)
 
 
+def task_event_target(caller_subject: str | None) -> Target:
+    """Where a task's events go: to its caller, never to everyone.
+
+    A task without a subject sends to the local admin only: with OIDC off
+    that is every connection without a test session, and with OIDC on it is
+    nobody. This matches who may read the task through ``/api/tasks``.
+    """
+    if caller_subject is None:
+        return LOCAL_ADMIN_TARGET
+    return Target.subject(caller_subject)
+
+
 class TaskProgressHandle:
     """Implementation of ProgressHandle for sending updates via SSE."""
 
@@ -38,11 +54,11 @@ class TaskProgressHandle:
         self,
         task_id: str,
         sse_connection_manager: SSEConnectionManager,
-        target_subject: str | None = None,
+        target: Target,
     ):
         self.task_id = task_id
         self.sse_connection_manager = sse_connection_manager
-        self.target_subject = target_subject
+        self.target = target
         self.progress = 0.0
         self.progress_text = ""
 
@@ -63,7 +79,7 @@ class TaskProgressHandle:
         self._send_progress_event(TaskProgressUpdate(text=text, value=value))
 
     def _send_progress_event(self, progress: TaskProgressUpdate) -> None:
-        """Send progress update event to matching connections."""
+        """Send progress update event to the task's target."""
         event = TaskEvent(
             event_type=TaskEventType.PROGRESS_UPDATE,
             task_id=self.task_id,
@@ -72,15 +88,14 @@ class TaskProgressHandle:
         try:
             # Use mode='json' to serialize datetime to ISO format string
             self.sse_connection_manager.send_event(
-                None,  # None = broadcast
+                self.target,
                 event.model_dump(mode='json'),
                 event_name="task_event",
                 service_type="task",
-                target_subject=self.target_subject,
             )
         except Exception as e:
             # If sending fails, log warning and continue
-            logger.warning(f"Failed to broadcast progress event for task {self.task_id}: {e}")
+            logger.warning(f"Failed to send progress event for task {self.task_id}: {e}")
 
 
 class TaskService:
@@ -147,9 +162,12 @@ class TaskService:
         Args:
             task: Instance of BaseTask to execute
             caller_subject: OIDC subject of the user starting the task.
-                When set, task events are only delivered to SSE connections
-                with a matching subject (or the ``"local-user"`` sentinel).
-                When None, events are broadcast to all connections.
+                Task events go to SSE connections bound to this subject,
+                and to the local admin's (OIDC off). The subject also owns
+                the task: only that caller can read, cancel or remove it
+                through ``/api/tasks``. When None, the task belongs to
+                nobody with OIDC on, so its events go to nobody; with OIDC
+                off they go to the local admin. Events are never broadcast.
             **kwargs: Task-specific parameters
 
         Returns:
@@ -190,29 +208,23 @@ class TaskService:
             status=TaskStatus.PENDING
         )
 
-    def _broadcast_task_event(
-        self,
-        event: TaskEvent,
-        target_subject: str | None = None,
-    ) -> None:
-        """Send a task event to matching connections.
+    def _send_task_event(self, event: TaskEvent, target: Target) -> None:
+        """Send a task event to the task's target.
 
         Args:
             event: Task event to send
-            target_subject: When set, only deliver to connections with a
-                matching subject or the ``"local-user"`` sentinel.
+            target: Where the task's events go (see ``task_event_target``)
         """
         # Use mode='json' to serialize datetime to ISO format string
         success = self.sse_connection_manager.send_event(
-            None,  # None = broadcast
+            target,
             event.model_dump(mode='json'),
             event_name="task_event",
             service_type="task",
-            target_subject=target_subject,
         )
 
         if not success:
-            logger.debug(f"No active connections for broadcast: {event.event_type}")
+            logger.debug(f"Task event {event.event_type} reached no connection ({target!r})")
 
     def get_task_status(self, task_id: str) -> TaskInfo | None:
         """Get current status of a task."""
@@ -268,6 +280,7 @@ class TaskService:
         caller_subject: str | None = None,
     ) -> None:
         """Execute a task in a background thread."""
+        target = task_event_target(caller_subject)
         try:
             # Update status to running
             with self._lock:
@@ -281,12 +294,10 @@ class TaskService:
                 task_id=task_id,
                 data=None,
             )
-            self._broadcast_task_event(start_event, target_subject=caller_subject)
+            self._send_task_event(start_event, target)
 
             # Create progress handle
-            progress_handle = TaskProgressHandle(
-                task_id, self.sse_connection_manager, target_subject=caller_subject
-            )
+            progress_handle = TaskProgressHandle(task_id, self.sse_connection_manager, target)
 
             # Execute the task
             result = task.execute(progress_handle, **kwargs)
@@ -306,9 +317,7 @@ class TaskService:
                         task_id=task_id,
                         data=result.model_dump() if result else None
                     )
-                    self._broadcast_task_event(
-                        completion_event, target_subject=caller_subject
-                    )
+                    self._send_task_event(completion_event, target)
 
                     logger.info(f"Task {task_id} completed successfully")
 
@@ -339,7 +348,7 @@ class TaskService:
                     "traceback": error_trace
                 }
             )
-            self._broadcast_task_event(failure_event, target_subject=caller_subject)
+            self._send_task_event(failure_event, target)
 
             # Check if this was the last task during shutdown
             self._check_tasks_complete()

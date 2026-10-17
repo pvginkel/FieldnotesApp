@@ -1,8 +1,8 @@
 """Pydantic schemas for testing SSE and task endpoints."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class TaskStartRequestSchema(BaseModel):
@@ -110,3 +110,24 @@ class TestErrorResponseSchema(BaseModel):
 
     error: str = Field(..., description="Error message")
     status: str = Field(..., description="Error status code", examples=["not_found"])
+
+
+def _coerce_status_int(value: object) -> object:
+    """Coerce a numeric query-string value to int before Literal validation.
+
+    Flask passes query parameters as strings (``"401"``), and Pydantic's
+    Literal validator does not coerce strings to ints. Anything else passes
+    through unchanged, so Literal validation produces its usual error.
+    """
+    if isinstance(value, str) and value.lstrip("-").isdigit():
+        return int(value)
+    return value
+
+
+class ForceSSECallbackErrorQuerySchema(BaseModel):
+    """Query parameters for /api/testing/sse/force-callback-error."""
+
+    status: Annotated[Literal[401, 403], BeforeValidator(_coerce_status_int)] = Field(
+        ...,
+        description="HTTP status the next SSE connect callback refuses with (401 or 403).",
+    )

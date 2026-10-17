@@ -4,7 +4,7 @@ Provides modular registration of Flask-native error handlers that convert
 exceptions into rich JSON error responses. Three registration functions
 allow layered composition:
 
-- register_core_error_handlers: Pydantic ValidationError, HTTP 404/405/500
+- register_core_error_handlers: Pydantic ValidationError, HTTP errors
 - register_business_error_handlers: All BusinessLogicException subclasses
 - register_app_error_handlers: Convenience wrapper that calls both of the above
 """
@@ -15,8 +15,9 @@ from typing import Any
 from flask import Flask, g, jsonify
 from flask.wrappers import Response
 from pydantic import ValidationError
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, HTTPException
 
+from app.core_exceptions import ExternalServiceException
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -55,6 +56,9 @@ def build_error_response(
     This helper produces the rich JSON envelope used by all error handlers.
     It is also importable for use in before_request hooks and inline
     short-circuit paths (e.g., ai_parts.py, testing.py).
+
+    ``ApiErrorResponseSchema`` in ``app/schemas/common.py`` documents this
+    envelope for the OpenAPI spec; change both together.
     """
     response_data: dict[str, Any] = {
         "error": error,
@@ -76,7 +80,8 @@ def register_core_error_handlers(app: Flask) -> None:
     """Register error handlers for framework-level exceptions.
 
     Handles Pydantic ValidationError, Werkzeug
-    BadRequest, and HTTP status codes 404, 405, and 500.
+    BadRequest, HTTP status codes 404, 405 and 500, and any other Werkzeug
+    HTTP error with its own status.
     """
 
     @app.errorhandler(BadRequest)
@@ -125,6 +130,19 @@ def register_core_error_handlers(app: Flask) -> None:
             "Method not allowed",
             {"message": "The HTTP method is not allowed for this endpoint"},
             status_code=405,
+        )
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error: HTTPException) -> tuple[Response, int]:
+        """Handle any other HTTP error, such as 413 for a body over MAX_UPLOAD_SIZE_MB.
+
+        Without it the Exception catch-all below would turn them into 500s.
+        """
+        _mark_request_failed()
+        return build_error_response(
+            error.name,
+            {"message": error.description or error.name},
+            status_code=error.code or 500,
         )
 
     @app.errorhandler(500)
@@ -212,6 +230,17 @@ def register_business_error_handlers(app: Flask) -> None:
             status_code=409,
         )
 
+    @app.errorhandler(ExternalServiceException)
+    def handle_external_service(error: ExternalServiceException) -> tuple[Response, int]:
+        _mark_request_failed()
+        logger.warning("External service error: %s", error.message)
+        return build_error_response(
+            error.message,
+            {"message": "External service request failed"},
+            code=error.error_code,
+            status_code=502,
+        )
+
     @app.errorhandler(RouteNotAvailableException)
     def handle_route_not_available(error: RouteNotAvailableException) -> tuple[Response, int]:
         _mark_request_failed()
@@ -235,14 +264,25 @@ def register_business_error_handlers(app: Flask) -> None:
             status_code=400,
         )
 
-    # Generic Exception catch-all for unexpected errors
+    # Generic Exception catch-all for unexpected errors. The exception text
+    # can carry SQL, paths and library internals, so the response shows it
+    # only where the app may expose internals (Settings.expose_internals);
+    # the log and the correlation ID always have it.
     @app.errorhandler(Exception)
     def handle_generic_exception(error: Exception) -> tuple[Response, int]:
         _mark_request_failed()
         logger.error("Unhandled exception: %s", str(error), exc_info=True)
+        # Imported here: apps' startup.py imports this module, and app.app
+        # pulls in the container.
+        from app.app import current_container
+
+        if current_container().config().expose_internals:
+            message = str(error)
+        else:
+            message = "An unexpected error occurred"
         return build_error_response(
             "Internal server error",
-            {"message": str(error)},
+            {"message": message},
             status_code=500,
         )
 

@@ -99,7 +99,7 @@ class MetricsService:
 
         Waits one full interval before the first tick so that application
         startup (and test fixtures) are not disrupted by concurrent DB
-        queries on SQLite.
+        queries.
         """
         while not self._stop_event.is_set():
             # Wait first, then poll — avoids racing with app init / tests

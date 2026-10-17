@@ -3,26 +3,62 @@
 import logging
 
 from dependency_injector.wiring import Provide, inject
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, current_app, g, request
 
 from app.config import Settings
+from app.exceptions import AuthenticationException, AuthorizationException
 from app.services.auth_service import AuthService
 from app.services.container import ServiceContainer
 from app.services.oidc_client_service import OidcClientService
-from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.testing_service import TestingService
 from app.utils.auth import (
     authenticate_request,
-    get_auth_context,
     get_cookie_kwargs,
     get_token_expiry_seconds,
 )
 
 logger = logging.getLogger(__name__)
 
-# The header the frontend's API client names its page's SSE connection in
-# (frontend/src/lib/api/sse-connection.ts).
-SSE_REQUEST_ID_HEADER = "X-SSE-Request-Id"
+
+def authenticate_api_request(
+    auth_service: AuthService,
+    oidc_client_service: OidcClientService,
+    testing_service: TestingService,
+    config: Settings,
+) -> None | tuple[dict[str, str], int]:
+    """Authenticate the current /api request.
+
+    Runs ``authenticate_request`` for the endpoint: tolerant for a ``@public``
+    one, throwing for any other. Maps AuthenticationException to 401 and
+    AuthorizationException to 403.
+
+    Returns:
+        None if the request may proceed, else the error response tuple
+    """
+    endpoint = request.endpoint
+    view_func = current_app.view_functions.get(endpoint) if endpoint else None
+    is_public = bool(view_func and getattr(view_func, "is_public", False))
+
+    logger.debug(
+        "Authenticating request to %s %s (public=%s)", request.method, request.path, is_public
+    )
+    try:
+        authenticate_request(
+            auth_service,
+            config,
+            request.method,
+            oidc_client_service,
+            view_func,
+            throw_on_error=not is_public,
+            testing_service=testing_service,
+        )
+        return None
+    except AuthenticationException as e:
+        logger.warning("Authentication failed: %s", str(e))
+        return {"error": str(e)}, 401
+    except AuthorizationException as e:
+        logger.warning("Authorization failed: %s", str(e))
+        return {"error": str(e)}, 403
 
 
 def register_oidc_hooks(api_bp: Blueprint) -> None:
@@ -33,82 +69,6 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
     for login/logout/callback endpoints.
     """
 
-    def authenticate(
-        auth_service: AuthService,
-        oidc_client_service: OidcClientService,
-        testing_service: TestingService,
-        config: Settings,
-    ) -> None | tuple[dict[str, str], int]:
-        """Authenticate all requests to /api endpoints before processing.
-
-        It checks if authentication is required and validates the JWT token.
-        If the access token is expired but a refresh token is available, it will
-        attempt to refresh the tokens automatically.
-
-        Authentication is skipped if:
-        - The endpoint is marked with @public decorator
-        - In testing mode with a valid test session
-        - OIDC_ENABLED is False
-
-        Returns:
-            None if authentication succeeds or is skipped
-            Error response tuple if authentication fails
-        """
-        from flask import current_app, g
-
-        from app.exceptions import AuthenticationException, AuthorizationException
-        from app.services.auth_service import AuthContext
-        from app.utils.auth import check_authorization
-
-        # Get the actual view function from Flask's view_functions
-        endpoint = request.endpoint
-        actual_func = current_app.view_functions.get(endpoint) if endpoint else None
-
-        # Skip authentication for public endpoints (check first to avoid unnecessary work)
-        if actual_func and getattr(actual_func, "is_public", False):
-            logger.debug("Public endpoint - skipping authentication")
-            return None
-
-        # In testing mode, check for test session token (bypasses OIDC)
-        if config.is_testing:
-            token = request.cookies.get(config.oidc_cookie_name)
-            if token:
-                test_session = testing_service.get_session(token)
-                if test_session:
-                    logger.debug("Test session authenticated: subject=%s", test_session.subject)
-                    # Expand roles through the hierarchy (same as OIDC path)
-                    expanded_roles = auth_service.expand_roles(set(test_session.roles))
-                    auth_context = AuthContext(
-                        subject=test_session.subject,
-                        email=test_session.email,
-                        name=test_session.name,
-                        roles=expanded_roles,
-                    )
-                    g.auth_context = auth_context
-                    try:
-                        check_authorization(auth_context, auth_service, request.method, actual_func)
-                        return None
-                    except AuthorizationException as e:
-                        logger.warning("Authorization failed: %s", str(e))
-                        return {"error": str(e)}, 403
-
-        # Skip authentication if OIDC is disabled
-        if not config.oidc_enabled:
-            logger.debug("OIDC disabled - skipping authentication")
-            return None
-
-        # Authenticate the request (may trigger token refresh)
-        logger.debug("Authenticating request to %s %s", request.method, request.path)
-        try:
-            authenticate_request(auth_service, config, request.method, oidc_client_service, actual_func)
-            return None
-        except AuthenticationException as e:
-            logger.warning("Authentication failed: %s", str(e))
-            return {"error": str(e)}, 401
-        except AuthorizationException as e:
-            logger.warning("Authorization failed: %s", str(e))
-            return {"error": str(e)}, 403
-
     @api_bp.before_request
     @inject
     def before_request_authentication(
@@ -116,28 +76,17 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
         oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
         testing_service: TestingService = Provide[ServiceContainer.testing_service],
         config: Settings = Provide[ServiceContainer.config],
-        sse_connection_manager: SSEConnectionManager = Provide[
-            ServiceContainer.sse_connection_manager
-        ],
     ) -> None | tuple[dict[str, str], int]:
-        """Authenticate the request, then bind the SSE connection it names to its user.
+        """Authenticate every request to an /api endpoint before it is handled.
 
-        This hook runs before every request to endpoints under the /api blueprint.
-        A request that authenticated as a user, refused or not, binds the SSE
-        connection named by its X-SSE-Request-Id header when the connection is
-        bound to no one, as the connect callback leaves a page's connection
-        that connected before its access token was refreshed.
+        A ``@public`` endpoint still resolves a signed-in caller (refreshing an
+        expired access token), but a request that fails to authenticate
+        proceeds without an auth context instead of answering 401.
 
         Returns:
-            None if authentication succeeds or is skipped
-            Error response tuple if authentication fails
+            None if the request may proceed, else the error response tuple
         """
-        refusal = authenticate(auth_service, oidc_client_service, testing_service, config)
-        auth_context = get_auth_context()
-        request_id = request.headers.get(SSE_REQUEST_ID_HEADER)
-        if auth_context is not None and request_id:
-            sse_connection_manager.bind_unbound_identity(request_id, auth_context.subject)
-        return refusal
+        return authenticate_api_request(auth_service, oidc_client_service, testing_service, config)
 
     @api_bp.after_request
     @inject
@@ -157,9 +106,7 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
         Returns:
             The response with updated cookies if needed
         """
-        from flask import g
-
-        # Check if we need to clear cookies (refresh failed)
+        # Clear the cookies when a refresh failed, or on logout
         if getattr(g, "clear_auth_cookies", False):
             _clear_auth_cookies(response, config)
             return response

@@ -30,6 +30,9 @@ class TestingService:
     # Forced error status for /api/auth/self (single-shot)
     _forced_auth_error: int | None = None
 
+    # Forced refusal status for the next SSE Gateway connect callback (single-shot)
+    _forced_sse_callback_error: int | None = None
+
     # ── Test session management ──────────────────────────────────────
 
     def create_session(
@@ -119,4 +122,25 @@ class TestingService:
         TestingService._forced_auth_error = None
         if error:
             logger.info("Consumed forced auth error: status=%d", error)
+        return error
+
+    def set_forced_sse_callback_error(self, status_code: int) -> None:
+        """Make the next SSE Gateway connect callback refuse the connection.
+
+        Args:
+            status_code: HTTP status code to refuse with (401 or 403)
+        """
+        TestingService._forced_sse_callback_error = status_code
+        logger.info("Set forced SSE callback error: status=%d", status_code)
+
+    def consume_forced_sse_callback_error(self) -> int | None:
+        """Consume and return the forced SSE callback error (single-shot).
+
+        Returns:
+            HTTP status code if set, None otherwise
+        """
+        error = TestingService._forced_sse_callback_error
+        TestingService._forced_sse_callback_error = None
+        if error:
+            logger.info("Consumed forced SSE callback error: status=%d", error)
         return error

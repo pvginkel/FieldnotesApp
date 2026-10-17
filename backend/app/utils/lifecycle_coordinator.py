@@ -48,6 +48,20 @@ class LifecycleCoordinatorProtocol(ABC):
         pass
 
     @abstractmethod
+    def unregister_lifecycle_notification(self, callback: Callable[[LifecycleEvent], None]) -> None:
+        """Remove a previously registered lifecycle notification callback.
+
+        Identity-based removal: removes at most one callback matching ``callback``
+        by identity. If no matching callback is registered, the call is a silent
+        no-op. Safe to call from within a callback currently being dispatched
+        because dispatch iterates over a snapshot.
+
+        Args:
+            callback: The callback previously passed to register_lifecycle_notification.
+        """
+        pass
+
+    @abstractmethod
     def register_shutdown_waiter(self, name: str, handler: Callable[[float], bool]) -> None:
         """Register a handler that blocks until ready for shutdown.
 
@@ -104,6 +118,16 @@ class LifecycleCoordinator(LifecycleCoordinatorProtocol):
         with self._lifecycle_lock:
             self._lifecycle_notifications.append(callback)
             logger.debug(f"Registered lifecycle notification: {getattr(callback, '__name__', repr(callback))}")
+
+    def unregister_lifecycle_notification(self, callback: Callable[[LifecycleEvent], None]) -> None:
+        """Remove a previously registered lifecycle notification callback (idempotent)."""
+        with self._lifecycle_lock:
+            try:
+                self._lifecycle_notifications.remove(callback)
+                logger.debug(f"Unregistered lifecycle notification: {getattr(callback, '__name__', repr(callback))}")
+            except ValueError:
+                # Callback was not registered (or already removed); no-op.
+                pass
 
     def register_shutdown_waiter(self, name: str, handler: Callable[[float], bool]) -> None:
         """Register a handler that blocks until ready for shutdown."""
@@ -195,7 +219,12 @@ class LifecycleCoordinator(LifecycleCoordinatorProtocol):
     def _raise_lifecycle_event(self, event: LifecycleEvent) -> None:
         logger.info(f"Raising lifecycle event {event}")
 
-        for callback in self._lifecycle_notifications:
+        # Snapshot so callbacks can (un)register during dispatch without
+        # mutating the list we're iterating.
+        with self._lifecycle_lock:
+            callbacks = list(self._lifecycle_notifications)
+
+        for callback in callbacks:
             try:
                 callback(event)
             except Exception as e:

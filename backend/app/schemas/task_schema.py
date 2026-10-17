@@ -44,7 +44,7 @@ class TaskEvent(BaseModel):
 class TaskInfo(BaseModel):
     """In-memory task metadata."""
     task_id: str = Field(description="Unique task identifier")
-    subject: str | None = Field(None, description="Subject of the user who started the task")
+    subject: str | None = Field(None, description="Subject of the user who started the task, and who owns it")
     status: TaskStatus = Field(description="Current task status")
     start_time: datetime = Field(description="Task start timestamp")
     end_time: datetime | None = Field(None, description="Task completion timestamp")

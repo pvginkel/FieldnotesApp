@@ -79,6 +79,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         SSEConnectionManager,
         gateway_url=config.provided.sse_gateway_url,
         http_timeout=2.0,
+        health_service=health_service,
     )
 
     # Task service - in-memory task management

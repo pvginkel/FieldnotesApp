@@ -438,11 +438,10 @@ scope here.
     run's log lines only through the editor's `GET /triage/actioner` (FR-33), and an inbox turn's
     progress and result, over the template's SSE gateway, only the connections bound to the editor
     whose request began it (FR-30), never every connection. The gateway's connect binds a page's
-    connection to the user of the access token the page holds; a connection the connect left bound
-    to no one, as for a page that connected before its token was refreshed or reconnected after a
-    rollout, is bound to the user of the page's next request that authenticates. A request that
-    authenticates as no one binds nothing, a connection bound to a user is never rebound, and a
-    connection's id is unguessable.
+    connection to the user of the access token the page holds, and refuses a connect without a
+    valid one, as for a page that connected before its token was refreshed or reconnected after a
+    rollout; the page then refreshes its session and connects again. A connection's id is
+    unguessable.
     Webhook secrets verified on every request.
 
 ## Technical design
@@ -766,8 +765,8 @@ The surface, `/api/inbox`, gated and typed as the triage surface is:
 
 A turn's events carry the session's words, so they reach only the connections bound to the editor
 whose request began the turn. A page's connection is bound by the gateway's connect, from the
-page's access token, or, when the connect left it bound to no one, as it does for a page that
-connected before its token was refreshed, by the page's next request that authenticates (NFR-4).
+page's access token; a connect without a valid token is refused, and the page refreshes its
+session and connects again (NFR-4).
 
 A turn is a task of the template's task service, so the page takes its progress, the log lines, and
 its completion, the reply, over the SSE gateway it already uses, by task id; a page that joins

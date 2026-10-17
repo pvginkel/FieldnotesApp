@@ -28,15 +28,12 @@ included. A request with no session, or with an agent's bearer token, is
 refused with 401, and a signed-in user without the role with 403, both in the template's own
 `{error}` body rather than problem+json.
 
-The template's OIDC hook on the `/api` blueprint also binds the page's SSE connection (NFR-4).
-Every request the UI's client makes names its page's connection in the `X-SSE-Request-Id` header
-once the page has one, and a request that authenticated as a user, refused or not (a viewer's 403
-binds the viewer), binds the connection the header names to that user when this pod holds it bound
-to no one. The gateway's connect binds a connection from the access cookie, and with OIDC off to
-`local-user`; a page whose connect came before its token's refresh, or that reconnected after a
-rollout, is bound by its next request. A bound connection is never rebound. A request that
-authenticates as no one binds nothing: a 401, a `@public` endpoint such as `GET /api/auth/self`,
-and any path outside the `/api` blueprint, the gateway's callback and `/api/testing/…` among them.
+The page's SSE connection is bound to its user by the gateway's connect, the template's callback
+(NFR-4): from the access cookie, and with OIDC off to `local-user`. A connect with a missing or
+expired token is refused with 401, and one by a user without the `editor` role with 403. On a
+refusal the page refreshes its session through `GET /api/auth/self` and connects again; a 401 there
+sends it to sign-in, and any other failure tells the user the connection was lost. So a connection
+is never held bound to no one.
 
 ## Endpoints
 

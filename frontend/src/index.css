@@ -65,6 +65,7 @@
     --warning-foreground: 48 64% 10%;
     --info: 200 90% 47%;
     --info-foreground: 200 69% 10%;
+    --stage-indicator: 35 80% 45%;
 
     /* Spacing scale */
     --spacing-xs: 0.25rem;
@@ -88,7 +89,7 @@
       --card-foreground: 210 40% 98%;
       --popover: 224 71% 4%;
       --popover-foreground: 210 40% 98%;
-      --primary: 220 90% 56%;
+      --primary: 220 70% 65%;
       --primary-foreground: 220 90% 10%;
       --secondary: 215 28% 17%;
       --secondary-foreground: 210 40% 98%;
@@ -96,13 +97,13 @@
       --muted-foreground: 218 11% 65%;
       --accent: 216 34% 17%;
       --accent-foreground: 210 40% 98%;
-      --destructive: 0 63% 31%;
+      --destructive: 0 72% 51%;
       --destructive-foreground: 0 0% 98%;
       --border: 216 34% 17%;
       --input: 216 34% 17%;
-      --ring: 220 90% 56%;
+      --ring: 220 70% 65%;
       --link: 220 90% 65%;
-      --link-hover: 220 90% 56%;
+      --link-hover: 220 70% 65%;
 
       /* Dark mode extended tokens */
       --success: 142 69% 52%;
@@ -111,6 +112,7 @@
       --warning-foreground: 49 72% 8%;
       --info: 200 64% 53%;
       --info-foreground: 200 74% 9%;
+      --stage-indicator: 35 70% 60%;
 
       /* Enhanced shadows for dark mode */
       --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
@@ -135,6 +137,11 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  /* Tailwind 4's preflight resets buttons to the default cursor */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 

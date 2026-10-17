@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
-import { access, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { access } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { databaseUrl, openRun, RUN_PREFIX_VARIABLE } from './helpers/pg-admin';
 
 async function globalSetup() {
   // External services mode has been removed. All tests now use per-worker managed services.
@@ -18,43 +18,50 @@ async function globalSetup() {
   console.log('🔧 Setting up Playwright tests...');
   console.log('Service management: Per-worker (Playwright managed)');
 
-  const seededDbPath = await initializeSeedDatabase();
-  if (seededDbPath) {
-    process.env.PLAYWRIGHT_SEEDED_SQLITE_DB = seededDbPath;
-    console.log(`🗃️  Seeded Playwright SQLite database: ${seededDbPath}`);
-  }
+  await initializeSeedDatabase();
   console.log('⏭️  Worker fixtures will boot backend, SSE gateway, and frontend on demand');
 }
 
 export default globalSetup;
 
-async function initializeSeedDatabase(): Promise<string | null> {
+/**
+ * Create the run's seed database and load the backend's test data into it.
+ * Each worker's backend serves a clone of it (fixtures-infrastructure.ts),
+ * and global teardown drops them all.
+ */
+async function initializeSeedDatabase(): Promise<void> {
   const repoRoot = getRepoRoot();
   const backendRoot = resolve(repoRoot, process.env.BACKEND_ROOT || '../backend');
-  const scriptPath = resolve(backendRoot, 'scripts/initialize-sqlite-database.sh');
 
-  // Apps without a database (use_database=false) won't have this script.
-  const scriptExists = await access(scriptPath).then(() => true, () => false);
-
-  if (!scriptExists) {
-    console.log('ℹ️  Database initialization script not found; skipping SQLite database seeding.');
-    return null;
+  // The backend template renders alembic.ini only with use_database.
+  const hasDatabase = await access(resolve(backendRoot, 'alembic.ini')).then(
+    () => true,
+    () => false
+  );
+  if (!hasDatabase) {
+    console.log('ℹ️  The backend has no database; skipping database seeding.');
+    return;
   }
 
-  const tmpRoot = await mkdtemp(join(tmpdir(), 'pw-seed-'));
-  const dbPath = join(tmpRoot, 'seed.sqlite');
+  const { prefix, seed } = await openRun();
+  // Workers clone the seed. Global teardown drops the run's databases, after
+  // a failed setup too.
+  process.env[RUN_PREFIX_VARIABLE] = prefix;
 
-  await runScript(scriptPath, ['--db', dbPath, '--load-test-data'], {
-    cwd: repoRoot,
+  // load-test-data recreates the database with the revisions, then loads the
+  // app's test data.
+  await runScript('uv', ['run', 'cli', 'load-test-data', '--yes-i-am-sure'], {
+    cwd: backendRoot,
+    env: { DATABASE_URL: databaseUrl(seed) },
   });
 
-  return dbPath;
+  console.log(`🗃️  Seeded Playwright database: ${seed}`);
 }
 
 async function runScript(
   command: string,
   args: readonly string[],
-  options: { cwd: string }
+  options: { cwd: string; env: Record<string, string> }
 ): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
@@ -62,9 +69,10 @@ async function runScript(
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        ...options.env,
         // Same override the per-worker backends get in process/servers.ts:
         // without it, OIDC_ENABLED=true from a developer's .env sends the
-        // seed script off to a Keycloak that tests never need.
+        // seed off to a Keycloak that tests never need.
         OIDC_ENABLED: 'false',
       },
     });
@@ -91,11 +99,11 @@ async function runScript(
       }
       const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
       if (output) {
-        console.error(`initialize-sqlite-database.sh failed output:\n${output}`);
+        console.error(`${command} ${args.join(' ')} failed output:\n${output}`);
       }
       rejectPromise(
         new Error(
-          `${command} exited with code ${code ?? 'null'} while initializing Playwright database`
+          `${command} ${args.join(' ')} exited with code ${code ?? 'null'} while seeding the Playwright database`
         )
       );
     });

@@ -1,28 +1,22 @@
 /**
  * SseGate component.
- * Blocks rendering of children until the SSE connection is established.
- * SSE runs as a sidecar alongside the app, so connection is expected to be
- * fast and reliable — no error or retry UI is needed here.
+ *
+ * Renders its children at once; it no longer waits for the SSE connection.
+ * The connection counts only from the gateway's `ready` event, so blocking
+ * here would leave a blank page for as long as the gateway is slow or down.
+ * The app works without SSE until then: listeners registered before `ready`
+ * still receive every event the stream delivers, and `useSSETask` buffers task
+ * events from mount.
+ *
+ * Kept as a placeholder so the provider tree stays stable.
  */
 
 import type { ReactNode } from 'react';
-import { useSseContext } from '@/contexts/sse-context';
 
 interface SseGateProps {
   children: ReactNode;
 }
 
 export function SseGate({ children }: SseGateProps) {
-  const { isConnected } = useSseContext();
-
-  if (!isConnected) {
-    return (
-      <div
-        className="h-screen w-full bg-background"
-        data-testid="sse.gate.loading"
-      />
-    );
-  }
-
   return <>{children}</>;
 }

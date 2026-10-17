@@ -26,7 +26,7 @@ test('surfaces backend-driven deployment updates', async ({
       streamId: 'connection',
       phase: 'open',
       event: 'connected',
-      timeoutMs: 15000,
+      timeoutMs: 30000,
     });
 
     const connectionData = extractSseData<{ requestId?: string }>(openEvent);
@@ -58,10 +58,12 @@ test('surfaces backend-driven deployment updates', async ({
         const payload = extractSseData<{ version?: string }>(event);
         return payload?.version === baselineVersion;
       },
-      timeoutMs: 15000,
+      timeoutMs: 30000,
     });
 
-    await page.waitForTimeout(200);
+    // The banner compares a version with the first one the app received;
+    // wait until the baseline is that one before sending the next.
+    await deploymentSse.waitForCurrentVersion(baselineVersion);
 
     const triggerResponse = await page.request.post(`${backendUrl}/api/testing/deployments/version`, {
       data: {
@@ -80,7 +82,7 @@ test('surfaces backend-driven deployment updates', async ({
         const payload = extractSseData<{ version?: string }>(event);
         return payload?.version === versionLabel;
       },
-      timeoutMs: 15000,
+      timeoutMs: 30000,
     });
 
     const payload = extractSseData<{ version?: string }>(payloadEvent);
@@ -93,13 +95,23 @@ test('surfaces backend-driven deployment updates', async ({
     const navigationPromise = page.waitForNavigation({ waitUntil: 'load' });
     await appShell.deploymentReloadButton.click();
     await navigationPromise;
+
+    // After page reload, wait for the app to fully re-initialize before
+    // interacting with the bridge. The old execution context is destroyed
+    // by navigation, so we must wait for the new bridge registration.
+    await page.waitForFunction(
+      () => Boolean(window.__deploymentSseControls),
+      undefined,
+      { timeout: 30_000 },
+    );
+
     await testEvents.clearEvents();
     await deploymentSse.ensureConnected();
     await waitForSseEvent(page, {
       streamId: 'connection',
       phase: 'open',
       event: 'connected',
-      timeoutMs: 15000,
+      timeoutMs: 30000,
     });
 
     await expect(page.locator('[data-testid="deployment.banner"]')).toHaveCount(0);

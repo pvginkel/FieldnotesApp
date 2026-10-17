@@ -11,6 +11,7 @@ type DeploymentBridge = {
   disconnect: () => void
   getStatus: () => { isConnected: boolean; requestId: string | null }
   getRequestId: () => string | null
+  getCurrentVersion: () => string | null
 }
 
 interface DeploymentProviderProps {
@@ -27,6 +28,7 @@ export function DeploymentProvider({ children }: DeploymentProviderProps) {
 
   const isConnectedRef = useRef(isConnected)
   const deploymentRequestIdRef = useRef<string | null>(requestId)
+  const currentVersionRef = useRef<string | null>(currentVersion)
   const deploymentControlsRef = useRef<DeploymentBridge | null>(null)
   const sseContextRef = useRef(sseContext)
 
@@ -41,6 +43,10 @@ export function DeploymentProvider({ children }: DeploymentProviderProps) {
   useEffect(() => {
     sseContextRef.current = sseContext
   }, [sseContext])
+
+  useEffect(() => {
+    currentVersionRef.current = currentVersion
+  }, [currentVersion])
 
   const checkForUpdates = useCallback(() => {
     // Trigger SSE reconnection (for window focus handler)
@@ -112,6 +118,11 @@ export function DeploymentProvider({ children }: DeploymentProviderProps) {
         }),
         getRequestId: () => {
           return deploymentRequestIdRef.current
+        },
+        // The version the banner compares against: the first one received.
+        // A spec waits for it before sending a newer one.
+        getCurrentVersion: () => {
+          return currentVersionRef.current
         }
       }
       globalWindow.__deploymentSseControls = deploymentControlsRef.current

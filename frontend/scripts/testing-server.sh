@@ -1,16 +1,19 @@
 #!/bin/bash
 
 # Frontend testing server script for Playwright integration.
-# Runs the Vite dev server per worker with isolated optimize cache directories.
+# Runs the Vite dev server per worker with isolated optimize cache directories,
+# or, with --preview, `vite preview` on dist/: a production build made with
+# `VITE_TEST_MODE=true pnpm build`, so the Playwright bridges are in it.
 
 set -euo pipefail
 
 HOST="127.0.0.1"
 PORT="3100"
+PREVIEW_MODE=false
 
 print_usage() {
   cat <<'EOF'
-Usage: testing-server.sh [--host HOST] [--port PORT]
+Usage: testing-server.sh [--host HOST] [--port PORT] [--preview]
 EOF
 }
 
@@ -33,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       fi
       PORT="$2"
       shift 2
+      ;;
+    --preview)
+      PREVIEW_MODE=true
+      shift
       ;;
     --help|-h)
       print_usage
@@ -59,13 +66,24 @@ else
   echo "Using BACKEND_URL=${BACKEND_URL}" >&2
 fi
 
-cache_root="node_modules/.tmp/vite-playwright"
-cache_dir="${cache_root}-${PORT}"
-
-mkdir -p "${cache_root}"
-
 export VITE_TEST_MODE=true
 export NODE_ENV=test
+
+# Vite directly: `pnpm exec` would leave a resident pnpm wrapper as its parent.
+if [ "${PREVIEW_MODE}" = "true" ]; then
+  # A plain `pnpm build` leaves the Playwright bridges out, and every spec
+  # would time out waiting for them.
+  if ! grep -qs '__playwright_emitTestEvent' dist/assets/*.js; then
+    echo "Error: --preview needs dist/ from 'VITE_TEST_MODE=true pnpm build'." >&2
+    exit 1
+  fi
+  echo "Preview mode: serving the production build in dist/" >&2
+  exec node_modules/.bin/vite preview --host "${HOST}" --port "${PORT}" --strictPort --mode test
+fi
+
+cache_root="node_modules/.tmp/vite-playwright"
+cache_dir="${cache_root}-${PORT}"
+mkdir -p "${cache_root}"
 export VITE_CACHE_DIR="${cache_dir}"
 
-exec pnpm exec vite --host "${HOST}" --port "${PORT}" --strictPort --mode test
+exec node_modules/.bin/vite --host "${HOST}" --port "${PORT}" --strictPort --mode test

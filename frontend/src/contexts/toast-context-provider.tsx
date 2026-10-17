@@ -4,6 +4,7 @@ import { ToastContainer } from '@/components/primitives/toast'
 import type { Toast, ToastOptions, ToastType } from '@/components/primitives/toast'
 import { isTestMode } from '@/lib/config/test-mode'
 import { createInstrumentedToastWrapper } from '@/lib/test/toast-instrumentation'
+import { serializeErrorDiagnostics } from '@/lib/utils/error-diagnostics'
 import { ToastContext } from './toast-context-base'
 import type { ToastContextValue } from './toast-context-base'
 
@@ -46,6 +47,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
       id,
       message,
       type,
+      diagnostics: options?.diagnostics,
       duration: options?.duration,
       action,
     }
@@ -84,7 +86,9 @@ export function ToastProvider({ children }: ToastProviderProps) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Toast exception', error)
     }
-    return showToast(message, 'error', options)
+    // The error's detail, for the toast's copy button
+    const diagnostics = serializeErrorDiagnostics(error)
+    return showToast(message, 'error', { ...options, diagnostics })
   }
 
   const baseContextValue: ToastContextValue = {

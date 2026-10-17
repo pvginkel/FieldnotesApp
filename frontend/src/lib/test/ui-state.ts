@@ -51,6 +51,7 @@ export function useUiStateInstrumentation(
 ): void {
   const { isLoading, error, getReadyMetadata, getErrorMetadata } = options;
   const activeRef = useRef(false);
+  const mountedRef = useRef(false);
   const readyMetadataRef = useRef(getReadyMetadata);
   const errorMetadataRef = useRef(getErrorMetadata);
   const testMode = isTestMode();
@@ -69,6 +70,9 @@ export function useUiStateInstrumentation(
       return;
     }
 
+    const isFirstRun = !mountedRef.current;
+    mountedRef.current = true;
+
     if (isLoading && !activeRef.current) {
       beginUiState(scope);
       activeRef.current = true;
@@ -77,6 +81,18 @@ export function useUiStateInstrumentation(
 
     if (!isLoading && activeRef.current) {
       activeRef.current = false;
+      const hasError = Boolean(error);
+      const metadata = hasError
+        ? errorMetadataRef.current?.(error)
+        : readyMetadataRef.current?.();
+      endUiState(scope, metadata);
+      return;
+    }
+
+    // Data was already available on mount (e.g. route loader pre-cached) —
+    // emit ready immediately so Playwright waiters don't hang waiting for a
+    // loading -> ready transition that will never happen.
+    if (isFirstRun && !isLoading) {
       const hasError = Boolean(error);
       const metadata = hasError
         ? errorMetadataRef.current?.(error)

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync, readFileSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'fs';
 import { createHash } from 'crypto';
 import https from 'https';
 import http from 'http';
@@ -65,12 +65,17 @@ async function fetchOpenAPISpec() {
       console.log(`✅ Successfully fetched OpenAPI spec from ${url}`);
       return spec;
     } catch (error) {
-      console.log(`❌ Failed to fetch from ${url}: ${error.message}`);
+      console.log(`❌ Failed to fetch from ${url}: ${error.message || error.code}`);
       lastError = error;
     }
   }
   
-  throw new Error(`Failed to fetch OpenAPI spec from all URLs. Last error: ${lastError.message}`);
+  throw new Error(
+    `Failed to fetch OpenAPI spec from all URLs. Last error: ${lastError.message || lastError.code}\n` +
+    `If no backend is running on port ${BACKEND_PORT}, run "scripts/regenerate-openapi.py --frontend" ` +
+    `from the repository root ("pnpm generate:api:with-backend" here): it starts a backend, ` +
+    `runs "pnpm generate:api" against it and stops it.`
+  );
 }
 
 /**
@@ -82,7 +87,7 @@ function calculateSpecHash(spec) {
 }
 
 /**
- * Loads cached OpenAPI spec and metadata
+ * Loads the cached OpenAPI spec
  */
 function loadCache() {
   try {
@@ -94,10 +99,11 @@ function loadCache() {
 }
 
 /**
- * Saves OpenAPI spec and metadata to cache
+ * Saves the OpenAPI spec to the cache
  */
 function saveCache(spec) {
-  // Save the spec
+  // Save the spec (a fresh app has no openapi-cache/ yet)
+  mkdirSync(CACHE_DIR, { recursive: true });
   writeFileSync(CACHE_FILE, JSON.stringify(spec, null, 2));
   
   console.log(`✅ Cached OpenAPI spec`);
@@ -114,7 +120,9 @@ export async function fetchAndCache(options = {}) {
     const spec = loadCache();
     if (!spec) {
       throw new Error(
-        'No cached OpenAPI spec found. Run "pnpm generate:api" first to fetch and cache the spec.'
+        'No cached OpenAPI spec found. Run "scripts/regenerate-openapi.py --frontend" from the ' +
+        'repository root first ("pnpm generate:api:with-backend" here), or "pnpm generate:api" ' +
+        'against a running backend, to fetch and cache the spec.'
       );
     }
     return spec;
@@ -122,18 +130,19 @@ export async function fetchAndCache(options = {}) {
   
   // Check if we should use cache
   if (!forceRefresh) {
-    const cache = loadCache();
-    if (cache) {
-      console.log(`📦 Found cached OpenAPI spec from ${cache.timestamp} (hash: ${cache.hash})`);
+    const cachedSpec = loadCache();
+    if (cachedSpec) {
+      const cachedHash = calculateSpecHash(cachedSpec);
+      console.log(`📦 Found cached OpenAPI spec (hash: ${cachedHash})`);
       
       // Try to fetch to check for changes
       try {
         const freshSpec = await fetchOpenAPISpec();
         const freshHash = calculateSpecHash(freshSpec);
         
-        if (freshHash === cache.hash) {
+        if (freshHash === cachedHash) {
           console.log('✅ OpenAPI spec is up to date, using cache');
-          return cache.spec;
+          return cachedSpec;
         } else {
           console.log('🔄 OpenAPI spec has changed, updating cache');
           saveCache(freshSpec);
@@ -141,7 +150,7 @@ export async function fetchAndCache(options = {}) {
         }
       } catch (error) {
         console.log(`⚠️  Failed to fetch fresh spec, using cache: ${error.message}`);
-        return cache.spec;
+        return cachedSpec;
       }
     }
   }

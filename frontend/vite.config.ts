@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type Plugin, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
@@ -75,6 +75,43 @@ function backendProxyStatusPlugin(target: string): Plugin {
   }
 }
 
+// The backend builds absolute URLs, such as the OIDC redirect URIs, from the
+// origin the browser used: its ProxyFix trusts one hop's X-Forwarded-Proto and
+// X-Forwarded-Host. changeOrigin rewrites Host to the backend's, so this hop
+// sends both. Values from a proxy in front (the KubeCoder front door, which
+// terminates TLS) win, as in nginx's proxy.conf. Vite's `xfwd` won't do: it
+// appends this hop's `http` to X-Forwarded-Proto, and ProxyFix reads the last.
+const forwardOrigin: ProxyOptions['configure'] = (proxy) => {
+  proxy.on('proxyReq', (proxyReq, req) => {
+    if (!req.headers['x-forwarded-host'] && req.headers.host) {
+      proxyReq.setHeader('X-Forwarded-Host', req.headers.host)
+    }
+    if (!req.headers['x-forwarded-proto']) {
+      proxyReq.setHeader('X-Forwarded-Proto', 'http')
+    }
+  })
+}
+
+// Flush an SSE response's head at once, so EventSource.onopen fires on
+// connect, not on the first heartbeat (http-proxy holds the head until data
+// flows). Transfer-Encoding goes first: http-proxy drops chunking only after
+// `proxyRes`, and a chunked head over the raw piped stream makes the browser
+// buffer the stream forever. The `: proxy-connected` comment forces the flush.
+const configureSseProxy: ProxyOptions['configure'] = (proxy) => {
+  proxy.on('proxyRes', (proxyRes, _req, res) => {
+    const contentType = proxyRes.headers['content-type'] ?? ''
+    if (!contentType.includes('text/event-stream')) {
+      return
+    }
+    if (!res.headersSent) {
+      const headers = { ...proxyRes.headers }
+      delete headers['transfer-encoding']
+      res.writeHead(proxyRes.statusCode ?? 200, headers)
+    }
+    res.write(': proxy-connected\n\n')
+  })
+}
+
 const backendProxyTarget = process.env.BACKEND_URL || 'http://localhost:3401'
 const gatewayProxyTarget = process.env.SSE_GATEWAY_URL || 'http://localhost:3402'
 
@@ -93,6 +130,9 @@ export default defineConfig({
   server: {
     host: true,
     port: 3400,
+    // Fail on a busy port instead of moving to the next one: the dev stack
+    // and Playwright expect the port they asked for.
+    strictPort: true,
     allowedHosts: true,
     proxy: {
       ...loadAppProxies(),
@@ -100,11 +140,13 @@ export default defineConfig({
         target: gatewayProxyTarget,
         changeOrigin: true,
         secure: false,
+        configure: configureSseProxy,
       },
       '/api': {
         target: backendProxyTarget,
         changeOrigin: true,
         secure: false,
+        configure: forwardOrigin,
       }
     },
     watch: process.env.VITE_TEST_MODE === 'true' ? { ignored: ['**'] } : { ignored: ['**/.pnpm-store/**'] }
@@ -116,22 +158,26 @@ export default defineConfig({
         target: gatewayProxyTarget,
         changeOrigin: true,
         secure: false,
+        configure: configureSseProxy,
       },
       '/api': {
         target: backendProxyTarget,
         changeOrigin: true,
         secure: false,
+        configure: forwardOrigin,
       }
     }
   },
+  // Test mode follows VITE_TEST_MODE, in a build too: `VITE_TEST_MODE=true
+  // pnpm build` gives the production build the Playwright bridges, for the
+  // preview-mode run (PLAYWRIGHT_PREVIEW_MODE=true). Any other build leaves
+  // them out, so never run the image's `pnpm build` with VITE_TEST_MODE set.
   define: {
-    'import.meta.env.VITE_TEST_MODE': process.env.NODE_ENV === 'production'
-      ? JSON.stringify('false')
-      : JSON.stringify(process.env.VITE_TEST_MODE || 'false'),
+    'import.meta.env.VITE_TEST_MODE': JSON.stringify(process.env.VITE_TEST_MODE || 'false'),
   },
   build: {
     rollupOptions: {
-      external: process.env.NODE_ENV === 'production' && process.env.VITE_TEST_MODE === 'true'
+      external: process.env.VITE_TEST_MODE !== 'true'
         ? ['./src/lib/test/*']
         : []
     },

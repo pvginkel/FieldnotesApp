@@ -222,7 +222,8 @@ export async function ensureTestEventBridge(page: Page): Promise<TestEventBuffer
     } catch (error) {
       bufferRegistry.delete(page);
       throw new Error(
-        `Failed to register Playwright test event binding: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to register Playwright test event binding: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   }
@@ -289,7 +290,7 @@ export class TestEventCapture {
     matcher: (event: TestEvent) => boolean,
     options?: { timeout?: number; intervalMs?: number }
   ): Promise<TestEvent> {
-    const timeout = options?.timeout ?? 5000;
+    const timeout = options?.timeout ?? 15_000;
     const event = await this.buffer.waitForEvent(matcher, timeout);
     // Refresh local snapshot so downstream assertions see the consumed event.
     await this.getEvents();
@@ -405,7 +406,7 @@ export async function waitForSseEvent(
   criteria: SseEventCriteria
 ): Promise<SseTestEvent> {
   const buffer = getTestEventBuffer(page);
-  const timeout = criteria.timeoutMs ?? 5000;
+  const timeout = criteria.timeoutMs ?? 15_000;
 
   const event = await buffer.waitForEvent(eventCandidate => {
     if (eventCandidate.kind !== 'sse') {

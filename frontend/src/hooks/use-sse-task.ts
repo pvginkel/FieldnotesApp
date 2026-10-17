@@ -3,6 +3,7 @@ import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
 import type { SseTestEvent } from '@/lib/test/test-events';
 import { useSseContext } from '@/contexts/sse-context';
+import type { SseContextValue } from '@/contexts/sse-context-base';
 
 /**
  * Raw task event data as received from the SSE stream.
@@ -18,7 +19,8 @@ interface SSEProgressEvent {
   event_type: 'progress_update';
   data: {
     text: string;
-    value?: number;
+    /** Fraction done, 0.0 to 1.0 (the backend's TaskProgressUpdate.value). */
+    value: number;
   };
 }
 
@@ -90,6 +92,39 @@ function bufferTaskEvent(event: RawTaskEvent): void {
   buffer.timestamp = now;
 }
 
+// One buffering listener per SSE provider, shared by every mounted useSSETask.
+// It runs from mount, not from subscribeToTask, so events that arrive between
+// the task's HTTP 202 and the subscribe are buffered too. A listener per hook
+// instance would buffer (and replay) each event once per instance.
+type AddEventListener = SseContextValue['addEventListener'];
+const bufferRegistrations = new Map<AddEventListener, { release: () => void; users: number }>();
+
+function retainTaskEventBuffer(addEventListener: AddEventListener): () => void {
+  let registration = bufferRegistrations.get(addEventListener);
+  if (!registration) {
+    registration = {
+      release: addEventListener('task_event', (data: unknown) => {
+        // A malformed event is the subscriber's to report, not the buffer's.
+        if (data !== null && typeof data === 'object') {
+          bufferTaskEvent(data as RawTaskEvent);
+        }
+      }),
+      users: 0,
+    };
+    bufferRegistrations.set(addEventListener, registration);
+  }
+  const retained = registration;
+  retained.users += 1;
+
+  return () => {
+    retained.users -= 1;
+    if (retained.users === 0) {
+      retained.release();
+      bufferRegistrations.delete(addEventListener);
+    }
+  };
+}
+
 export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSETaskReturn<T> {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +141,8 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
   } = options;
 
   const { addEventListener } = useSseContext();
+
+  useEffect(() => retainTaskEventBuffer(addEventListener), [addEventListener]);
 
   const unsubscribe = useCallback(() => {
     if (unsubscribeListenerRef.current) {
@@ -138,7 +175,8 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
       case 'progress_update': {
         const progressData = {
           message: parsedEvent.data.text,
-          percentage: parsedEvent.data.value
+          // The wire value is a fraction; percentage is 0 to 100.
+          percentage: parsedEvent.data.value * 100,
         };
         setProgress(progressData);
         onProgress?.(progressData.message, progressData.percentage);
@@ -249,13 +287,11 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
       }
     }
 
-    // Subscribe to live task_event stream, filtered by taskId
+    // Subscribe to live task_event stream, filtered by taskId. The shared
+    // listener registered on mount buffers every task event.
     const unsubscribeListener = addEventListener('task_event', (data: unknown) => {
       try {
         const rawEvent = data as RawTaskEvent;
-
-        // Buffer all task events for late-subscriber replay
-        bufferTaskEvent(rawEvent);
 
         // Only process events for our task
         if (rawEvent.task_id !== taskId) return;

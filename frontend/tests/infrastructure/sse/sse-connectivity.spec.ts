@@ -6,10 +6,20 @@
  * - Version events are delivered correctly through the React SSE infrastructure
  * - Task events are routed through the Vite proxy to the browser (envelope format)
  * - SharedWorker path delivers events correctly when enabled via URL parameter
+ *   (preview mode only)
  */
 import { test, expect } from '../../support/fixtures';
 import { makeUnique } from '../../support/helpers';
 import { extractSseData, waitForSseEvent } from '../../support/helpers/test-events';
+
+// Only a production build takes the SharedWorker path: under the Vite dev
+// server shouldUseSharedWorker() is false, so these tests would pass on the
+// direct connection. Preview mode serves such a build, made with
+// `VITE_TEST_MODE=true pnpm build`, and their @preview tag has the root suite
+// runner's preview pass run them.
+const SHARED_WORKER_SKIP_REASON =
+  'Needs PLAYWRIGHT_PREVIEW_MODE=true: the Vite dev server never uses the SharedWorker';
+const sharedWorkerUnavailable = process.env.PLAYWRIGHT_PREVIEW_MODE !== 'true';
 
 test.describe('SSE connectivity', () => {
   test('connects through the Vite proxy, not directly to the gateway', async ({
@@ -150,8 +160,8 @@ test.describe('SSE connectivity', () => {
           });
         });
 
-        // Small delay to ensure the Gateway callback has registered the connection
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // No wait for the backend: the gateway opens the stream only after the
+        // backend's connect callback has registered the connection.
 
         // Send a fake task event to our request_id via the backend testing API.
         // Uses relative URL so the request goes through the Vite proxy.
@@ -237,8 +247,6 @@ test.describe('SSE connectivity', () => {
           });
         });
 
-        await new Promise(resolve => setTimeout(resolve, 500));
-
         const sendResponse = await fetch('/api/testing/sse/task-event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -272,12 +280,14 @@ test.describe('SSE connectivity', () => {
     expect(event.data.code).toBe('TEST_ERROR');
   });
 
-  test('delivers version events via SharedWorker', async ({
+  test('delivers version events via SharedWorker', { tag: '@preview' }, async ({
     page,
     frontendUrl,
     backendUrl,
     deploymentSse,
   }) => {
+    test.skip(sharedWorkerUnavailable, SHARED_WORKER_SKIP_REASON);
+
     // Navigate with __sharedWorker parameter to enable SharedWorker path
     await page.goto(`${frontendUrl}?__sharedWorker`);
 
@@ -321,12 +331,14 @@ test.describe('SSE connectivity', () => {
     await deploymentSse.disconnect();
   });
 
-  test('connects and receives events via SharedWorker', async ({
+  test('connects and receives events via SharedWorker', { tag: '@preview' }, async ({
     page,
     frontendUrl,
     gatewayUrl,
     deploymentSse,
   }) => {
+    test.skip(sharedWorkerUnavailable, SHARED_WORKER_SKIP_REASON);
+
     // Navigate with __sharedWorker parameter to enable SharedWorker path
     await page.goto(`${frontendUrl}?__sharedWorker`);
 

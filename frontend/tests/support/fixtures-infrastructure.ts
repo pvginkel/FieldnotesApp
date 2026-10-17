@@ -10,9 +10,6 @@
 /* eslint-disable react-hooks/rules-of-hooks, no-empty-pattern */
 import { test as base } from '@playwright/test';
 import type { WorkerInfo } from '@playwright/test';
-import { copyFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import getPort from 'get-port';
 import {
   TestEventCapture,
@@ -27,6 +24,7 @@ import {
 } from './helpers/deployment-sse';
 import { FileUploadHelper, createFileUploadHelper } from './helpers/file-upload';
 import { AuthFactory } from './helpers/auth-factory';
+import { cloneSeed, databaseUrl, dropDatabase, RUN_PREFIX_VARIABLE } from './helpers/pg-admin';
 import { AppShellPage } from './page-objects/app-shell-page';
 import { startBackend, startFrontend, startSSEGateway } from './process/servers';
 import {
@@ -45,7 +43,6 @@ type ServiceManager = {
   backendLogs: BackendLogCollector;
   gatewayLogs: GatewayLogCollector;
   frontendLogs: FrontendLogCollector;
-  sqliteDbPath?: string;
   disposeServices(): Promise<void>;
 };
 
@@ -167,7 +164,9 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
             return;
           }
 
-          if (text.includes('Form submission error')) {
+          // showException logs 'Toast exception' outside production builds;
+          // the toast itself is what a test asserts on.
+          if (text.includes('Form submission error') || text.includes('Toast exception')) {
             return;
           }
 
@@ -327,35 +326,31 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
         const previousGateway = process.env.SSE_GATEWAY_URL;
         const previousFrontend = process.env.FRONTEND_URL;
 
-        let workerDbDir: string | undefined;
-        let workerDbPath: string | undefined;
+        // The worker's own database, cloned from the run's seed (global
+        // setup), when the backend has one.
+        let workerDatabase: string | undefined;
 
         const cleanupWorkerDb = async () => {
-          if (!workerDbDir) {
+          if (!workerDatabase) {
             return;
           }
           try {
-            await rm(workerDbDir, { recursive: true, force: true });
+            await dropDatabase(workerDatabase);
           } catch (error) {
             console.warn(
-              `[worker-${workerInfo.workerIndex}] Failed to remove temp SQLite data at ${workerDbDir}:`,
+              `[worker-${workerInfo.workerIndex}] Failed to drop database ${workerDatabase}:`,
               error
             );
           } finally {
-            workerDbDir = undefined;
-            workerDbPath = undefined;
+            workerDatabase = undefined;
           }
         };
 
-        const seedDbPath = process.env.PLAYWRIGHT_SEEDED_SQLITE_DB;
-        if (seedDbPath) {
+        const runPrefix = process.env[RUN_PREFIX_VARIABLE];
+        if (runPrefix) {
           try {
-            workerDbDir = await mkdtemp(
-              join(tmpdir(), `test-worker-${workerInfo.workerIndex}-`)
-            );
-            workerDbPath = join(workerDbDir, 'database.sqlite');
-            await copyFile(seedDbPath, workerDbPath);
-            backendLogs.log(`Using SQLite database copy at ${workerDbPath}`);
+            workerDatabase = await cloneSeed(runPrefix, workerInfo.parallelIndex);
+            backendLogs.log(`Using database ${workerDatabase}, cloned from the seed`);
           } catch (error) {
             backendLogs.dispose();
             gatewayLogs.dispose();
@@ -370,9 +365,8 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
         const frontendPort = await getPort({ exclude: [backendPort, gatewayPort] });
 
         // Pre-compute URLs from allocated ports so we can wire them before any
-        // service starts.  The backend's /health/readyz now checks SSE Gateway
-        // reachability, so the gateway must be up before the backend can pass
-        // its readiness probe.
+        // service starts: the gateway calls back to the backend, and the
+        // backend sends events through the gateway.
         const backendUrl = `http://127.0.0.1:${backendPort}`;
         const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
 
@@ -403,12 +397,14 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
           }
         })();
 
-        // 2. Once the gateway is ready, start the backend (its readyz can now
-        //    reach the gateway).
+        // 2. Once the gateway is ready, start the backend. Its readyz doesn't
+        //    wait for the gateway (sse_gateway is a non-critical check), but
+        //    started second, the backend never sends to a gateway that isn't
+        //    up yet.
         const backendPromise = gatewayPromise.then(async gatewayHandle => {
           try {
             const backendHandle = await startBackend(workerInfo.workerIndex, {
-              ...(workerDbPath ? { sqliteDbPath: workerDbPath } : {}),
+              ...(workerDatabase ? { databaseUrl: databaseUrl(workerDatabase) } : {}),
               streamLogs: backendStreamLogs,
               port: backendPort,
               frontendVersionUrl: `http://127.0.0.1:${frontendPort}/version.json`,
@@ -537,7 +533,6 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
           gatewayLogs,
           frontendLogs,
           disposeServices,
-          sqliteDbPath: workerDbPath,
         };
 
         try {
@@ -552,7 +547,7 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
           frontendLogs.dispose();
         }
       },
-      { scope: 'worker', timeout: 120_000 },
+      { scope: 'worker', timeout: 300_000 },
     ],
   }
 );

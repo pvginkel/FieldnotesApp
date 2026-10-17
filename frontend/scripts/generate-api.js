@@ -37,10 +37,17 @@ function generateTypes() {
   const specFile = path.join(__dirname, '..', 'openapi-cache', 'openapi.json');
 
   try {
-    // Run openapi-typescript to generate types
-    execSync(`npx openapi-typescript ${specFile} --output ${TYPES_FILE}`, {
-      stdio: 'inherit'
-    });
+    // Run openapi-typescript to generate types.
+    //
+    // `--default-non-nullable false`: a property with a `default` that is not
+    // in `required` stays optional (`?:`). The backend's update schemas declare
+    // `str | None = Field(None, ...)`, which has `default: null` and no
+    // `required` entry; openapi-typescript 7's default would make those
+    // request fields required on the TypeScript side.
+    execSync(
+      `npx openapi-typescript ${specFile} --default-non-nullable false --output ${TYPES_FILE}`,
+      { stdio: 'inherit' },
+    );
 
     console.log('✅ TypeScript types generated');
   } catch (error) {

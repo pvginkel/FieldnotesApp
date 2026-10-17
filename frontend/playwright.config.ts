@@ -28,7 +28,9 @@ export default defineConfig({
     headless: true,
     viewport: { width: 1280, height: 720 },
     ignoreHTTPSErrors: true,
-    video: process.env.PLAYWRIGHT_RETAIN_VIDEO ? 'on' : 'retain-on-failure',
+    // No video by default: recording every test costs CPU and disk across the
+    // workers. PLAYWRIGHT_RETAIN_VIDEO=true keeps the videos of failed tests.
+    video: process.env.PLAYWRIGHT_RETAIN_VIDEO === 'true' ? 'retain-on-failure' : 'off',
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },
@@ -47,4 +49,5 @@ export default defineConfig({
   outputDir: 'test-results/',
 
   globalSetup: './tests/support/global-setup.ts',
+  globalTeardown: './tests/support/global-teardown.ts',
 });

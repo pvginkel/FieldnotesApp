@@ -1,8 +1,11 @@
 import * as React from 'react'
 import * as ToastPrimitive from '@radix-ui/react-toast'
+import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ClearButtonIcon } from '@/components/icons/clear-button-icon'
 import { toastToneStyles, toastIconMap } from '@/styles/toast'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { useUiSetup } from '@/hooks/use-ui-setup'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
@@ -16,12 +19,15 @@ export interface ToastAction {
 export interface ToastOptions {
   duration?: number
   action?: ToastAction
+  /** Error detail the copy button puts on the clipboard (see showException). */
+  diagnostics?: string
 }
 
 export interface Toast {
   id: string
   type: ToastType
   message: string
+  diagnostics?: string
   duration?: number
   action?: ToastAction
 }
@@ -41,6 +47,12 @@ const ToastComponent = React.forwardRef<
   ToastProps
 >(({ toast, onRemove, className, ...props }, ref) => {
   const tone = toastToneStyles[toast.type];
+  const { copyState, copy } = useCopyToClipboard();
+  const uiSetup = useUiSetup();
+
+  // The copy button replaces the icon only where the backend allows internal
+  // detail, and only on a toast that carries diagnostics.
+  const showCopyButton = !!uiSetup?.exposeInternals && !!toast.diagnostics;
 
   return (
     <ToastPrimitive.Root
@@ -67,7 +79,33 @@ const ToastComponent = React.forwardRef<
       <div className="p-4">
         <div className="flex items-center gap-3">
           <div className="flex-shrink-0 leading-none">
-            <span className="text-lg">{toastIconMap[toast.type]}</span>
+            {showCopyButton ? (
+              <button
+                type="button"
+                onClick={() => {
+                  copy(
+                    `[${toast.type.toUpperCase()}] ${toast.message}\n\n--- Diagnostics ---\n${toast.diagnostics}`,
+                  )
+                }}
+                className="inline-flex items-center justify-center rounded-md focus:outline-hidden focus:ring-2 focus:ring-offset-2 cursor-pointer"
+                aria-label="Copy toast details"
+                data-testid="app-shell.toast.copy-button"
+                data-copy-state={copyState}
+              >
+                {copyState === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <>
+                    <span className="text-lg group-hover:hidden group-focus-within:hidden">
+                      {toastIconMap[toast.type]}
+                    </span>
+                    <Copy className="hidden w-4 h-4 group-hover:block group-focus-within:block" />
+                  </>
+                )}
+              </button>
+            ) : (
+              <span className="text-lg">{toastIconMap[toast.type]}</span>
+            )}
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-hidden">
             <ToastPrimitive.Title className="text-sm font-medium overflow-hidden line-clamp-3">

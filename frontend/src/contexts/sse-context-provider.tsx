@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
+import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api/generated/client';
 import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
-import { nameSseConnection } from '@/lib/api/sse-connection';
-import { makeUniqueToken } from '@/lib/utils/random';
 import type { SseTestEvent } from '@/lib/test/test-events';
 import { SseContext } from './sse-context-base';
 import type { SseContextValue } from './sse-context-base';
@@ -14,12 +14,17 @@ interface SseContextProviderProps {
   children: ReactNode;
 }
 
-// Worker message types
+// Shown when a refused stream can't be recovered.
+const CONNECTION_LOST_MESSAGE =
+  'Connection to the server was lost. Please refresh the page to reconnect.';
+
+// Worker message types; they mirror the union in `src/workers/sse-worker.ts`.
 type WorkerMessage =
   | { type: 'connected'; requestId: string; __testEvent?: SseTestEventMetadata }
   | { type: 'event'; event: string; data: unknown; __testEvent?: SseTestEventMetadata }
   | { type: 'disconnected'; reason?: string; __testEvent?: SseTestEventMetadata }
-  | { type: 'error'; error: string; __testEvent?: SseTestEventMetadata };
+  | { type: 'error'; error: string; __testEvent?: SseTestEventMetadata }
+  | { type: 'rejected'; status: number; message: string; __testEvent?: SseTestEventMetadata };
 
 interface SseTestEventMetadata {
   kind: 'sse';
@@ -27,6 +32,45 @@ interface SseTestEventMetadata {
   phase: 'open' | 'message' | 'error' | 'close';
   event: string;
   data?: unknown;
+}
+
+type SessionProbeOutcome = 'valid' | 'signed-out' | 'failed';
+
+/**
+ * Check the session after the gateway refused the stream. GET /api/auth/self
+ * refreshes the session cookies while the refresh token is good, so `valid`
+ * means a new stream will be accepted. On `signed-out` (401) the API client's
+ * middleware is already sending the user to login.
+ */
+async function probeSession(): Promise<SessionProbeOutcome> {
+  try {
+    const { response } = await api.GET('/api/auth/self', {
+      credentials: 'include',
+    });
+    if (response.ok) {
+      return 'valid';
+    }
+    return response.status === 401 ? 'signed-out' : 'failed';
+  } catch (error) {
+    console.error('SSE recovery: /api/auth/self failed:', error);
+    return 'failed';
+  }
+}
+
+/**
+ * Read the gateway's `rejected` payload, `{"status": <code>, "message": "<text>"}`.
+ * A payload that doesn't parse gives status 0.
+ */
+function parseRejection(data: unknown): { status: number; message: string } {
+  try {
+    const payload = JSON.parse(String(data)) as { status?: unknown; message?: unknown };
+    return {
+      status: typeof payload?.status === 'number' ? payload.status : 0,
+      message: typeof payload?.message === 'string' ? payload.message : 'Unknown',
+    };
+  } catch {
+    return { status: 0, message: 'Unknown' };
+  }
 }
 
 /**
@@ -56,15 +100,27 @@ function shouldUseSharedWorker(): boolean {
   return true;
 }
 
+// Decided once, when the module loads: in test mode the opt-in is the
+// `__sharedWorker` query parameter of the URL the page loaded with, and a route
+// that redirects on load (an index route, say) drops it before the provider
+// mounts.
+const USE_SHARED_WORKER = shouldUseSharedWorker();
+
 /**
  * SSE context provider that manages a unified SSE connection.
  *
  * Exposes a generic addEventListener interface. Consumer hooks subscribe to
  * named SSE events and handle their own DTO parsing.
  *
- * The gateway sends all events as unnamed data-only messages with a
+ * The gateway sends all domain events as unnamed data-only messages with a
  * {type, payload} envelope. Both the SharedWorker and the direct EventSource
  * path unwrap the envelope and dispatch to local listeners by event name.
+ *
+ * Two control signals are named events. `ready` (no data) means the gateway
+ * accepted the stream; only then is the connection `isConnected`, since a
+ * refused stream opens too. `rejected` means the backend's connect callback
+ * refused it (401/403): both paths close the stream instead of retrying it,
+ * check the session, and open a new stream once the session is valid again.
  *
  * Uses SharedWorker in production for cross-tab connection sharing, falls back to
  * direct EventSource in dev/test/iOS environments.
@@ -75,10 +131,42 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sharedWorkerRef = useRef<SharedWorker | null>(null);
-  const useSharedWorker = useRef<boolean>(shouldUseSharedWorker());
+  const useSharedWorker = useRef<boolean>(USE_SHARED_WORKER);
+  // The direct path's recovery reopens through this ref, since
+  // createDirectConnection can't refer to itself.
+  const createDirectConnectionRef = useRef<(() => void) | null>(null);
 
   // Internal listener registry: Map<eventName, Set<handler>>
   const listenersRef = useRef(new Map<string, Set<(data: unknown) => void>>());
+
+  // showError through a ref: ToastProvider builds a new context value on every
+  // render, so depending on showError would rebuild handleWorkerMessage, and
+  // with it the SharedWorker, on every toast. Requires ToastProvider above this
+  // provider (CoreProviders wraps SseProviders).
+  const { showError } = useToast();
+  const showErrorRef = useRef(showError);
+  useEffect(() => {
+    showErrorRef.current = showError;
+  }, [showError]);
+
+  /**
+   * Recover from a refused stream: check the session, then `reopen` when it is
+   * valid, leave the redirect to login to the API client when it is gone, and
+   * otherwise tell the user to refresh the page.
+   */
+  const recoverFromRejection = useCallback((status: number, reopen: () => void) => {
+    // Only the status: the message comes from the backend's response.
+    console.debug(`SSE stream rejected: status=${status}`);
+    setIsConnected(false);
+
+    void probeSession().then(outcome => {
+      if (outcome === 'valid') {
+        reopen();
+      } else if (outcome === 'failed') {
+        showErrorRef.current(CONNECTION_LOST_MESSAGE);
+      }
+    });
+  }, []);
 
   /**
    * Dispatch an event to all registered handlers for a given event name
@@ -133,7 +221,6 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
     switch (message.type) {
       case 'connected':
-        nameSseConnection(message.requestId);
         setIsConnected(true);
         setRequestId(message.requestId);
         break;
@@ -152,10 +239,19 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
         setIsConnected(false);
         break;
 
+      case 'rejected':
+        // The worker has closed the stream and won't retry it until told to.
+        // Post to the worker directly, not through reconnect(), so the
+        // recovery doesn't depend on the isConnected guard or render timing.
+        recoverFromRejection(message.status, () => {
+          sharedWorkerRef.current?.port.postMessage({ type: 'reconnect' });
+        });
+        break;
+
       default:
         console.warn('Unknown worker message:', message);
     }
-  }, [dispatchEvent]);
+  }, [dispatchEvent, recoverFromRejection]);
 
   /**
    * Create SharedWorker connection
@@ -192,7 +288,8 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
    * Uses onmessage to unwrap the {type, payload} envelope — same logic as the SharedWorker.
    */
   const createDirectConnection = useCallback(() => {
-    const tabRequestId = makeUniqueToken(32);
+    const tabRequestId = Math.random().toString(36).substring(2, 15) +
+                         Math.random().toString(36).substring(2, 15);
 
     const params = new URLSearchParams({ request_id: tabRequestId });
     const url = `/api/sse/stream?${params}`;
@@ -200,8 +297,9 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
 
-    eventSource.onopen = () => {
-      nameSseConnection(tabRequestId);
+    // Open is not connected: the gateway may still refuse the stream. The
+    // connection counts from the `ready` event (no data line; don't read it).
+    eventSource.addEventListener('ready', () => {
       setIsConnected(true);
       setRequestId(tabRequestId);
 
@@ -215,7 +313,31 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
         };
         emitTestEvent(payload);
       }
-    };
+    });
+
+    // The gateway refused the stream and is ending it. Close it before the
+    // browser retries it, and open a new one only once the session is valid,
+    // unless this stream was replaced or disconnected meanwhile.
+    eventSource.addEventListener('rejected', (event) => {
+      const { status, message } = parseRejection((event as MessageEvent).data);
+      eventSource.close();
+
+      if (isTestMode()) {
+        emitTestEvent({
+          kind: 'sse',
+          streamId: 'connection',
+          phase: 'message',
+          event: 'rejected',
+          data: { status, message },
+        });
+      }
+
+      recoverFromRejection(status, () => {
+        if (eventSourceRef.current === eventSource) {
+          createDirectConnectionRef.current?.();
+        }
+      });
+    });
 
     // Single onmessage handler unwraps the {type, payload} envelope
     // and dispatches to local listeners — mirrors the SharedWorker logic.
@@ -248,17 +370,6 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       dispatchEvent(eventName, eventData);
     };
 
-    // connection_close stays as a named event (internal plumbing)
-    eventSource.addEventListener('connection_close', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.debug('Connection closed by backend:', data.reason);
-      } catch {
-        // Ignore parse errors
-      }
-      setIsConnected(false);
-    });
-
     eventSource.onerror = (event) => {
       if (isTestMode()) {
         console.debug('EventSource error (test mode):', event);
@@ -267,7 +378,11 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       }
       setIsConnected(false);
     };
-  }, [dispatchEvent]);
+  }, [dispatchEvent, recoverFromRejection]);
+
+  useEffect(() => {
+    createDirectConnectionRef.current = createDirectConnection;
+  }, [createDirectConnection]);
 
   /**
    * Disconnect from SSE
@@ -292,7 +407,11 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
   }, []);
 
   /**
-   * Reconnect SSE (for focus-based reconnection)
+   * Reconnect SSE (for focus-based reconnection).
+   *
+   * A healthy connection is left alone, on both paths, so that a focus event
+   * doesn't tear it down. The recovery from a refused stream reopens it without
+   * going through here.
    */
   const reconnect = useCallback(() => {
     if (isConnected) {
@@ -300,9 +419,12 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     }
 
     if (useSharedWorker.current) {
-      if (!sharedWorkerRef.current) {
-        createSharedWorkerConnection();
+      if (sharedWorkerRef.current) {
+        // The worker is alive but its stream is down: ask it to reconnect.
+        sharedWorkerRef.current.port.postMessage({ type: 'reconnect' });
+        return;
       }
+      createSharedWorkerConnection();
       return;
     }
 
@@ -316,7 +438,6 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
   // Establish connection on mount
   useEffect(() => {
     if (useSharedWorker.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional SSE connection initiation
       createSharedWorkerConnection();
     } else {
       createDirectConnection();
@@ -326,6 +447,38 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       disconnect();
     };
   }, [createSharedWorkerConnection, createDirectConnection, disconnect]);
+
+  // Test-only bridge: `window.__sseForceReconnect()` opens a new stream even
+  // while the connection is healthy, which reconnect() refuses to do, so a spec
+  // can make the next connect meet a refusal it has armed. It posts `reconnect`
+  // to the SharedWorker, or replaces the direct EventSource. It isn't part of
+  // SseContextValue, and it doesn't exist outside test mode.
+  useEffect(() => {
+    if (!isTestMode()) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const bridge = () => {
+      if (useSharedWorker.current) {
+        sharedWorkerRef.current?.port.postMessage({ type: 'reconnect' });
+        return;
+      }
+      eventSourceRef.current?.close();
+      createDirectConnection();
+    };
+
+    window.__sseForceReconnect = bridge;
+
+    return () => {
+      if (window.__sseForceReconnect === bridge) {
+        delete window.__sseForceReconnect;
+      }
+    };
+  }, [createDirectConnection]);
 
   const contextValue: SseContextValue = {
     isConnected,

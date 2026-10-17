@@ -114,10 +114,12 @@ export const Tooltip: React.FC<TooltipProps> = ({
         );
       }
 
-      // For enabled elements, just add title to the child
+      // For enabled elements, just add title to the child. Inject data-testid
+      // only when testId is set: cloneElement would otherwise overwrite the
+      // child's own data-testid with undefined.
       return React.cloneElement(children as React.ReactElement<any>, {
         title,
-        'data-testid': testId,
+        ...(testId !== undefined ? { 'data-testid': testId } : {}),
       });
     }
 

@@ -6,7 +6,8 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev": "vite --host --port 3400",
-    "build": "pnpm generate:api:build && pnpm generate:routes && pnpm check && vite build && pnpm verify:build",
+    "build-fast": "pnpm generate:api:build && pnpm generate:routes && vite build && pnpm verify:build",
+    "build": "pnpm build-fast && pnpm check",
     "check": "pnpm check:lint && pnpm check:type-check && pnpm check:knip",
     "check:lint": "eslint .",
     "check:type-check": "tsc -b --noEmit",
@@ -15,6 +16,7 @@
     "generate:routes": "tsr generate",
     "generate:api": "node scripts/generate-api.js --fetch",
     "generate:api:build": "node scripts/generate-api.js --cache-only",
+    "generate:api:with-backend": "python3 ../scripts/regenerate-openapi.py --frontend",
     "verify:build": "node scripts/verify-production-build.cjs",
     "playwright": "playwright"
   },
@@ -42,6 +44,7 @@
     "@eslint/js": "^9.33.0",
     "@playwright/test": "1.60.0",
     "@types/node": "^24.10.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",
@@ -54,6 +57,7 @@
     "knip": "^5.85.0",
     "split2": "^4.2.0",
     "openapi-typescript": "^7.0.0",
+    "pg": "^8.23.1",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.39.1",
     "ssegateway": "github:pvginkel/SSEGateway#stable",

@@ -9,9 +9,10 @@ import split2 from 'split2';
 const BACKEND_READY_PATH = '/health/readyz';
 const FRONTEND_READY_PATH = '/';
 const GATEWAY_READY_PATH = '/readyz';
-const BACKEND_STARTUP_TIMEOUT_MS = 30_000;
-const FRONTEND_STARTUP_TIMEOUT_MS = 90_000;
-const GATEWAY_STARTUP_TIMEOUT_MS = 30_000;
+// Generous: workers start their services side by side on a loaded machine.
+const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
+const FRONTEND_STARTUP_TIMEOUT_MS = 120_000;
+const GATEWAY_STARTUP_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 200;
 const HOSTNAME = '127.0.0.1';
 
@@ -29,7 +30,7 @@ export type SSEGatewayServerHandle = ServerHandle;
 export async function startBackend(
   workerIndex: number,
   options: {
-    sqliteDbPath?: string;
+    databaseUrl?: string;
     streamLogs?: boolean;
     port?: number;
     excludePorts?: number[];
@@ -49,7 +50,9 @@ export async function startBackend(
     HOSTNAME,
     '--port',
     String(port),
-    ...(options.sqliteDbPath ? ['--sqlite-db', options.sqliteDbPath] : []),
+    // The worker's clone of the seed database. testing-server.sh sets
+    // FLASK_ENV=testing, which gives the backend its small test pool.
+    ...(options.databaseUrl ? ['--database-url', options.databaseUrl] : []),
   ];
 
   return startService({
@@ -91,6 +94,11 @@ export async function startFrontend(options: {
 
   const scriptPath = resolve(getFrontendRepoRoot(), './scripts/testing-server.sh');
   const args = ['--host', HOSTNAME, '--port', String(port)];
+  // Serve the production build in dist/ instead of the dev server. It must be
+  // built with VITE_TEST_MODE=true, or the Playwright bridges are missing.
+  if (process.env.PLAYWRIGHT_PREVIEW_MODE === 'true') {
+    args.push('--preview');
+  }
 
   return startService({
     workerIndex: options.workerIndex,
@@ -173,9 +181,13 @@ async function startService(options: StartServiceOptions): Promise<ServerHandle>
     cwd: getFrontendRepoRoot(),
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
+    // Own process group, so stopping a service stops its children too
+    // (uv's Python, Vite's workers); see signalProcessGroup.
+    detached: true,
   }) as ChildProcessWithoutNullStreams;
 
   registerForCleanup(child);
+  const startupStart = performance.now();
 
   if (options.streamLogs) {
     streamProcessOutput(child, options.workerIndex, options.serviceLabel);
@@ -189,11 +201,10 @@ async function startService(options: StartServiceOptions): Promise<ServerHandle>
     startupTimeoutMs: options.startupTimeoutMs,
   });
 
-  if (logLifecycle) {
-    console.log(
-      `${formatPrefix(options.workerIndex, options.serviceLabel)} ${capitalize(options.serviceLabel)} ready at ${url}`
-    );
-  }
+  const startupMs = Math.round(performance.now() - startupStart);
+  console.log(
+    `${formatPrefix(options.workerIndex, options.serviceLabel)} ${capitalize(options.serviceLabel)} ready at ${url} (${startupMs}ms)`
+  );
 
   return {
     url,
@@ -244,7 +255,12 @@ async function waitForStartup({
   });
 
   const poll = async () => {
+    // The last non-OK answer goes into the timeout error, so a failing
+    // readiness check names itself. A 503 is not ready.
+    let lastStatus = 0;
+    let lastBody = '';
     while (performance.now() - start < startupTimeoutMs) {
+      const fetchStart = performance.now();
       try {
         const response = await fetch(readinessUrl, {
           method: 'GET',
@@ -253,15 +269,24 @@ async function waitForStartup({
         if (response.ok) {
           return;
         }
+        lastStatus = response.status;
+        lastBody = await response.text().catch(() => '');
       } catch {
         // Service not ready yet; retry until timeout.
       }
 
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      // Sleep only what is left of the interval after a slow fetch.
+      const remaining = POLL_INTERVAL_MS - (performance.now() - fetchStart);
+      if (remaining > 0) {
+        await new Promise(resolve => setTimeout(resolve, remaining));
+      }
     }
 
+    const detail = lastStatus
+      ? ` (last response: ${lastStatus} ${lastBody.slice(0, 500)})`
+      : '';
     throw new Error(
-      `${formatPrefix(workerIndex, serviceLabel)} Timed out waiting for readiness at ${readinessUrl}`
+      `${formatPrefix(workerIndex, serviceLabel)} Timed out waiting for readiness at ${readinessUrl}${detail}`
     );
   };
 
@@ -282,7 +307,7 @@ async function terminateProcess(
     console.log(`${formatPrefix(workerIndex, serviceLabel)} Stopping process (pid=${child.pid})`);
   }
 
-  child.kill('SIGTERM');
+  signalProcessGroup(child, 'SIGTERM');
 
   const exited = await waitForExit(child, 5_000);
 
@@ -290,8 +315,21 @@ async function terminateProcess(
     console.warn(
       `${formatPrefix(workerIndex, serviceLabel)} Process did not exit after SIGTERM; sending SIGKILL`
     );
-    child.kill('SIGKILL');
+    signalProcessGroup(child, 'SIGKILL');
     await waitForExit(child, 5_000);
+  }
+}
+
+/**
+ * Signal the service's whole process group (a negative PID), which `detached:
+ * true` gave it, so no child outlives the service and holds its port. Falls
+ * back to the process alone if the group is already gone.
+ */
+function signalProcessGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-child.pid!, signal);
+  } catch {
+    child.kill(signal);
   }
 }
 
@@ -402,13 +440,11 @@ function registerForCleanup(child: ChildProcessWithoutNullStreams): void {
   if (!cleanupHookRegistered) {
     cleanupHookRegistered = true;
 
+    // The worker is going away and can't wait for a graceful stop, so kill
+    // each service's process group outright.
     const shutdown = () => {
       for (const proc of activeChildren) {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // Ignore cleanup failures; process may already be terminating.
-        }
+        signalProcessGroup(proc, 'SIGKILL');
       }
     };
 

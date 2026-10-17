@@ -1,6 +1,6 @@
 node_modules
-.env
-.env.local
+.env*
+!.env.example
 /dist
 .pnpm-store
 /browsers
@@ -10,5 +10,4 @@ node_modules
 /test-results/
 /playwright-report/
 /playwright/.cache/
-.env.test
 *.tsbuildinfo

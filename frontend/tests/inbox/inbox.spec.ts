@@ -30,17 +30,15 @@ function readHolding(page: Page, lines: string[]) {
   });
 }
 
-/** The page's own SSE connection, which every request the page makes names for the API to bind
- *  (NFR-4). */
-async function connection(testEvents: TestEventCapture): Promise<string> {
-  const connected = await testEvents.waitForEvent((event) => event.kind === 'sse' && event.event === 'connected');
-  return (connected as { data: { requestId: string } }).data.requestId;
+/** Waits for the page's own SSE connection, which the sitting's events reach it over (NFR-4). */
+async function connection(testEvents: TestEventCapture): Promise<void> {
+  await testEvents.waitForEvent((event) => event.kind === 'sse' && event.event === 'connected');
 }
 
-/** The next POST to `path`: its body, and the SSE connection it names. */
-async function posted(page: Page, path: string): Promise<{ body: unknown; connection: string | null }> {
+/** The body of the next POST to `path`. */
+async function posted(page: Page, path: string): Promise<unknown> {
   const request = await page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === path);
-  return { body: request.postDataJSON(), connection: await request.headerValue('x-sse-request-id') };
+  return request.postDataJSON();
 }
 
 const ASK =
@@ -111,10 +109,10 @@ test.describe('Start', () => {
     await expect(inbox.start).toBeVisible();
     await expect(inbox.end).toHaveCount(0);
 
-    const requestId = await connection(testEvents);
-    const sent = posted(page, '/api/inbox/start');
+    await connection(testEvents);
+    const body = posted(page, '/api/inbox/start');
     await inbox.begin();
-    expect(await sent).toEqual({ body: { scope: '' }, connection: requestId });
+    expect(await body).toEqual({ scope: '' });
     await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1$/);
     await expect(inbox.working).toBeVisible();
     await expect(inbox.end).toBeVisible();
@@ -182,10 +180,10 @@ test.describe('the composer', () => {
     await expect(inbox.field).toHaveValue('line one\nline two\nline three!');
     await expect(inbox.operatorMessages).toHaveCount(0);
 
-    const requestId = await connection(testEvents);
-    const sent = posted(page, '/api/inbox/turns');
+    await connection(testEvents);
+    const body = posted(page, '/api/inbox/turns');
     await page.keyboard.press('Control+Enter');
-    expect(await sent).toEqual({ body: { message: 'line one\nline two\nline three!' }, connection: requestId });
+    expect(await body).toEqual({ message: 'line one\nline two\nline three!' });
     await expect(inbox.operatorMessages).toHaveCount(1);
     await expect(inbox.field).toHaveValue('');
     await expect(inbox.working).toBeVisible();

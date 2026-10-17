@@ -109,16 +109,18 @@ export class ToastHelper {
   async dismissToast(options?: { all?: boolean }): Promise<void> {
     if (options?.all) {
       const toasts = this.getAllToasts();
+      // A closed toast leaves the DOM at once, so the next one is first again.
       const count = await toasts.count();
 
       for (let i = 0; i < count; i++) {
-        const closeButton = toasts.nth(i).locator('button[aria-label="Close"]');
-        if (await closeButton.isVisible()) {
-          await closeButton.click();
+        const closeButton = this.getCloseButton(toasts.first());
+        if (!(await closeButton.isVisible())) {
+          break;
         }
+        await closeButton.click();
       }
     } else {
-      const closeButton = this.page.locator('[data-testid="app-shell.toast.item"] button[aria-label="Close"]').first();
+      const closeButton = this.getCloseButton(this.getToastContainer());
       if (await closeButton.isVisible()) {
         await closeButton.click();
       }
@@ -136,23 +138,40 @@ export class ToastHelper {
   }
 
   /**
-   * Waits for the toast viewport to stop intercepting pointer events.
+   * Gets a toast's close button, by its accessible name (the button's
+   * screen-reader text; it has no aria-label)
+   * @param toast - The toast
+   * @returns Locator for the toast's close button
+   */
+  private getCloseButton(toast: Locator): Locator {
+    return toast.getByRole('button', { name: 'Close', exact: true });
+  }
+
+  /**
+   * Closes every toast and waits until none is left, so the toast viewport
+   * stops intercepting pointer events.
    *
-   * This is critical for preventing flaky tests where the toast viewport
-   * intercepts pointer events even after toasts are dismissed.
    * Use this method after operations that trigger toasts and before
    * attempting to interact with UI elements that might be blocked by the viewport.
+   * A toast covers its part of the viewport until it has left the DOM, so the
+   * wait is on that, not on time.
    *
-   * This provides a brief fixed wait to allow toast exit animations to complete
-   * and the viewport to stop intercepting pointer events. This is a pragmatic
-   * workaround for intermittent issues with toast dismissal timing.
-   *
+   * @param options - Wait options
    * @see https://playwright.dev/docs/actionability for details on pointer event interception
    */
-  async waitForToastViewportDismissed(): Promise<void> {
-    // Fixed wait for toast exit animations to complete
-    // This handles the intermittent case where toasts may take longer to clear
-    await this.page.waitForTimeout(1000);
+  async waitForToastViewportDismissed(options?: { timeout?: number }): Promise<void> {
+    const toasts = this.getAllToasts();
+    // A closed toast leaves the DOM at once, so the next one is first again.
+    // Bounded by the count, as a toast may also time out while this runs.
+    const count = await toasts.count();
+    for (let i = 0; i < count; i++) {
+      const closeButton = this.getCloseButton(toasts.first());
+      if (!(await closeButton.isVisible())) {
+        break;
+      }
+      await closeButton.click();
+    }
+    await expect(toasts).toHaveCount(0, options);
   }
 
   /**
@@ -271,9 +290,11 @@ export class ToastHelper {
         await this.waitForToastWithText(expected.text);
       }
 
-      // Dismiss the toast before checking for the next one
-      await this.dismissToast();
-      await this.page.waitForTimeout(100); // Brief pause between toasts
+      // Close the toast, and wait until it has left before checking for the next one
+      const toast = this.getAllToasts().filter({ hasText: expected.text }).first();
+      const toastId = await toast.getAttribute('data-toast-id');
+      await this.getCloseButton(toast).click();
+      await expect(this.page.locator(`[data-toast-id="${toastId}"]`)).toHaveCount(0);
     }
   }
 

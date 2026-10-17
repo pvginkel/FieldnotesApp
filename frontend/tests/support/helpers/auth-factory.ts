@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import type { APIResponse, Page } from '@playwright/test';
 
 export interface TestUserOptions {
   subject?: string;
@@ -40,9 +40,7 @@ export class AuthFactory {
     );
 
     if (!response.ok()) {
-      throw new Error(
-        `Failed to create test session: ${response.status()} ${response.statusText()}`,
-      );
+      throw await requestError('Failed to create test session', response);
     }
   }
 
@@ -56,9 +54,7 @@ export class AuthFactory {
     );
 
     if (!response.ok()) {
-      throw new Error(
-        `Failed to clear test session: ${response.status()} ${response.statusText()}`,
-      );
+      throw await requestError('Failed to clear test session', response);
     }
 
     await this.page.context().clearCookies();
@@ -74,9 +70,18 @@ export class AuthFactory {
     );
 
     if (!response.ok()) {
-      throw new Error(
-        `Failed to configure auth error: ${response.status()} ${response.statusText()}`,
-      );
+      throw await requestError('Failed to configure auth error', response);
     }
   }
+}
+
+/** An error naming the failed request, with the backend's response body. */
+async function requestError(what: string, response: APIResponse): Promise<Error> {
+  let body = '';
+  try {
+    body = await response.text();
+  } catch {
+    // The body is a diagnostic; the status still says what failed.
+  }
+  return new Error(`${what}: ${response.status()} ${response.statusText()}\n${body}`);
 }

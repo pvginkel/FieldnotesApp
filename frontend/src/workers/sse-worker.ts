@@ -2,14 +2,20 @@
  * SharedWorker for multiplexing a unified SSE connection across browser tabs.
  *
  * Maintains a single EventSource connection to the SSE endpoint and forwards
- * events to all connected tabs via MessagePort. The gateway sends all events as
- * unnamed data-only messages with a {type, payload} envelope, so the worker
- * uses a single `onmessage` handler to capture everything.
+ * events to all connected tabs via MessagePort. The gateway sends all domain
+ * events as unnamed data-only messages with a {type, payload} envelope, so the
+ * worker uses a single `onmessage` handler to capture them. Two control signals
+ * are named events: `ready` (no data) once the gateway has accepted the stream,
+ * and `rejected` when the backend's connect callback refused it.
+ *
+ * The stream counts as connected on `ready`, not on `onopen`: a refused stream
+ * opens too, before its `rejected` event.
+ *
+ * A `rejected` stream is terminal: the worker closes it and does not reconnect
+ * until a tab sends `reconnect` (after refreshing the session).
  *
  * When the last tab disconnects, the worker closes the SSE connection.
  */
-
-import { makeUniqueToken } from '@/lib/utils/random';
 
 // Type definitions for worker messages
 
@@ -25,11 +31,23 @@ type WorkerMessage =
   | { type: 'connected'; requestId: string; __testEvent?: TestEventMetadata }
   | { type: 'event'; event: string; data: unknown; __testEvent?: TestEventMetadata }
   | { type: 'disconnected'; reason?: string; __testEvent?: TestEventMetadata }
-  | { type: 'error'; error: string; __testEvent?: TestEventMetadata };
+  | { type: 'error'; error: string; __testEvent?: TestEventMetadata }
+  | { type: 'rejected'; status: number; message: string; __testEvent?: TestEventMetadata };
 
 type TabCommand =
   | { type: 'connect'; isTestMode?: boolean }
-  | { type: 'disconnect' };
+  | { type: 'disconnect' }
+  | { type: 'reconnect' };
+
+// Token generation utility (inline version of makeUniqueToken)
+const TOKEN_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+function makeUniqueToken(length = 32): string {
+  let token = '';
+  for (let i = 0; i < length; i++) {
+    token += TOKEN_CHARS.charAt(Math.floor(Math.random() * TOKEN_CHARS.length));
+  }
+  return token;
+}
 
 // Worker state
 const ports = new Set<MessagePort>();
@@ -42,6 +60,15 @@ const maxRetryDelay = 60000; // 60 seconds
 
 // Cache the last version event so late-joining tabs receive it immediately
 let lastVersionPayload: unknown = null;
+
+// Whether the current stream has received the gateway's `ready` event. Tabs are
+// told `connected` only then, late-joining tabs included.
+let readyReceived = false;
+
+// Set when the gateway sends `rejected`: keeps `onerror` from scheduling a
+// reconnect until a tab sends `reconnect`. Cleared there and in
+// `handleConnect()` when it opens a new stream.
+let rejectedTerminal = false;
 
 /**
  * Broadcast a message to all connected tabs
@@ -97,6 +124,7 @@ function closeConnection(): void {
   currentRequestId = null;
   retryCount = 0;
   lastVersionPayload = null;
+  readyReceived = false;
 }
 
 /**
@@ -134,6 +162,8 @@ function createEventSource(): void {
     eventSource = null;
   }
 
+  readyReceived = false;
+
   if (!currentRequestId) {
     currentRequestId = makeUniqueToken(32);
   }
@@ -146,21 +176,10 @@ function createEventSource(): void {
   eventSource = new EventSource(url);
 
   eventSource.onopen = () => {
-    console.debug('SSE worker: SSE connection opened');
+    // Open is not connected: the gateway may still refuse the stream. Tabs hear
+    // `connected` on the `ready` event.
+    console.debug('SSE worker: SSE connection opened (waiting for ready)');
     retryCount = 0;
-
-    const message: WorkerMessage = {
-      type: 'connected',
-      requestId: currentRequestId!,
-    };
-
-    if (hasTestModePorts()) {
-      message.__testEvent = createTestEvent('connection', 'open', 'connected', {
-        requestId: currentRequestId,
-      });
-    }
-
-    broadcast(message);
   };
 
   // Single onmessage handler captures all envelope events from the gateway.
@@ -200,19 +219,78 @@ function createEventSource(): void {
     broadcast(message);
   };
 
-  // connection_close stays as a named event (internal plumbing)
-  eventSource.addEventListener('connection_close', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      console.debug('SSE worker: Connection closed by backend:', data.reason);
-    } catch {
-      // Ignore parse errors for connection_close
+  // The gateway sends `ready` as a named event with no data once it has
+  // accepted the stream. Don't read `event.data` here.
+  eventSource.addEventListener('ready', () => {
+    readyReceived = true;
+
+    const message: WorkerMessage = {
+      type: 'connected',
+      requestId: currentRequestId!,
+    };
+
+    if (hasTestModePorts()) {
+      message.__testEvent = createTestEvent('connection', 'open', 'connected', {
+        requestId: currentRequestId,
+      });
     }
 
+    broadcast(message);
+  });
+
+  // The gateway sends `rejected` as a named event with a JSON payload
+  // (`{"status": <code>, "message": "<text>"}`) when the backend's connect
+  // callback refused the stream (401/403), then ends the stream. Terminal:
+  // close the EventSource, stop retrying, and tell every tab. The tabs refresh
+  // the session through /api/auth/self and send `reconnect` when it is valid.
+  eventSource.addEventListener('rejected', (event) => {
+    let status = 0;
+    let message = 'Unknown';
+    const rawData: unknown = (event as MessageEvent).data;
+    try {
+      const payload = JSON.parse(String(rawData)) as {
+        status?: number;
+        message?: string;
+      };
+      if (typeof payload?.status === 'number') {
+        status = payload.status;
+      }
+      if (typeof payload?.message === 'string') {
+        message = payload.message;
+      }
+    } catch (parseError) {
+      // Still terminal, with status 0. Keep the raw payload (truncated) for triage.
+      const raw = String(rawData);
+      const truncated = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+      console.warn('SSE worker: Failed to parse `rejected` payload:', parseError, 'raw:', truncated);
+    }
+
+    rejectedTerminal = true;
     closeConnection();
+
+    const rejectedMessage: WorkerMessage = {
+      type: 'rejected',
+      status,
+      message,
+    };
+
+    if (hasTestModePorts()) {
+      rejectedMessage.__testEvent = createTestEvent('connection', 'message', 'rejected', {
+        status,
+        message,
+      });
+    }
+
+    broadcast(rejectedMessage);
   });
 
   eventSource.onerror = (event) => {
+    // The stream's end after `rejected` can still fire `onerror`; the recovery
+    // is the tabs' to drive, so don't schedule a reconnect.
+    if (rejectedTerminal) {
+      return;
+    }
+
     console.error('SSE worker: EventSource error:', event);
 
     const errorMessage: WorkerMessage = {
@@ -245,9 +323,12 @@ function handleConnect(port: MessagePort, isTestMode = false): void {
   ports.add(port);
 
   if (!eventSource) {
+    // A new stream must not inherit an earlier rejection (the last tab left
+    // after `rejected`, the worker stayed alive, and a new tab connects).
+    rejectedTerminal = false;
     createEventSource();
-  } else if (eventSource.readyState === EventSource.OPEN) {
-    // SSE already connected — send connected message to new tab
+  } else if (readyReceived) {
+    // SSE already connected and ready — send connected message to new tab
     const connectedMessage: WorkerMessage = {
       type: 'connected',
       requestId: currentRequestId!,
@@ -284,6 +365,18 @@ function handleConnect(port: MessagePort, isTestMode = false): void {
 }
 
 /**
+ * Handle a tab's `reconnect` command: close any stream (which clears the retry
+ * timer, request ID, cached version and ready flag), clear the rejection, and
+ * open a fresh stream with a new request ID. The worker is single-threaded, so
+ * commands that arrive together end in one stream.
+ */
+function handleReconnect(): void {
+  closeConnection();
+  rejectedTerminal = false;
+  createEventSource();
+}
+
+/**
  * Handle tab disconnection
  */
 function handleDisconnect(port: MessagePort): void {
@@ -315,6 +408,10 @@ self.addEventListener('connect', (event) => {
 
       case 'disconnect':
         handleDisconnect(port);
+        break;
+
+      case 'reconnect':
+        handleReconnect();
         break;
 
       default:

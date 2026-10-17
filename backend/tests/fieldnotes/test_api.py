@@ -11,6 +11,11 @@ from fieldnotes_contracts import Reaction
 
 DUPLICATE = "uv sync installs no workspace members"
 REWRITTEN = "uv sync leaves the workspace members out"
+FAILED_START = {
+    "status": "error",
+    "critical": True,
+    "detail": "startup failed: the store could not be cloned or indexed",
+}
 
 
 def post(api, auth, text=DUPLICATE, area="uv", **fields):
@@ -33,11 +38,10 @@ def rewrite(remote, id_, canonical=REWRITTEN):
 def test_health_answers_without_a_token(start):
     with start() as api:
         assert api.get("/health/healthz").status_code == 200
-        # The template's readiness also waits on the SSE gateway, which no suite runs.
-        assert api.get("/health/readyz").json()["store"] == {
-            "ok": True,
-            "failed": False,
-        }
+        readyz = api.get("/health/readyz")
+        # 200 though no suite runs the SSE gateway: only the store's check is critical.
+        assert readyz.status_code == 200
+        assert readyz.json()["checks"]["store"] == {"status": "ok", "critical": True}
 
 
 def test_a_failed_start_keeps_the_store_unready(start, auth):
@@ -45,10 +49,9 @@ def test_a_failed_start_keeps_the_store_unready(start, auth):
     (`FieldnotesService`); here the runtime has no `on_failure`."""
     with start(ready=False, FIELDNOTES_STORE_URL="/nonexistent/remote.git") as api:
         api.runtime.wait_started(20)
-        assert api.get("/health/readyz").json()["store"] == {
-            "ok": False,
-            "failed": True,
-        }
+        readyz = api.get("/health/readyz")
+        assert readyz.status_code == 503
+        assert readyz.json()["checks"]["store"] == FAILED_START
         problem = post(api, auth).json()
         assert (problem["status"], problem["type"]) == (503, "not-ready")
 
@@ -70,9 +73,10 @@ def test_a_start_that_cannot_index_the_checkout_fails(start, remote, models):
 
     with start(ready=False) as api:
         api.runtime.wait_started(20)
-        store = api.get("/health/readyz").json()["store"]
+        readyz = api.get("/health/readyz")
 
-    assert store == {"ok": False, "failed": True}
+    assert readyz.status_code == 503
+    assert readyz.json()["checks"]["store"] == FAILED_START
 
 
 @pytest.mark.parametrize(

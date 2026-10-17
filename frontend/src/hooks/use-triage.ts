@@ -293,8 +293,9 @@ export function useTriage() {
   };
 
   // The pane shows the reconciler's draft as it wrote it: a submit takes it as ruled (FR-26), and
-  // an edit saved over it is the operator's.
-  const guessed = (item: Item) => isRuled(item) && item.ruling!.guessed && !edited(item);
+  // an edit saved over it is the operator's. A ruling without the flag is no guess, as the
+  // backend's default has it.
+  const guessed = (item: Item) => isRuled(item) && (item.ruling!.guessed ?? false) && !edited(item);
 
   // → is `next` while the pane shows a verb: it saves an edit, as Ctrl+Enter does, and moves on.
   // Without a verb it is `skip`: the card goes to the back of the stack next time. A ruled card

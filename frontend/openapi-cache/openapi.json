@@ -216,8 +216,27 @@
         "title": "ForceErrorQuerySchema",
         "type": "object"
       },
+      "ForceSSECallbackErrorQuerySchema.6b6ce9f": {
+        "description": "Query parameters for /api/testing/sse/force-callback-error.",
+        "properties": {
+          "status": {
+            "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+            "enum": [
+              401,
+              403
+            ],
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ForceSSECallbackErrorQuerySchema",
+        "type": "object"
+      },
       "HealthResponse.d817ae2": {
-        "description": "Health check response.",
+        "description": "Liveness and drain response.",
         "properties": {
           "ready": {
             "description": "Whether the service is ready to handle requests",
@@ -231,9 +250,8 @@
           "status": {
             "description": "Health status message",
             "examples": [
-              "ready",
               "alive",
-              "shutting down"
+              "unauthorized"
             ],
             "title": "Status",
             "type": "string"
@@ -464,6 +482,96 @@
           "status"
         ],
         "title": "Problem",
+        "type": "object"
+      },
+      "ReadyzResponse.d817ae2": {
+        "description": "Readiness response: the overall verdict and every check.",
+        "properties": {
+          "checks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReadyzResponse.d817ae2.ReadinessCheckSchema"
+            },
+            "description": "Every registered check by name; empty while shutting down",
+            "title": "Checks",
+            "type": "object"
+          },
+          "ready": {
+            "description": "Whether the service takes traffic; false exactly when readyz answers 503",
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "stage": {
+            "description": "Deployment stage (STAGE)",
+            "examples": [
+              "prd",
+              "local-dev"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok: every check passed. degraded: a non-critical check failed (200). not_ready: a critical check failed (503). shutting_down: draining (503).",
+            "enum": [
+              "ok",
+              "degraded",
+              "not_ready",
+              "shutting_down"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ready",
+          "stage",
+          "checks"
+        ],
+        "title": "ReadyzResponse",
+        "type": "object"
+      },
+      "ReadyzResponse.d817ae2.ReadinessCheckSchema": {
+        "description": "Result of one readiness check.",
+        "properties": {
+          "critical": {
+            "description": "Whether a failure of this check makes readyz answer 503",
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the check failed, or a note on its result",
+            "examples": [
+              "connection failed",
+              "2 migrations pending",
+              "timed out after 0.8 s"
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "description": "ok, error, or disabled (deliberately not configured; never fails readiness)",
+            "enum": [
+              "ok",
+              "error",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "critical"
+        ],
+        "title": "ReadinessCheckSchema",
         "type": "object"
       },
       "RulingRequest.b288cbf": {
@@ -1511,6 +1619,39 @@
         "title": "TurnRequest",
         "type": "object"
       },
+      "UiSetupResponseSchema.630d3b9": {
+        "description": "What the frontend needs to know about the deployment it runs against.",
+        "properties": {
+          "expose_internals": {
+            "description": "Whether the app may show internal detail, such as exception text and diagnostics: STAGE is not prd, or the app is marked HOMELAB_INTERNAL",
+            "title": "Expose Internals",
+            "type": "boolean"
+          },
+          "stage": {
+            "description": "Deployment stage (STAGE)",
+            "enum": [
+              "local-dev",
+              "dev",
+              "uat",
+              "prd",
+              "local-tst",
+              "tst"
+            ],
+            "examples": [
+              "prd",
+              "local-dev"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "expose_internals"
+        ],
+        "title": "UiSetupResponseSchema",
+        "type": "object"
+      },
       "UserInfoResponseSchema.a535b8c": {
         "description": "Response schema for current user information.",
         "properties": {
@@ -1573,8 +1714,17 @@
         "description": "Model of a validation error response element.",
         "properties": {
           "ctx": {
-            "title": "Error context",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error context"
           },
           "loc": {
             "items": {
@@ -1628,7 +1778,7 @@
     },
     "/api/auth/login": {
       "get": {
-        "description": "Generates authorization URL and redirects to OIDC provider. PKCE state is encrypted into the OAuth state parameter.\n\nQuery Parameters:     redirect: URL to redirect to after successful login (required)\n\nReturns:     302: Redirect to OIDC provider authorization endpoint     400: Missing or invalid redirect parameter",
+        "description": "Generates authorization URL and redirects to OIDC provider. PKCE state is encrypted into the OAuth state parameter. The ``redirect_uri`` is the callback on the origin the request came in on, so the app signs in on every hostname it is served on (each one registered at the IdP).\n\nQuery Parameters:     redirect: Path to redirect to after successful login (required)\n\nReturns:     302: Redirect to OIDC provider authorization endpoint     400: Missing or invalid redirect parameter",
         "operationId": "get__api_auth_login",
         "parameters": [],
         "responses": {},
@@ -1638,7 +1788,7 @@
     },
     "/api/auth/logout": {
       "get": {
-        "description": "Clears access token cookie and redirects to OIDC provider's logout endpoint to terminate the session at the IdP level.\n\nQuery Parameters:     redirect: URL to redirect to after logout (default: /)\n\nReturns:     302: Redirect to OIDC logout endpoint (or direct redirect if OIDC disabled)",
+        "description": "Clears access token cookie and redirects to OIDC provider's logout endpoint to terminate the session at the IdP level.\n\nQuery Parameters:     redirect: Path to redirect to after logout (default: /)\n\nReturns:     302: Redirect to OIDC logout endpoint (or direct redirect if OIDC disabled)     400: Invalid redirect parameter",
         "operationId": "get__api_auth_logout",
         "parameters": [],
         "responses": {},
@@ -1648,7 +1798,7 @@
     },
     "/api/auth/self": {
       "get": {
-        "description": "This endpoint is @public because it handles authentication explicitly: in testing mode it checks test sessions and forced errors; otherwise it validates tokens or returns a default local-user when OIDC is off.\n\nReturns:     200: User information from validated token or test session     401: No valid token provided or token invalid     403: User authenticated but has no recognized hierarchical role",
+        "description": "This endpoint is @public, so the request hook resolves the caller (refreshing an expired access token) without answering 401 itself, and the handler answers 401 when no one is signed in. A caller with none of the app's roles gets 403 from the hook. With OIDC disabled, the caller is the local admin.\n\nReturns:     200: User information     401: No valid token provided or token invalid     403: User authenticated but has none of the app's roles",
         "operationId": "get__api_auth_self",
         "parameters": [],
         "responses": {
@@ -2000,7 +2150,7 @@
     },
     "/api/sse/callback": {
       "post": {
-        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nReturns:     200 on success     401 if authentication fails (production only)     400 if payload invalid or request_id missing",
+        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nA connect is accepted only for a caller the API would serve, and is refused before it is registered, so a refused stream never receives an event and never counts in the connection metrics. The gateway turns a refusal into an in-stream ``rejected`` event and ends the stream.\n\nReturns:     200 on success     401 if the callback secret fails (production only), or the         forwarded token is missing or invalid     403 if the caller holds none of the app's roles (or lacks the         read role, where one is set)     400 if payload invalid or request_id missing",
         "operationId": "post__api_sse_callback",
         "parameters": [],
         "responses": {},
@@ -2344,12 +2494,44 @@
     },
     "/api/testing/logs/stream": {
       "get": {
-        "description": "Streams logs from all loggers at INFO level and above. Each log entry is formatted as structured JSON with correlation ID when available.\n\nEvent Types:     - log: Application log entries     - connection_open: Sent when client connects     - heartbeat: Sent every 30 seconds for keepalive     - connection_close: Sent when server shuts down",
+        "description": "Streams logs from all loggers at INFO level and above. Each log entry is formatted as structured JSON with correlation ID when available.\n\nEvent Types:     - log: Application log entries     - connection_open: Sent when client connects     - heartbeat: Sent every 30 seconds for keepalive",
         "operationId": "get__api_testing_logs_stream",
         "parameters": [],
         "responses": {},
         "summary": "SSE endpoint for streaming backend application logs in real-time.",
         "tags": []
+      }
+    },
+    "/api/testing/sse/force-callback-error": {
+      "post": {
+        "description": "Single-shot: the callback after it behaves normally again. The gateway turns the refusal into an in-stream ``rejected`` event, which drives the frontend's refresh-and-reconnect path.\n\nQuery Parameters:     status: 401 or 403 (the schema refuses anything else with 400)\n\nReturns:     204: Hook armed",
+        "operationId": "post__api_testing_sse_force-callback-error",
+        "parameters": [
+          {
+            "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+            "in": "query",
+            "name": "status",
+            "required": true,
+            "schema": {
+              "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+              "enum": [
+                401,
+                403
+              ],
+              "title": "Status",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make the next SSE Gateway connect callback refuse the connection.",
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/testing/sse/task-event": {
@@ -2741,6 +2923,37 @@
         "x-required-role": "editor"
       }
     },
+    "/api/ui-setup": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_ui-setup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiSetupResponseSchema.630d3b9"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Return the deployment stage, and whether the UI may show internal detail.",
+        "tags": []
+      }
+    },
     "/health/drain": {
       "get": {
         "description": "Requires bearer token authentication against DRAIN_AUTH_KEY config setting. Calls shutdown() on the lifecycle coordinator and returns health status.",
@@ -2815,7 +3028,7 @@
     },
     "/health/readyz": {
       "get": {
-        "description": "Returns 503 when the application is shutting down, or any registered readiness check fails. This signals Kubernetes to remove the pod from service endpoints.",
+        "description": "Reports every registered check. Returns 503 when the application is shutting down or a critical check fails, which signals Kubernetes to remove the pod from service endpoints; a failing non-critical check leaves it in service (status \"degraded\").",
         "operationId": "get__health_readyz",
         "parameters": [],
         "responses": {
@@ -2823,7 +3036,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthResponse.d817ae2"
+                  "$ref": "#/components/schemas/ReadyzResponse.d817ae2"
                 }
               }
             },
@@ -2843,7 +3056,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthResponse.d817ae2"
+                  "$ref": "#/components/schemas/ReadyzResponse.d817ae2"
                 }
               }
             },
@@ -2869,6 +3082,7 @@
   "tags": [],
   "x-auth-roles": {
     "admin": null,
+    "hierarchy": {},
     "read": null,
     "write": "editor"
   }

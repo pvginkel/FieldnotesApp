@@ -22,7 +22,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from prometheus_client import REGISTRY
 
@@ -34,7 +33,7 @@ from app.fieldnotes.inbox import Inbox
 from app.fieldnotes.observations import Observations
 from app.fieldnotes.runtime import Runtime
 from app.fieldnotes.testing import FakeController, FakeModels
-from app.services.health_service import HealthService
+from app.services.health_service import CheckResult, CheckStatus, HealthService
 from app.services.task_service import TaskService
 from app.utils.lifecycle_coordinator import LifecycleCoordinatorProtocol, LifecycleEvent
 
@@ -75,7 +74,8 @@ class FieldnotesService:
             else:
                 on_failure = _exit_for_restart if config.is_production else None
                 self.runtime = Runtime(settings, on_failure=on_failure)
-        health_service.register_readyz("store", self._readyz)
+        # Critical: until the store is cloned and indexed the app serves nothing but 503s.
+        health_service.register_check("store", self._readyz, critical=True)
         lifecycle_coordinator.register_lifecycle_notification(self._on_lifecycle_event)
 
     def use(self, runtime: Runtime) -> None:
@@ -163,11 +163,17 @@ class FieldnotesService:
             raise not_ready()
         return self.runtime.ready_observations()
 
-    def _readyz(self) -> dict[str, Any]:
+    def _readyz(self) -> CheckResult:
         runtime = self.runtime
         if runtime is None:  # nothing to wait for: the dev stack
-            return {"ok": True, "configured": False}
-        return {"ok": runtime.ready, "failed": runtime.failed}
+            return CheckResult(CheckStatus.DISABLED)
+        if runtime.ready:
+            return CheckResult(CheckStatus.OK)
+        if runtime.failed:
+            return CheckResult(
+                CheckStatus.ERROR, "startup failed: the store could not be cloned or indexed"
+            )
+        return CheckResult(CheckStatus.ERROR, "starting: cloning and indexing the store")
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
         if self.runtime is None:

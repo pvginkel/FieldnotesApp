@@ -79,6 +79,14 @@ The environment is composed by this repo's `.kubecoder/config.yaml`, which check
 store, FieldnotesDeploy and HomelabAppsDeploy out as siblings. The toolchain is the `modern-app` sidecar
 (Node, pnpm, uv), so an ad-hoc command is `cexec modern-app …`. The `kc project` verbs are cwd-bound: run them from this repo's root.
 
+The root and `backend/` are two uv projects, each with its own `uv.lock`, and both locks are
+committed, because CI and the image sync `--locked`. `scripts/dev.py` starts the dev stack and
+`scripts/dev.py stop` stops it from another shell. After a backend API change,
+`scripts/regenerate-openapi.py --frontend` refreshes the frontend's OpenAPI cache and client;
+`backend/tests/test_openapi_cache.py` fails while the committed cache is stale.
+`cexec modern-app python3 scripts/check_updates.py` reports the dependencies with a newer release,
+major, minor and patch, in every component it finds.
+
 ## Template ownership
 
 The root, `backend/` and `frontend/` are each generated from a ModernAppTemplate Copier template
@@ -90,7 +98,7 @@ template-owned file to add app behaviour; use the extension points instead:
 |------|-----------|
 | New API endpoints | `backend/app/api/`, registered in `register_blueprints()` in `backend/app/startup.py` |
 | New services | `backend/app/services/`, wired in `backend/app/services/container.py` |
-| CLI commands, post-migration logic | `backend/app/startup.py` |
+| CLI commands | `backend/app/startup.py` |
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 

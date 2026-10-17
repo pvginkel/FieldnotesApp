@@ -60,7 +60,7 @@ The `{id}` path segment must be a ULID (26 characters of Crockford base32,
 | `POST /api/inbox/start` | `StartRequest` | 202 the inbox's state with the sitting begun; 200 with the live sitting, starting nothing |
 | `POST /api/inbox/turns` | `TurnRequest` | 202 the inbox's state, the turn in flight in it |
 | `POST /api/inbox/end` | | 204, also when no sitting is held |
-| `GET /health/healthz`, `GET /health/readyz` | | the template's health checks; readiness carries a `store` entry, `{ok, failed}` |
+| `GET /health/healthz`, `GET /health/readyz` | | the template's health checks; readiness carries a critical `store` check: `disabled` without a store, `ok` once it is cloned and indexed, `error` before that or after a failed start |
 | `GET /metrics` | | 200 the Prometheus text exposition |
 
 Request models strip surrounding whitespace from strings; a blank required string is refused;
@@ -573,4 +573,4 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_KUBECODER_INBOX_MODEL`, `FIELDNOTES_KUBECODER_INBOX_EFFORT` | the engine's defaults | the sitting's model and reasoning effort |
 | `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved, or a lost one stays lost, before the API ends its session and stops the environment it started, keeping the sitting; see [The inbox sitting](#the-inbox-sitting); a positive number |
 | `FIELDNOTES_KUBECODER_INBOX_TRACKER` | `https://issues.webathome.org/issue/` | the issue address the inbox screen appends a card id to |
-| `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |
+| `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST`, `PORT` and `LOG_LEVEL` apply |

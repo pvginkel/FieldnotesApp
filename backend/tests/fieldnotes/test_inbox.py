@@ -91,13 +91,12 @@ def finished(api, eventually, task_id):
 
 
 def listen(api, monkeypatch) -> list[dict]:
-    """The task channel as the page hears it: every task event the API broadcasts."""
+    """The task channel as the page hears it: every task event the API sends, whoever it
+    is for."""
     heard: list[dict] = []
     manager = api.app.container.sse_connection_manager()
 
-    def send_event(
-        request_id, event_data, event_name, service_type, target_subject=None
-    ):
+    def send_event(target, event_data, event_name, service_type):
         heard.append(event_data)
         return True
 

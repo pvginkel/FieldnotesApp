@@ -35,8 +35,7 @@
 | `FIELDNOTES_KUBECODER_INBOX_MODEL`, `_EFFORT` | the engine's | its model and reasoning effort |
 | `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes without a turn before a sitting rests: its session ended, the environment the API started stopped |
 | `FIELDNOTES_KUBECODER_INBOX_TRACKER` | the tracker's | the issue address a browser opens, a card id appended |
-| `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
-| `FIELDNOTES_LOG_LEVEL` | `INFO` | |
+| `FIELDNOTES_API_HOST`, `_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused: the template's `HOST`, `PORT` and `LOG_LEVEL` apply |
 
 Tokens are never in code or config files, only in environment variables materialised from
 secrets. A malformed value fails startup and names its variable. The GitHub webhook's two

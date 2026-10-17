@@ -74,12 +74,12 @@ EOF
 cexec modern-app sh -c 'cd /work/FieldnotesApp/backend && set -a && . .run/live/env && set +a &&
   setsid nohup .venv/bin/dev > .run/live/api.log 2>&1 < /dev/null &
   echo $! > .run/live/api.pid'
-until curl -s localhost:3401/health/readyz | grep -q '"store":{"failed":false,"ok":true}'; do sleep 1; done
+until curl -sf -o /dev/null localhost:3401/health/readyz; do sleep 1; done
 ```
 
-The API answers on 3401 under `/api`. `/health/readyz` as a whole stays `503`, because it also
-waits for the SSE gateway, which this check does not run; its `store` entry is the API's own
-readiness. The pid is written from inside the tool container: killing the local `cexec` client does
+The API answers on 3401 under `/api`. `/health/readyz` answers `200` once the store is cloned and
+indexed: its `store` check is the only critical one. The SSE gateway's check, which this run has no
+gateway for, fails without failing readiness, so the body reads `degraded`. The pid is written from inside the tool container: killing the local `cexec` client does
 not reach the process it started, and `.venv/bin/dev` rather than `uv run dev` keeps that pid the
 server's own.
 

@@ -488,6 +488,9 @@ class Actioner:
         """Start the actioner on the task service and return at once, unless a start is pending
         already: that one covers the caller's submit."""
         if self._begin():
+            # A system task, so no caller_subject: under OIDC its events reach no one. Nothing
+            # listens for them; the app bar's pill and the actioner page poll
+            # `GET /api/triage/actioner`, and the task's id never reaches a client.
             tasks.start_task(_Start(self))
 
     def _begin(self) -> bool:

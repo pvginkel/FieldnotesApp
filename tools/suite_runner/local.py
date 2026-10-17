@@ -7,11 +7,25 @@ Flow:
   2. wait for services, when backend/scripts/wait-for-services.py exists
   3. run backend pytest
   4. install the frontend's npm deps (standalone pnpm project), build the
-     frontend, install the Playwright browser, run Playwright
+     frontend, install the Playwright browser, run Playwright on the dev server
+  5. the preview pass: rebuild the frontend with VITE_TEST_MODE=true and run
+     the specs tagged @preview on that build (PLAYWRIGHT_PREVIEW_MODE=true)
 
 Step 2 is the app's hook for sidecars that are slow to come up in CI (a search
 engine, a message broker): the script runs under the backend's uv venv and
 must exit non-zero if a service never becomes ready.
+
+Step 5 covers what only a production build does, such as the SSE SharedWorker:
+those specs skip on the dev server. The runner owns VITE_TEST_MODE and
+PLAYWRIGHT_PREVIEW_MODE, clearing both for step 4 and setting them for step 5,
+and it skips step 5 when the selected specs hold no @preview one. It leaves
+dist/ a test-mode build; .dockerignore keeps dist/ out of the image, whose
+build stays plain.
+
+The build cache (--build-cache, or BUILD_CACHE=true, which CI sets) restores
+the frontend's pnpm store before the install and uploads it after a miss,
+keyed on frontend/pnpm-lock.yaml. scripts/build-cache-get.sh and -put.sh are
+copies of the Jenkins chart's (HomelabAppsDeploy, jenkins/chart/scripts/).
 
 Output modes:
   simple  — progress indicators, captured output, test_results.md (default)
@@ -20,13 +34,15 @@ Output modes:
 
 import argparse
 import os
+import re
 import shlex
 import shutil
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import ALL_SUITES, REPO_ROOT, RESULTS_FILE
+from . import ALL_SUITES, REPO_ROOT, RESULTS_FILE, SCRIPTS_DIR
 from .display import (
     is_full_mode,
     progress_end,
@@ -43,6 +59,13 @@ APP_NAME = "FieldnotesApp"
 # python3.13 when that interpreter is on PATH; in CI the base image's default
 # python is already 3.13 (the binary may be absent by that name), so we skip it.
 HAS_PYTHON313 = shutil.which("python3.13") is not None
+
+# The cache key is <prefix>-<sha256 of the lockfile>.tgz, so one prefix serves
+# every app: the same lockfile makes the same store.
+BUILD_CACHE_PREFIX = "pnpm"
+
+# Specs that need a production build carry this tag; the preview pass runs them.
+PREVIEW_TAG = "@preview"
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +102,10 @@ examples:
                         help="Output mode: simple (progress + summary) or full (streamed + JUnit)")
     parser.add_argument("--junitxml-dir", default=None,
                         help="Directory for JUnit XML output (used with --output-mode full)")
+    parser.add_argument("--build-cache", action="store_true",
+                        default=os.environ.get("BUILD_CACHE") == "true",
+                        help="Restore the frontend's pnpm store from the Jenkins build cache and "
+                             "upload it after a miss (default: on when BUILD_CACHE=true, as in CI)")
     args = parser.parse_args(argv)
 
     args.suites = [s.strip() for s in args.suite.split(",") if s.strip()]
@@ -122,6 +149,117 @@ def _install_cmd(cmd, *, cwd, timeout=120, env=None):
         ok = run_streamed(cmd, cwd=cwd, timeout=timeout, env=env)
         return ok, ""
     return run(cmd, cwd=cwd, timeout=timeout, env=env)
+
+
+def _env_without(*names):
+    return {k: v for k, v in os.environ.items() if k not in names}
+
+
+# ---------------------------------------------------------------------------
+# Build cache
+# ---------------------------------------------------------------------------
+
+def _pnpm_store_path(frontend):
+    """The store the frontend's pnpm installs into, or None if pnpm can't say."""
+    try:
+        result = subprocess.run(
+            ["pnpm", "store", "path"], cwd=frontend, capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    path = result.stdout.strip()
+    return path if result.returncode == 0 and path else None
+
+
+def _build_cache(action, frontend, store_path):
+    """Get or put the pnpm store. A failure only costs time, so it is no step result."""
+    script = SCRIPTS_DIR / f"build-cache-{action}.sh"
+    ok, _detail = _install_cmd(
+        ["sh", str(script), BUILD_CACHE_PREFIX, "pnpm-lock.yaml", store_path],
+        cwd=frontend, timeout=300,
+    )
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Playwright
+# ---------------------------------------------------------------------------
+
+def _run_playwright(args, frontend, extra, results, *, preview):
+    """Run one Playwright pass and record it. Returns success."""
+    reporter = "list,junit" if args.junitxml_dir else "list"
+    cmd = ["pnpm", "playwright", "test", f"--reporter={reporter}"]
+    if args.max_failures is not None:
+        cmd.append(f"--max-failures={args.max_failures}")
+    if args.retries is not None:
+        cmd.append(f"--retries={args.retries}")
+    if args.workers is not None:
+        cmd.append(f"--workers={args.workers}")
+    env = _env_without("PLAYWRIGHT_PREVIEW_MODE")
+    env["PLAYWRIGHT_BACKEND_LOG_STREAM"] = "true"
+    junit_name = "frontend"
+    label = "frontend playwright"
+    if preview:
+        cmd.extend(["--grep", PREVIEW_TAG])
+        env["PLAYWRIGHT_PREVIEW_MODE"] = "true"
+        junit_name = "frontend-preview"
+        label = "frontend playwright (preview)"
+    if args.junitxml_dir:
+        env["PLAYWRIGHT_JUNIT_OUTPUT_NAME"] = f"{args.junitxml_dir}/{junit_name}.xml"
+    cmd.extend(extra)
+
+    col = progress_start(f"Running {label} tests")
+    ok, detail, peak_mb = _run_cmd(cmd, cwd=frontend, timeout=3600, env=env)
+    progress_end(ok, col)
+    results.append((label, ok, detail, peak_mb))
+    return ok
+
+
+def _count_preview_specs(frontend, extra):
+    """How many selected tests carry PREVIEW_TAG: (count or None, listing output)."""
+    ok, out = run(
+        ["pnpm", "playwright", "test", "--list", "--pass-with-no-tests", "--grep", PREVIEW_TAG,
+         *extra],
+        cwd=frontend, timeout=300,
+    )
+    match = re.search(r"^Total: (\d+) tests?", out, re.MULTILINE)
+    return (int(match.group(1)) if ok and match else None), out
+
+
+def _run_preview_pass(args, frontend, extra, results):
+    """Rebuild in test mode and run the @preview specs on that build. Returns success.
+
+    Skipped when the selection holds no @preview spec, so a run of other spec
+    files doesn't pay for a second build.
+    """
+    count, listing = _count_preview_specs(frontend, extra)
+    if count is None:
+        col = progress_start("Listing frontend preview specs")
+        progress_end(False, col)
+        if is_full_mode():
+            print(listing, flush=True)
+        results.append(("frontend preview listing", False, listing, None))
+        return False
+    if count == 0:
+        col = progress_start(f"Preview pass: no {PREVIEW_TAG} specs selected")
+        progress_skip(col)
+        return True
+
+    # VITE_TEST_MODE puts the Playwright bridges into the bundle.
+    col = progress_start("Building frontend (test mode)")
+    ok, detail = _install_cmd(
+        ["pnpm", "build"], cwd=frontend, timeout=900,
+        env={**os.environ, "VITE_TEST_MODE": "true"},
+    )
+    progress_end(ok, col)
+    results.append(("frontend build (test mode)", ok, detail, None))
+    if not ok:
+        col = progress_start("Running frontend playwright (preview) tests")
+        progress_skip(col)
+        results.append(("frontend playwright (preview)", False, "Skipped (build failed)", None))
+        return False
+
+    return _run_playwright(args, frontend, extra, results, preview=True)
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +331,23 @@ def run_tests(args):
 
     # --- Frontend ---
     if "frontend" in args.suites:
+        cache_store = None
+        cache_hit = False
+        if args.build_cache and frontend.is_dir():
+            col = progress_start("Restoring pnpm store from build cache")
+            cache_store = _pnpm_store_path(frontend)
+            cache_hit = bool(cache_store) and _build_cache("get", frontend, cache_store)
+            if cache_hit:
+                progress_end(True, col)
+            else:
+                progress_skip(col)
+
         # The frontend is a standalone pnpm project (its own lockfile), not a
         # workspace member — install it in its own directory.
         col = progress_start("Installing npm dependencies")
         pnpm_install = ["pnpm", "install", "--frozen-lockfile", "--config.confirmModulesPurge=false"]
         ok, detail = _install_cmd(pnpm_install, cwd=frontend, timeout=600)
+        frozen_ok = ok
         if not ok:
             ok, detail = _install_cmd(
                 ["pnpm", "install", "--config.confirmModulesPurge=false"],
@@ -206,6 +356,11 @@ def run_tests(args):
         progress_end(ok, col)
         results.append(("frontend install", ok, detail, None))
         pnpm_installed = ok
+
+        # Only a frozen install's store is the one the lockfile's hash names.
+        if cache_store and frozen_ok and not cache_hit:
+            col = progress_start("Uploading pnpm store to build cache")
+            progress_end(_build_cache("put", frontend, cache_store), col)
 
         if not frontend.is_dir():
             col = progress_start("Building frontend")
@@ -217,9 +372,12 @@ def run_tests(args):
                 progress_skip(col)
                 results.append((f"frontend {step}", False, "Skipped (install failed)", None))
         else:
-            # Build (generates the API client + routes, runs check, vite build).
+            # Build (generates the API client + routes, runs check, vite build),
+            # plain like the image's.
             col = progress_start("Building frontend")
-            ok, detail = _install_cmd(["pnpm", "build"], cwd=frontend, timeout=900)
+            ok, detail = _install_cmd(
+                ["pnpm", "build"], cwd=frontend, timeout=900, env=_env_without("VITE_TEST_MODE"),
+            )
             progress_end(ok, col)
             results.append(("frontend build", ok, detail, None))
 
@@ -239,24 +397,9 @@ def run_tests(args):
                 progress_end(ok_pw, col)
                 results.append(("playwright install", ok_pw, detail_pw, None))
 
-                reporter = "list,junit" if args.junitxml_dir else "list"
-                pw_cmd = ["pnpm", "playwright", "test", f"--reporter={reporter}"]
-                if args.max_failures is not None:
-                    pw_cmd.append(f"--max-failures={args.max_failures}")
-                if args.retries is not None:
-                    pw_cmd.append(f"--retries={args.retries}")
-                if args.workers is not None:
-                    pw_cmd.append(f"--workers={args.workers}")
-                pw_env = {**os.environ, "PLAYWRIGHT_BACKEND_LOG_STREAM": "true"}
-                if args.junitxml_dir:
-                    pw_env["PLAYWRIGHT_JUNIT_OUTPUT_NAME"] = f"{args.junitxml_dir}/frontend.xml"
-                pw_cmd.extend(extra_args["frontend"])
-
-                col = progress_start("Running frontend playwright tests")
-                ok, detail, peak_mb = _run_cmd(pw_cmd, cwd=frontend, timeout=3600, env=pw_env)
-                progress_end(ok, col)
-                results.append(("frontend playwright", ok, detail, peak_mb))
-                if not ok:
+                if not _run_playwright(args, frontend, extra_args["frontend"], results, preview=False):
+                    exit_code = 1
+                if not _run_preview_pass(args, frontend, extra_args["frontend"], results):
                     exit_code = 1
 
     return exit_code, results

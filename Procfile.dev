@@ -1,7 +1,8 @@
 # One-command dev startup: `scripts/dev.py` (honcho launcher — clean child cleanup +
 # per-service logs under logs/). Lower-level: `uv run honcho -f Procfile.dev start`.
-# The backend runs in debug mode (Werkzeug auto-reload). The frontend dev server
-# proxies API calls to the backend on :3401 (override with BACKEND_URL) and SSE to
+# The backend restarts on a code change (backend/scripts/dev-watch.sh, under
+# watchmedo). The frontend dev server proxies API calls to the backend on
+# :3401 (override with BACKEND_URL) and SSE to
 # the gateway on :3402 (override with SSE_GATEWAY_URL). The gateway is the
 # `ssegateway` package (a frontend devDependency, github:pvginkel/SSEGateway#stable)
 # — no sibling checkout needed.
@@ -11,6 +12,6 @@
 # honcho runs from the root project's venv and children inherit VIRTUAL_ENV;
 # `uv run` in backend/ uses backend/.venv regardless, but warns about the
 # mismatch. Clear it.
-backend:  cd backend && env -u VIRTUAL_ENV PORT=3401 uv run dev
+backend:  cd backend && env -u VIRTUAL_ENV PORT=3401 scripts/dev-watch.sh
 frontend: cd frontend && pnpm dev
 gateway:  scripts/dev-sse-gateway.sh

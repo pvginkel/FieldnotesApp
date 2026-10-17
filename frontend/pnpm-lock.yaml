@@ -91,7 +91,7 @@ importers:
         specifier: ^9.33.0
         version: 9.39.5(jiti@2.7.0)
       eslint-plugin-react-hooks:
-        specifier: ^7.0.1
+        specifier: ^7.1.1
         version: 7.1.1(eslint@9.39.5(jiti@2.7.0))
       eslint-plugin-react-refresh:
         specifier: ^0.4.20
@@ -116,7 +116,7 @@ importers:
         version: 4.2.0
       ssegateway:
         specifier: github:pvginkel/SSEGateway#stable
-        version: https://codeload.github.com/pvginkel/SSEGateway/tar.gz/bacf8c3eebacb3561826a07f767632b6775434ba
+        version: https://codeload.github.com/pvginkel/SSEGateway/tar.gz/3f6199d17db69f88704cfa06ccdc9391755bfeff
       typescript:
         specifier: ~5.9.0
         version: 5.9.3
@@ -2374,8 +2374,8 @@ packages:
     resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
     engines: {node: '>= 10.x'}
 
-  ssegateway@https://codeload.github.com/pvginkel/SSEGateway/tar.gz/bacf8c3eebacb3561826a07f767632b6775434ba:
-    resolution: {tarball: https://codeload.github.com/pvginkel/SSEGateway/tar.gz/bacf8c3eebacb3561826a07f767632b6775434ba}
+  ssegateway@https://codeload.github.com/pvginkel/SSEGateway/tar.gz/3f6199d17db69f88704cfa06ccdc9391755bfeff:
+    resolution: {tarball: https://codeload.github.com/pvginkel/SSEGateway/tar.gz/3f6199d17db69f88704cfa06ccdc9391755bfeff}
     version: 1.0.0
     engines: {node: '>=20.0.0'}
 
@@ -4829,7 +4829,7 @@ snapshots:
 
   split2@4.2.0: {}
 
-  ssegateway@https://codeload.github.com/pvginkel/SSEGateway/tar.gz/bacf8c3eebacb3561826a07f767632b6775434ba:
+  ssegateway@https://codeload.github.com/pvginkel/SSEGateway/tar.gz/3f6199d17db69f88704cfa06ccdc9391755bfeff:
     dependencies:
       '@types/amqplib': 0.10.8
       '@types/express': 5.0.6

@@ -46,15 +46,19 @@ async function posted(page: Page, path: string): Promise<{ body: unknown; connec
 const ASK =
   "The reconciler's dedup misses a reworded observation whose headline differs only in its tense, so the " +
   'operator rules on the same friction twice in one week and the store keeps both of them';
+const ONE_LETTER_ASK =
+  "The dev instance's setup script regenerates its .env on every run and overwrites the port chosen " +
+  'for the second checkout, so the two instances collide on the same port when both start';
 
 /** The sorted inbox, as the skill writes it: a fenced block, and markdown around it. */
 const SORTED = [
-  '**The inbox**, sorted: two new cards and a hand-back.',
+  '**The inbox**, sorted: three new cards and a hand-back.',
   '',
   '```',
   'New',
   '  EX-12  The webhook relay drops a delivery under load',
   '  EX-14  Docs: the install skill names the old path',
+  `  X-3    ${ONE_LETTER_ASK}`,
   'Hand-backs',
   `  Slice:   EX-40  ${ASK}`,
   '```',
@@ -64,7 +68,7 @@ const SORTED = [
   '1. **EX-12**: fix now, or a card for slice `005`?',
   '   - It touches the relay only.',
   '     - No deploy change.',
-  '2. EX-40 asks for a ruling; see [the runbook](https://example.org/runbook).',
+  '2. EX-40 and X-3 ask for a ruling; see [the runbook](https://example.org/runbook).',
   '',
   'FR-28 stays as it is.',
 ].join('\n');
@@ -566,6 +570,7 @@ test.describe('the transcript', () => {
       'New',
       '  EX-12  The webhook relay drops a delivery under load',
       '  EX-14  Docs: the install skill names the old path',
+      `  X-3    ${ONE_LETTER_ASK}`,
       'Hand-backs',
       `  Slice:   EX-40  ${ASK}`,
     ]);
@@ -580,6 +585,11 @@ test.describe('the transcript', () => {
     expect(slice.boxes.length).toBeGreaterThan(1);
     expect(Math.abs(slice.boxes[1] - slice.at)).toBeLessThan(1);
     expect(slice.boxes[1]).toBeGreaterThan(slice.boxes[0] + 1);
+    // A one-letter project key is a card id too (FN-51): its ask lines up and wraps under itself.
+    const oneLetter = await fencedGeometry(page, "The dev instance's");
+    expect(Math.abs(oneLetter.at - webhook.at)).toBeLessThan(0.5);
+    expect(oneLetter.boxes.length).toBeGreaterThan(1);
+    expect(Math.abs(oneLetter.boxes[1] - oneLetter.at)).toBeLessThan(1);
 
     await expect(message.locator('strong').first()).toHaveText('The inbox');
     await expect(message.locator('ol > li')).toHaveCount(2);
@@ -590,8 +600,8 @@ test.describe('the transcript', () => {
 
     const { tracker } = await inboxState(request, backendUrl);
     expect(tracker).toBeTruthy();
-    const cards = message.getByRole('link', { name: /^EX-\d+$/ });
-    await expect(cards).toHaveText(['EX-12', 'EX-14', 'EX-40', 'EX-12', 'EX-40']);
+    const cards = message.getByRole('link', { name: /^[A-Z]+-\d+$/ });
+    await expect(cards).toHaveText(['EX-12', 'EX-14', 'X-3', 'EX-40', 'EX-12', 'EX-40', 'X-3']);
     for (const card of await cards.all()) {
       await expect(card).toHaveAttribute('href', `${tracker}${await card.textContent()}`);
     }

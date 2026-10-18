@@ -1,8 +1,9 @@
 // The session's text as the inbox screen reads it (FR-28): the card ids a line names, where a
 // wrapped line continues, a code fence, the time of day a message carries, and an idle time.
 
-/** A card id: a project key and a number. Requirement numbers and the like are not cards. */
-const CARD = /\b([A-Z][A-Z0-9]{1,9})-(\d+)\b/g;
+/** A card id: a project key, one letter or more, and a number. Requirement numbers and the like
+ * are not cards. */
+const CARD = /\b([A-Z][A-Z0-9]{0,9})-(\d+)\b/g;
 const NOT_CARDS = new Set(['FR', 'NFR', 'UTF', 'SHA', 'ISO', 'RFC', 'HTTP', 'TLS', 'CVE']);
 
 type Piece = { text: string; card?: string };
@@ -24,7 +25,7 @@ export function pieces(line: string): Piece[] {
 /** Where a wrapped line continues: under a card line's text (`  Slice:   FN-44  The ask…`), else
  * under its own indentation. */
 export function hang(line: string): number {
-  const card = /^\s*(?:[A-Za-z][A-Za-z ]*:\s+)?[A-Z][A-Z0-9]+-\d+\s+/.exec(line);
+  const card = /^\s*(?:[A-Za-z][A-Za-z ]*:\s+)?[A-Z][A-Z0-9]*-\d+\s+/.exec(line);
   if (card) return card[0].length;
   return /^\s*/.exec(line)![0].length;
 }

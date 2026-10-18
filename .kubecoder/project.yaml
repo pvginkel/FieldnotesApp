@@ -9,9 +9,16 @@ projects:
     setup:
       - cexec modern-app uv sync --locked
       - scripts/dev-instance-setup.sh
-    # The root's own Python only; backend/ and frontend/ lint themselves. The
-    # rule set and the Ruff version are pinned in the root pyproject.toml.
-    lint: cexec modern-app uv run ruff check scripts tools
+    # The root's own Python, and the architecture model; backend/ and frontend/
+    # lint themselves.
+    lint:
+      # The rule set and the Ruff version are pinned in the root pyproject.toml.
+      - cexec modern-app uv run ruff check scripts tools
+      # The model AaC/FieldnotesApp validates (Jenkinsfile.architecture).
+      # A new app has none until it is seeded (CLAUDE.md), and this skips it.
+      # arch-validate exits 0 valid, 1 invalid, 2 transport: a 2 is the
+      # architecture service, not this repository.
+      - "if ls docs/architecture/*.yaml >/dev/null 2>&1; then cexec aac-tools arch-validate docs/architecture/*.yaml; else echo 'No architecture model in docs/architecture/ yet: CLAUDE.md says how to seed it'; fi"
     # No `test:` here on purpose. The root project owns `run-suite`
     # (tools/suite_runner), which is CI's single entry point and runs the
     # backend and frontend suites itself — declaring it here would make

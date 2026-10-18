@@ -125,6 +125,69 @@
         "title": "ActionerFailure",
         "type": "object"
       },
+      "ApiErrorResponseSchema.c2a0d71": {
+        "description": "The error envelope every error handler answers with.\n\nIt mirrors ``build_error_response()`` in ``app/utils/flask_error_handlers.py``;\nchange both together. Use it to document error responses in ``@api.validate``,\nfor example ``HTTP_502=ApiErrorResponseSchema`` on an endpoint that calls an\nexternal service. One handler differs: a ``pydantic.ValidationError`` raised\nin a handler answers 400 with ``details.errors``, a list of\n``{\"message\", \"field\"}``, instead of ``details.message``.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Machine-readable error code; every business-logic exception sets one",
+            "example": "AUTHORIZATION_FAILED",
+            "title": "Code"
+          },
+          "correlationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The request's correlation ID, when it has one",
+            "title": "Correlationid"
+          },
+          "details": {
+            "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71.ApiErrorDetailsSchema",
+            "description": "Error details"
+          },
+          "error": {
+            "description": "Error message",
+            "example": "Authorization failed",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "details"
+        ],
+        "title": "ApiErrorResponseSchema",
+        "type": "object"
+      },
+      "ApiErrorResponseSchema.c2a0d71.ApiErrorDetailsSchema": {
+        "description": "The ``details`` object of the error envelope ``build_error_response`` builds.",
+        "properties": {
+          "message": {
+            "description": "Human-readable error description",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ApiErrorDetailsSchema",
+        "type": "object"
+      },
       "DeploymentTriggerRequestSchema.6b6ce9f": {
         "description": "Request schema for triggering version deployment events in testing mode.",
         "properties": {
@@ -647,6 +710,27 @@
         "title": "TakeBackQuery",
         "type": "object"
       },
+      "TaskActionResponse.70db092": {
+        "description": "Response when a task is cancelled or removed.",
+        "properties": {
+          "message": {
+            "description": "What was done",
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "description": "Whether the action was taken; an action that can't be is a 404",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "TaskActionResponse",
+        "type": "object"
+      },
       "TaskEventRequestSchema.6b6ce9f": {
         "description": "Request schema for sending fake task events in testing mode.",
         "properties": {
@@ -745,6 +829,99 @@
         "title": "TaskEventResponseSchema",
         "type": "object"
       },
+      "TaskInfo.70db092": {
+        "description": "In-memory task metadata.",
+        "properties": {
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Task completion timestamp",
+            "title": "End Time"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Error message if task failed",
+            "title": "Error"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Task result data",
+            "title": "Result"
+          },
+          "start_time": {
+            "description": "Task start timestamp",
+            "format": "date-time",
+            "title": "Start Time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskInfo.70db092.TaskStatus",
+            "description": "Current task status"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Subject of the user who started the task, and who owns it",
+            "title": "Subject"
+          },
+          "task_id": {
+            "description": "Unique task identifier",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status",
+          "start_time"
+        ],
+        "title": "TaskInfo",
+        "type": "object"
+      },
+      "TaskInfo.70db092.TaskStatus": {
+        "description": "Task execution status.",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
       "TaskStartRequestSchema.6b6ce9f": {
         "description": "Request schema for starting a test task.",
         "properties": {
@@ -799,30 +976,6 @@
           "task_id"
         ],
         "title": "TaskStartResponseSchema",
-        "type": "object"
-      },
-      "TestErrorResponseSchema.6b6ce9f": {
-        "description": "Error response schema for testing endpoints.",
-        "properties": {
-          "error": {
-            "description": "Error message",
-            "title": "Error",
-            "type": "string"
-          },
-          "status": {
-            "description": "Error status code",
-            "examples": [
-              "not_found"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "error",
-          "status"
-        ],
-        "title": "TestErrorResponseSchema",
         "type": "object"
       },
       "TestSessionCreateSchema.e510e64": {
@@ -2150,7 +2303,7 @@
     },
     "/api/sse/callback": {
       "post": {
-        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nA connect is accepted only for a caller the API would serve, and is refused before it is registered, so a refused stream never receives an event and never counts in the connection metrics. The gateway turns a refusal into an in-stream ``rejected`` event and ends the stream.\n\nReturns:     200 on success     401 if the callback secret fails (production only), or the         forwarded token is missing or invalid     403 if the caller holds none of the app's roles (or lacks the         read role, where one is set)     400 if payload invalid or request_id missing",
+        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nA connect is accepted only for a caller the API would serve, and is refused before it is registered, so a refused stream never receives an event and never counts in the connection metrics. The gateway turns a refusal into an in-stream ``rejected`` event and ends the stream.\n\nReturns:     200 with an empty object on success\n\nRaises:     AuthenticationException: 401, the callback secret fails (production         only), or the forwarded token is missing or invalid     AuthorizationException: 403, the caller holds none of the app's roles         (or lacks the read role, where one is set)     ValidationException: 400, the body is not a JSON object, the action         is unknown, or the request_id is missing or malformed     pydantic.ValidationError: 400, the payload is not a valid callback",
         "operationId": "post__api_sse_callback",
         "parameters": [],
         "responses": {},
@@ -2179,7 +2332,38 @@
             }
           }
         ],
-        "responses": {},
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskActionResponse.70db092"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
         "security": [
           {
             "BearerAuth": []
@@ -2205,7 +2389,38 @@
             }
           }
         ],
-        "responses": {},
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskActionResponse.70db092"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
         "security": [
           {
             "BearerAuth": []
@@ -2231,7 +2446,38 @@
             }
           }
         ],
-        "responses": {},
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInfo.70db092"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
         "summary": "Get current status of a task.",
         "tags": []
       }
@@ -2523,7 +2769,21 @@
             }
           }
         ],
-        "responses": {},
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
         "security": [
           {
             "BearerAuth": []
@@ -2536,7 +2796,7 @@
     },
     "/api/testing/sse/task-event": {
       "post": {
-        "description": "Allows integration tests to simulate task events without running actual background tasks. The event is sent directly to the SSE connection identified by request_id.",
+        "description": "Allows integration tests to simulate task events without running actual background tasks. The event is sent directly to the SSE connection identified by request_id.\n\nRaises:     RecordNotFoundException: 404, no SSE connection has that request_id     ExternalServiceException: 502, the SSE Gateway did not take the event",
         "operationId": "post__api_testing_sse_task-event",
         "parameters": [],
         "requestBody": {
@@ -2564,11 +2824,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TestErrorResponseSchema.6b6ce9f"
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
                 }
               }
             },
             "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "security": [

@@ -28,8 +28,14 @@ keyed on frontend/pnpm-lock.yaml. scripts/build-cache-get.sh and -put.sh are
 copies of the Jenkins chart's (HomelabAppsDeploy, jenkins/chart/scripts/).
 
 Output modes:
-  simple  — progress indicators, captured output, test_results.md (default)
-  full    — streamed output, JUnit XML, SUITE_RESULT markers (for CI)
+  simple  — progress indicators, captured output, a summary and test_results.md
+            with each suite's passed/failed/skipped counts (default)
+  full    — streamed output, and SUITE_RESULT markers from the JUnit XML
+            reports in --junitxml-dir (for CI)
+
+Each test run writes a JUnit XML report, in either mode: into --junitxml-dir
+when given (backend.xml, frontend.xml, frontend-preview.xml), into a temporary
+directory otherwise. The counts come from those reports.
 """
 
 import argparse
@@ -39,8 +45,9 @@ import shlex
 import shutil
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
+import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 from . import ALL_SUITES, REPO_ROOT, RESULTS_FILE, SCRIPTS_DIR
 from .display import (
@@ -51,6 +58,7 @@ from .display import (
     run_with_pager,
     set_full_mode,
 )
+from .junit import Counts, format_counts, report_counts
 from .process import run, run_streamed, run_tracked
 
 APP_NAME = "FieldnotesApp"
@@ -68,6 +76,17 @@ BUILD_CACHE_PREFIX = "pnpm"
 PREVIEW_TAG = "@preview"
 
 
+class StepResult(NamedTuple):
+    step: str
+    ok: bool
+    detail: str
+    peak_mb: float | None
+    # A test run (pytest, a Playwright pass): its counts come from its JUnit
+    # report, and are None when it wrote none (a crash, a timeout).
+    suite: bool = False
+    counts: Counts | None = None
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -82,7 +101,8 @@ examples:
   %(prog)s --suite backend --backend-args "tests/test_foo.py -k bar"
   %(prog)s --suite frontend --frontend-args "tests/e2e/foo.spec.ts"
   %(prog)s --max-failures 10
-  %(prog)s --output-mode full --junitxml-dir /work/results --retries 2""",
+  %(prog)s --suite backend --junitxml-dir results   # keep the JUnit XML reports
+  %(prog)s --output-mode full --junitxml-dir /work/results --retries 2   # as CI runs it""",
     )
     parser.add_argument(
         "--suite", default=",".join(ALL_SUITES),
@@ -99,9 +119,13 @@ examples:
     parser.add_argument("--workers", type=int, default=None,
                         help="Playwright parallel worker count (default: Playwright config)")
     parser.add_argument("--output-mode", choices=["simple", "full"], default="simple",
-                        help="Output mode: simple (progress + summary) or full (streamed + JUnit)")
+                        help="Output mode: simple (progress, a summary with each suite's "
+                             "counts, test_results.md) or full (streamed output, and "
+                             "SUITE_RESULT markers when --junitxml-dir is given, for CI)")
     parser.add_argument("--junitxml-dir", default=None,
-                        help="Directory for JUnit XML output (used with --output-mode full)")
+                        help="Directory to keep the JUnit XML reports in (backend.xml, "
+                             "frontend.xml, frontend-preview.xml), in either output mode "
+                             "(default: a temporary directory)")
     parser.add_argument("--build-cache", action="store_true",
                         default=os.environ.get("BUILD_CACHE") == "true",
                         help="Restore the frontend's pnpm store from the Jenkins build cache and "
@@ -117,7 +141,9 @@ examples:
 
     args.full = args.output_mode == "full"
 
+    # Absolute: pytest and Playwright run in backend/ and frontend/.
     if args.junitxml_dir:
+        args.junitxml_dir = str(Path(args.junitxml_dir).resolve())
         Path(args.junitxml_dir).mkdir(parents=True, exist_ok=True)
 
     return args
@@ -185,10 +211,9 @@ def _build_cache(action, frontend, store_path):
 # Playwright
 # ---------------------------------------------------------------------------
 
-def _run_playwright(args, frontend, extra, results, *, preview):
+def _run_playwright(args, report_dir, frontend, extra, results, *, preview):
     """Run one Playwright pass and record it. Returns success."""
-    reporter = "list,junit" if args.junitxml_dir else "list"
-    cmd = ["pnpm", "playwright", "test", f"--reporter={reporter}"]
+    cmd = ["pnpm", "playwright", "test", "--reporter=list,junit"]
     if args.max_failures is not None:
         cmd.append(f"--max-failures={args.max_failures}")
     if args.retries is not None:
@@ -204,14 +229,16 @@ def _run_playwright(args, frontend, extra, results, *, preview):
         env["PLAYWRIGHT_PREVIEW_MODE"] = "true"
         junit_name = "frontend-preview"
         label = "frontend playwright (preview)"
-    if args.junitxml_dir:
-        env["PLAYWRIGHT_JUNIT_OUTPUT_NAME"] = f"{args.junitxml_dir}/{junit_name}.xml"
+    report = report_dir / f"{junit_name}.xml"
+    report.unlink(missing_ok=True)
+    env["PLAYWRIGHT_JUNIT_OUTPUT_NAME"] = str(report)
     cmd.extend(extra)
 
     col = progress_start(f"Running {label} tests")
     ok, detail, peak_mb = _run_cmd(cmd, cwd=frontend, timeout=3600, env=env)
     progress_end(ok, col)
-    results.append((label, ok, detail, peak_mb))
+    results.append(StepResult(label, ok, detail, peak_mb, suite=True,
+                              counts=report_counts(report)))
     return ok
 
 
@@ -226,7 +253,7 @@ def _count_preview_specs(frontend, extra):
     return (int(match.group(1)) if ok and match else None), out
 
 
-def _run_preview_pass(args, frontend, extra, results):
+def _run_preview_pass(args, report_dir, frontend, extra, results):
     """Rebuild in test mode and run the @preview specs on that build. Returns success.
 
     Skipped when the selection holds no @preview spec, so a run of other spec
@@ -238,7 +265,7 @@ def _run_preview_pass(args, frontend, extra, results):
         progress_end(False, col)
         if is_full_mode():
             print(listing, flush=True)
-        results.append(("frontend preview listing", False, listing, None))
+        results.append(StepResult("frontend preview listing", False, listing, None))
         return False
     if count == 0:
         col = progress_start(f"Preview pass: no {PREVIEW_TAG} specs selected")
@@ -252,24 +279,25 @@ def _run_preview_pass(args, frontend, extra, results):
         env={**os.environ, "VITE_TEST_MODE": "true"},
     )
     progress_end(ok, col)
-    results.append(("frontend build (test mode)", ok, detail, None))
+    results.append(StepResult("frontend build (test mode)", ok, detail, None))
     if not ok:
         col = progress_start("Running frontend playwright (preview) tests")
         progress_skip(col)
-        results.append(("frontend playwright (preview)", False, "Skipped (build failed)", None))
+        results.append(StepResult("frontend playwright (preview)", False, "Skipped (build failed)", None))
         return False
 
-    return _run_playwright(args, frontend, extra, results, preview=True)
+    return _run_playwright(args, report_dir, frontend, extra, results, preview=True)
 
 
 # ---------------------------------------------------------------------------
 # Suite orchestration
 # ---------------------------------------------------------------------------
 
-def run_tests(args):
+def run_tests(args, report_dir):
     """Run test steps for selected suites. Returns (exit_code, results).
 
-    results is a list of (step, ok, detail, peak_mb) tuples.
+    results is a list of StepResult; the test runs write their JUnit XML
+    reports into report_dir.
     """
     backend = REPO_ROOT / "backend"
     frontend = REPO_ROOT / "frontend"
@@ -292,11 +320,11 @@ def run_tests(args):
             if not ok:
                 break
         progress_end(ok, col)
-        results.append(("backend install", ok, detail, None))
+        results.append(StepResult("backend install", ok, detail, None))
         backend_installed = ok
     else:
         progress_end(False, col)
-        results.append(("backend install", False, f"Directory not found: {backend}", None))
+        results.append(StepResult("backend install", False, f"Directory not found: {backend}", None))
 
     # --- Service readiness (app hook) ---
     wait_script = backend / "scripts" / "wait-for-services.py"
@@ -306,7 +334,7 @@ def run_tests(args):
             ["uv", "run", "python", str(wait_script)], cwd=backend, timeout=300
         )
         progress_end(ok, col)
-        results.append(("services", ok, detail, None))
+        results.append(StepResult("services", ok, detail, None))
         if not ok:
             exit_code = 1
 
@@ -315,17 +343,18 @@ def run_tests(args):
         col = progress_start("Running backend tests")
         if not backend_installed:
             progress_skip(col)
-            results.append(("backend pytest", False, "Skipped (install failed)", None))
+            results.append(StepResult("backend pytest", False, "Skipped (install failed)", None))
         else:
-            pytest_cmd = ["uv", "run", "pytest", "-v", "--tb=short"]
-            if args.junitxml_dir:
-                pytest_cmd.append(f"--junitxml={args.junitxml_dir}/backend.xml")
+            report = report_dir / "backend.xml"
+            report.unlink(missing_ok=True)
+            pytest_cmd = ["uv", "run", "pytest", "-v", "--tb=short", f"--junitxml={report}"]
             if args.max_failures is not None:
                 pytest_cmd.append(f"--maxfail={args.max_failures}")
             pytest_cmd.extend(extra_args["backend"])
             ok, detail, peak_mb = _run_cmd(pytest_cmd, cwd=backend, timeout=1800)
             progress_end(ok, col)
-            results.append(("backend pytest", ok, detail, peak_mb))
+            results.append(StepResult("backend pytest", ok, detail, peak_mb, suite=True,
+                                      counts=report_counts(report)))
             if not ok:
                 exit_code = 1
 
@@ -354,7 +383,7 @@ def run_tests(args):
                 cwd=frontend, timeout=600,
             )
         progress_end(ok, col)
-        results.append(("frontend install", ok, detail, None))
+        results.append(StepResult("frontend install", ok, detail, None))
         pnpm_installed = ok
 
         # Only a frozen install's store is the one the lockfile's hash names.
@@ -365,12 +394,12 @@ def run_tests(args):
         if not frontend.is_dir():
             col = progress_start("Building frontend")
             progress_end(False, col)
-            results.append(("frontend build", False, f"Directory not found: {frontend}", None))
+            results.append(StepResult("frontend build", False, f"Directory not found: {frontend}", None))
         elif not pnpm_installed:
             for step in ("build", "playwright"):
                 col = progress_start(f"Running frontend {step}" if step != "build" else "Building frontend")
                 progress_skip(col)
-                results.append((f"frontend {step}", False, "Skipped (install failed)", None))
+                results.append(StepResult(f"frontend {step}", False, "Skipped (install failed)", None))
         else:
             # Build (generates the API client + routes, runs check, vite build),
             # plain like the image's.
@@ -379,13 +408,13 @@ def run_tests(args):
                 ["pnpm", "build"], cwd=frontend, timeout=900, env=_env_without("VITE_TEST_MODE"),
             )
             progress_end(ok, col)
-            results.append(("frontend build", ok, detail, None))
+            results.append(StepResult("frontend build", ok, detail, None))
 
             if not ok:
                 exit_code = 1
                 col = progress_start("Running frontend playwright tests")
                 progress_skip(col)
-                results.append(("frontend playwright", False, "Skipped (build failed)", None))
+                results.append(StepResult("frontend playwright", False, "Skipped (build failed)", None))
             else:
                 # Download the Chromium build the installed Playwright pins; a no-op
                 # when it is already in the browser cache. The CI validation image
@@ -395,11 +424,13 @@ def run_tests(args):
                     ["pnpm", "playwright", "install", "chromium"], cwd=frontend, timeout=900
                 )
                 progress_end(ok_pw, col)
-                results.append(("playwright install", ok_pw, detail_pw, None))
+                results.append(StepResult("playwright install", ok_pw, detail_pw, None))
 
-                if not _run_playwright(args, frontend, extra_args["frontend"], results, preview=False):
+                if not _run_playwright(args, report_dir, frontend, extra_args["frontend"],
+                                       results, preview=False):
                     exit_code = 1
-                if not _run_preview_pass(args, frontend, extra_args["frontend"], results):
+                if not _run_preview_pass(args, report_dir, frontend, extra_args["frontend"],
+                                         results):
                     exit_code = 1
 
     return exit_code, results
@@ -416,26 +447,9 @@ def _emit_suite_results(junitxml_dir):
         return
 
     for xml_file in sorted(xml_dir.glob("*.xml")):
-        try:
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-            # For a <testsuites> root, aggregate across all <testsuite> children
-            # (Playwright emits one per spec file). Sum children to stay robust
-            # against reporters that only populate per-suite counts.
-            if root.tag == "testsuites":
-                suites = root.findall("testsuite")
-            else:
-                suites = [root]
-            tests = sum(int(s.get("tests", 0)) for s in suites)
-            failures = sum(int(s.get("failures", 0)) for s in suites)
-            errors = sum(int(s.get("errors", 0)) for s in suites)
-            skipped = sum(int(s.get("skipped", 0)) for s in suites)
-            passed = tests - failures - errors - skipped
-            name = xml_file.stem
-            print(f"===SUITE_RESULT:{name}:{passed}:{failures + errors}:{skipped}===",
-                  flush=True)
-        except (ET.ParseError, ValueError):
-            print(f"===SUITE_RESULT:{xml_file.stem}:0:0:0===", flush=True)
+        counts = report_counts(xml_file) or Counts(0, 0, 0)
+        print(f"===SUITE_RESULT:{xml_file.stem}:{counts.passed}:{counts.failed}:"
+              f"{counts.skipped}===", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -465,44 +479,50 @@ def _format_mem(peak_mb):
     return ""
 
 
+def _format_suite_counts(steps):
+    """A line per test run with its passed/failed/skipped counts, under a header."""
+    return [f"  {s.step}: {format_counts(s.counts)}" for s in steps if s.suite]
+
+
 def format_summary(all_results):
     lines = []
     any_failure = False
 
     for app_name, steps in all_results:
-        failures = [(step, detail, peak_mb)
-                    for step, ok, detail, peak_mb in steps if not ok]
+        failures = [s for s in steps if not s.ok]
         if failures:
             any_failure = True
             lines.append(f"\n{app_name}: FAILURES")
-            for step, detail, peak_mb in failures:
-                mem = _format_mem(peak_mb)
-                if "Skipped" in detail:
-                    lines.append(f"  {step}: {detail}")
-                elif step == "backend pytest":
-                    extracted = _extract_pytest_failures(detail)
+            for s in failures:
+                mem = _format_mem(s.peak_mb)
+                if "Skipped" in s.detail:
+                    lines.append(f"  {s.step}: {s.detail}")
+                elif s.step == "backend pytest":
+                    extracted = _extract_pytest_failures(s.detail)
                     for line in extracted:
                         lines.append(f"  {line}")
                     if not extracted:
-                        lines.append(f"  {step}: failed{mem} (see test_results.md)")
+                        lines.append(f"  {s.step}: failed{mem} (see test_results.md)")
                     elif mem:
                         lines.append(f"  {mem.strip()}")
-                elif "playwright" in step:
-                    extracted = _extract_playwright_failures(detail)
+                elif "playwright" in s.step:
+                    extracted = _extract_playwright_failures(s.detail)
                     for line in extracted:
                         lines.append(f"  {line}")
                     if not extracted:
-                        lines.append(f"  {step}: failed{mem} (see test_results.md)")
+                        lines.append(f"  {s.step}: failed{mem} (see test_results.md)")
                     elif mem:
                         lines.append(f"  {mem.strip()}")
                 else:
-                    lines.append(f"  {step}: FAILED (see test_results.md)")
+                    lines.append(f"  {s.step}: FAILED (see test_results.md)")
         else:
-            mem_parts = []
-            for step, _ok, _detail, peak_mb in steps:
-                mem = _format_mem(peak_mb)
-                mem_parts.append(f"{step}{mem}")
+            mem_parts = [f"{s.step}{_format_mem(s.peak_mb)}" for s in steps]
             lines.append(f"\n{app_name}: all passed ({', '.join(mem_parts)})")
+
+        suite_counts = _format_suite_counts(steps)
+        if suite_counts:
+            lines.append(f"\n{app_name}: test counts")
+            lines.extend(suite_counts)
 
     if not any_failure:
         lines.append("\nAll steps passed.")
@@ -512,16 +532,16 @@ def format_summary(all_results):
 
 def format_app_detailed(app_name, steps):
     lines = [f"## {app_name}\n"]
-    for step, ok, detail, peak_mb in steps:
-        status = "PASS" if ok else "FAIL"
-        mem = _format_mem(peak_mb)
-        lines.append(f"### {step}: {status}{mem}\n")
-        if not ok and detail and "Skipped" not in detail:
+    for s in steps:
+        status = "PASS" if s.ok else "FAIL"
+        counts = f" ({format_counts(s.counts)})" if s.suite else ""
+        lines.append(f"### {s.step}: {status}{counts}{_format_mem(s.peak_mb)}\n")
+        if not s.ok and s.detail and "Skipped" not in s.detail:
             lines.append("```")
-            lines.extend(detail.splitlines())
+            lines.extend(s.detail.splitlines())
             lines.append("```\n")
-        elif not ok:
-            lines.append(f"{detail}\n")
+        elif not s.ok:
+            lines.append(f"{s.detail}\n")
     return "\n".join(lines) + "\n"
 
 
@@ -533,16 +553,19 @@ def main(argv=None):
     args = parse_args(argv)
     set_full_mode(args.full)
 
-    exit_code, steps = run_tests(args)
+    # The test runs always write JUnit XML reports, for the counts; without
+    # --junitxml-dir they go to a directory that lives as long as the run.
+    with tempfile.TemporaryDirectory(prefix="run-suite-") as tmp:
+        exit_code, steps = run_tests(args, Path(args.junitxml_dir or tmp))
 
     if is_full_mode():
-        # Full mode: emit SUITE_RESULT markers from JUnit XML
+        # Full mode: emit SUITE_RESULT markers from the kept JUnit XML
         if args.junitxml_dir:
             col = progress_start("Exporting test results")
             _emit_suite_results(args.junitxml_dir)
             progress_end(True, col)
     else:
-        # Simple mode: write test_results.md and print summary
+        # Simple mode: write test_results.md and print the summary, with counts
         RESULTS_FILE.write_text("# Test Results\n\n")
         with RESULTS_FILE.open("a") as f:
             f.write(format_app_detailed(APP_NAME, steps))

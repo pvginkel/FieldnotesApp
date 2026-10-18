@@ -25,10 +25,16 @@ included. A turn held by no follow, or whose heartbeat has stopped, is taken ove
 notices first, on a read of the sitting or on the timer each pod runs, and goes on from where the
 file stands: a message the session has not taken is sent, once. A pod shutting down takes no turn
 over. A controller failure that is a loss, or a call the controller refuses outright, loses the
-sitting (FR-32); any other is tried again for as long as the follow holds the turn. The same timer closes a sitting that has not moved for the
-idle time and keeps it, ended (FR-31), and closes a lost one once the idle time has passed since
-its loss, kept lost (FR-32). A sitting it closed is closed once: Start and End clear it and close
-nothing. Closing a lost sitting ends no session: its own is gone, and its name may be another's.
+sitting (FR-32); any other is tried again for as long as the follow holds the turn. A send that
+finds the session gone before the session took the turn resumes it, once a turn has given the
+conversation an id (FR-32): in the sitting's own environment, started when it is stopped, a session
+is created with the conversation's id to resume, the offset and the turn number counted from the
+start again, and the message is sent there; once per follow, and a session gone mid-turn loses
+the sitting. The same timer rests a sitting that has not moved for the idle time and keeps it live:
+its session ended and an environment the API started stopped, for the next send to resume (FR-31);
+and closes a lost one once the idle time has passed since its loss, kept lost (FR-32). The sitting
+is written without what the timer closes, so it is closed once: Start and End close nothing of it
+again. Closing a lost sitting ends no session: its own is gone, and its name may be another's.
 """
 
 from __future__ import annotations
@@ -84,7 +90,8 @@ DEFAULT_TRACKER = "https://issues.webathome.org/issue/"
 class InboxSettings:
     prompt: str = DEFAULT_PROMPT
     cwd: str = DEFAULT_CWD
-    # A sitting with no turn for this long is ended (FR-31).
+    # A sitting with no turn for this long is rested: its session ended and an environment the API
+    # started stopped, the sitting kept live (FR-31).
     idle: timedelta = DEFAULT_IDLE
     model: str | None = None  # None: the engine's default
     reasoning_effort: str | None = None
@@ -162,14 +169,6 @@ class InboxLoss(_Model):
     reason: str
 
 
-class InboxEnd(_Model):
-    """FR-31: when the expiry ended the sitting, and the idle time it had not moved for, in
-    minutes: the configured one."""
-
-    at: str
-    idle_minutes: float
-
-
 class InboxSitting(_Model):
     environment: str | None  # None until Start has picked one
     started_environment: bool
@@ -177,7 +176,6 @@ class InboxSitting(_Model):
     moved: str
     turn: InboxTurn | None
     lost: InboxLoss | None
-    ended: InboxEnd | None
     transcript: list[InboxEntry]
 
 
@@ -238,7 +236,7 @@ def _busy() -> ProblemException:
 
 # -- the sitting's file ------------------------------------------------------------------------
 
-Status = Literal["starting", "busy", "idle", "lost", "ended"]
+Status = Literal["starting", "busy", "idle", "lost"]
 
 
 class Follower(_Model):
@@ -252,12 +250,13 @@ class Follower(_Model):
 
 class Sitting(_Model):
     """The sitting as its file holds it. `status` is `starting` until the session has taken its
-    first turn, `busy` while a turn is in flight, `idle` between turns, `lost` once the sitting is
-    lost and `ended` once the expiry has ended it. `closed`: the expiry has ended its session, a
-    live one's, and stopped an environment the API started, which nothing does again. `moved` is the last send or
-    result. `offset` is the session log's byte offset after the last log line or message read,
-    where the next read of the response stream begins. `turns` is the number of the session's last
-    turn whose reply the transcript holds; the turn in flight is the session's next. `follower` is
+    first turn, `busy` while a turn is in flight, `idle` between turns and `lost` once the sitting
+    is lost. `session` is None before Start creates one and once the timer has rested the sitting
+    (FR-31), for the next send to resume the conversation, `conversation` its id. `moved` is the
+    last send or result. `offset` is the session log's byte offset after the last log line or
+    message read, where the next read of the response stream begins. `turns` is the number of the
+    session's last turn whose reply the transcript holds; the turn in flight is the session's next.
+    A resumed session's log and turns count from the start again, and so do both. `follower` is
     set only while a turn is in flight, and is None for a turn in flight whose pod left it as it
     shut down. `subject` is the OIDC subject of the operator whose request began the last turn:
     its task's events, the session's lines and reply, reach only their SSE connections (NFR-4);
@@ -277,14 +276,28 @@ class Sitting(_Model):
     turn: TurnInFlight | None = None
     follower: Follower | None = None
     lost: InboxLoss | None = None
-    ended: InboxEnd | None = None
-    closed: bool = False
     transcript: list[InboxEntry] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ended(cls, data: Any) -> Any:
+        # A sitting file of the layout before 2026-10-18 (FN-52) can hold a sitting the idle
+        # expiry ended, or a lost one it closed: its session ended and the environment the API
+        # started stopped, which may since run for another caller. An ended one reads as a live
+        # one at rest, for the next send to resume, and neither holds anything to close again.
+        if not isinstance(data, dict):
+            return data
+        kept = {k: v for k, v in data.items() if k not in ("ended", "closed")}
+        if kept.get("status") == "ended":
+            kept["status"] = "idle"
+        if data.get("closed"):
+            kept |= {"session": None, "started_environment": False}
+        return kept
 
     @property
     def live(self) -> bool:
-        """Neither lost nor ended: the sitting takes a turn."""
-        return self.lost is None and self.ended is None
+        """Not lost: the sitting takes a turn."""
+        return self.lost is None
 
     def wire(self) -> InboxSitting:
         """The sitting as `/api/inbox` answers it: its turn in flight without the messages read so
@@ -301,7 +314,6 @@ class Sitting(_Model):
             moved=self.moved,
             turn=turn,
             lost=self.lost,
-            ended=self.ended,
             transcript=self.transcript,
         )
 
@@ -341,8 +353,8 @@ class SittingFile:
 
     def session(self) -> tuple[str, str] | None:
         """The live sitting's session as the file names it, its environment and its name; None
-        while there is none. A lost or ended sitting takes no turn: its session is gone or
-        ended."""
+        while there is none: before Start creates it, once the timer has rested the sitting, and
+        for a lost sitting, whose session is gone."""
         sitting = self.load()
         if (
             sitting is None
@@ -431,6 +443,8 @@ class _Follow(BaseTask):
         # The session has not taken the sitting's last message: a fresh follow's, before anything
         # failed, or a session it has just created.
         self.unsent = fresh
+        # The follow has resumed the sitting's session: a session gone again loses the sitting.
+        self.resumed = False
         self.delay = retry
         # Set once the follow is over, its pod leaves it, or the sitting is no longer its own.
         self.released = threading.Event()
@@ -499,7 +513,7 @@ class Inbox:
         self, scope: str, tasks: TaskService, subject: str | None
     ) -> tuple[InboxState, bool]:
         """FR-29: begin a sitting, off the request; the sitting and whether it began. A live
-        sitting is answered as it is; a lost or ended one is cleared as End clears it, first."""
+        sitting is answered as it is; a lost one is cleared as End clears it, first."""
         _, settings = self._configured()
         kept = self.file.change(
             lambda current: (current, None)
@@ -510,7 +524,7 @@ class Inbox:
             logger.info(
                 "inbox sitting %s, %s, cleared for a new one", kept.id, kept.status
             )
-            self._close_unless_closed(kept)
+            self._close(kept)
         prompt = f"{settings.prompt} {scope}" if scope else settings.prompt
         now = stamp(self.clock())
 
@@ -578,7 +592,7 @@ class Inbox:
         cleared = self.file.change(lambda current: (current, None))
         if cleared is not None:
             logger.info("inbox sitting %s ended (operator)", cleared.id)
-            self._close_unless_closed(cleared)
+            self._close(cleared)
 
     # Each pod's timer.
 
@@ -600,52 +614,51 @@ class Inbox:
 
     def sweep(self, tasks: TaskService) -> None:
         """A round over the sitting: a turn no follow holds taken over, so a turn orphaned
-        with no page open is finished; and the sitting expired once it is due (FR-31, FR-32).
+        with no page open is finished; and the sitting rested once it is due (FR-31, FR-32).
         Both pods sweep."""
         _, settings = self._configured()
         self._take_over(tasks)
-        self.expire(settings.idle)
+        self.rest(settings.idle)
 
-    def expire(self, idle: timedelta) -> bool:
-        """Close a sitting with no turn in flight that has not moved for `idle`, as End closes
-        it, and keep it: a live one ended (FR-31), a lost one lost, its idle time counted from the
-        loss (FR-32); whether it did. A sitting closed already is left as it is, so either pod
-        closes it once. The sweep's `idle` is the configured idle time, which the ended sitting
-        records whatever `idle` is."""
-        _, settings = self._configured()
+    def rest(self, idle: timedelta) -> bool:
+        """Close what a sitting with no turn in flight holds once it has not moved for `idle`, as
+        End closes it, and keep the sitting: a live one's session ended and an environment the API
+        started stopped, the sitting live for the next send to resume (FR-31); a lost one's
+        environment stopped, its idle time counted from the loss, the sitting kept lost (FR-32);
+        whether it did. The sitting is written first without them, no session and no environment
+        the API's to stop, so either pod closes them once, and Start and End close nothing of them
+        again: the environment may since run for another caller."""
         now = self.clock()
 
         def due(current: Sitting | None) -> tuple[Sitting | None, Sitting | None]:
-            if current is None or current.turn is not None or current.closed:
+            if current is None or current.turn is not None:
                 return None, current
-            since = current.moved if current.lost is None else current.lost.at
-            if now - datetime.fromisoformat(since) < idle:
-                return None, current
-            if current.lost is not None:
-                closed = current.model_copy(update={"closed": True})
+            if current.lost is None:
+                holds = current.session is not None or current.started_environment
+                since = current.moved
             else:
-                end = InboxEnd(
-                    at=stamp(now), idle_minutes=settings.idle.total_seconds() / 60
-                )
-                closed = current.model_copy(
-                    update={"status": "ended", "ended": end, "closed": True}
-                )
-            return current, closed
+                holds, since = current.started_environment, current.lost.at
+            if not holds or now - datetime.fromisoformat(since) < idle:
+                return None, current
+            rested = current.model_copy(
+                update={"session": None, "started_environment": False}
+            )
+            return current, rested
 
-        expired = self.file.change(due)
-        if expired is None:
+        before = self.file.change(due)
+        if before is None:
             return False
-        if expired.lost is None:
+        if before.lost is None:
             logger.info(
-                "inbox sitting %s ended: it has not moved since %s",
-                expired.id,
-                expired.moved,
+                "inbox sitting %s at rest: it has not moved since %s",
+                before.id,
+                before.moved,
             )
         else:
             logger.info(
-                "inbox sitting %s, lost at %s, closed", expired.id, expired.lost.at
+                "inbox sitting %s, lost at %s, closed", before.id, before.lost.at
             )
-        self._close(expired)
+        self._close(before)
         return True
 
     def _take_over(self, tasks: TaskService) -> Sitting | None:
@@ -790,8 +803,8 @@ class Inbox:
         self, sitting: Sitting, follow: _Follow, progress: ProgressHandle
     ) -> InboxEntry | None:
         """One attempt at the turn from where the file stands: an environment picked or started,
-        the session created, the sitting's last message sent unless the session has taken it,
-        and the response followed to the result."""
+        the session created, or resumed where the send finds it gone (FR-32), the sitting's last
+        message sent unless the session has taken it, and the response followed to the result."""
         controller, _ = self._configured()
         if sitting.environment is None:
             picked = self._pick(follow, progress)
@@ -806,7 +819,12 @@ class Inbox:
         env, name = sitting.environment, sitting.session
         assert env is not None and name is not None
         if follow.unsent or not self._taken(sitting):
-            controller.send(env, name, sitting.transcript[-1].messages[0])
+            try:
+                controller.send(env, name, sitting.transcript[-1].messages[0])
+            except ControllerError as exc:
+                if not exc.lost or follow.resumed or len(sitting.transcript) < 2:
+                    raise
+                return self._resume(follow, progress, exc)
             follow.unsent = False
         if sitting.status == "starting":
             sent = self._write(
@@ -846,15 +864,41 @@ class Inbox:
         self._lose(follow, f"no environment of {repo} is running or stopped")
         return None
 
+    def _resume(
+        self, follow: _Follow, progress: ProgressHandle, gone: ControllerError
+    ) -> InboxEntry | None:
+        """FR-32: the turn taken on in a session that resumes the sitting's conversation, the
+        session the send found `gone` before it took the turn dropped from the file; once per
+        follow."""
+        follow.resumed = True
+        logger.info(
+            "inbox sitting %s: its session is gone (%s); resuming it",
+            follow.sitting_id,
+            gone.reason,
+        )
+        dropped = self._write(follow, lambda s: s.model_copy(update={"session": None}))
+        if dropped is None:
+            return None
+        return self._advance(dropped, follow, progress)
+
     def _create(
         self, sitting: Sitting, follow: _Follow, progress: ProgressHandle
     ) -> Sitting | None:
         """The session created in the sitting's environment, which is started first when the API
-        started it; None when that environment did not come up, the sitting lost, or the follow
-        no longer holds the turn, what it made since its last write undone."""
+        started it; past the first turn, the session resumes the sitting's conversation, its
+        environment readied first (FR-32). None when that environment did not come up or is gone,
+        the sitting lost, or the follow no longer holds the turn, what it made since its last
+        write undone. The new session's log and turns count from the start, and the sitting's
+        offset and turn number with them."""
         controller, settings = self._configured()
         env = sitting.environment
         assert env is not None
+        resuming = len(sitting.transcript) > 1
+        if resuming:
+            readied = self._ready(sitting, follow, progress)
+            if readied is None:
+                return None
+            sitting = readied
         if sitting.started_environment:
             started = self._unless_released(follow, lambda: controller.start(env))
             if started is None:
@@ -862,18 +906,60 @@ class Inbox:
             if not started.settled:
                 self._lose(follow, f"{env} did not come up: it is {started.status}")
                 return None
-        creating = self._step(follow, progress, "Creating the session")
+        creating = self._step(
+            follow,
+            progress,
+            "Resuming the conversation" if resuming else "Creating the session",
+        )
         if creating is None:
             self._abandon(sitting)
             return None
         name = controller.create(
-            env, settings.cwd, settings.model, settings.reasoning_effort
+            env,
+            settings.cwd,
+            settings.model,
+            settings.reasoning_effort,
+            resume=sitting.conversation if resuming else None,
         ).name
         follow.unsent = True
-        named = self._write(follow, lambda s: s.model_copy(update={"session": name}))
+        named = self._write(
+            follow,
+            lambda s: s.model_copy(update={"session": name, "offset": 0, "turns": 0}),
+        )
         if named is None:
             self._abandon(creating, name)
         return named
+
+    def _ready(
+        self, sitting: Sitting, follow: _Follow, progress: ProgressHandle
+    ) -> Sitting | None:
+        """The sitting ready to resume its conversation in its own environment, which it records
+        is the API's to start when it is stopped; None when the conversation has no id to resume
+        or the environment is gone, the sitting lost, or the follow no longer holds the turn. An
+        environment on its way up or down is tried again."""
+        controller, _ = self._configured()
+        env = sitting.environment
+        if sitting.conversation is None:
+            self._lose(
+                follow, "the session is gone, and its conversation has no id to resume"
+            )
+            return None
+        found = next((e for e in controller.environments() if e.env_id == env), None)
+        if found is None or found.status in ("error", "deleting"):
+            self._lose(follow, f"{env} is {found.status if found else 'gone'}")
+            return None
+        if found.status == "stopped":
+            return self._step(
+                follow,
+                progress,
+                f"Starting {env}, which was stopped",
+                started_environment=True,
+            )
+        if found.status != "running":
+            raise ControllerError(
+                f"{env} is {found.status}", f"{env} is {found.status}"
+            )
+        return sitting
 
     @staticmethod
     def _unless_released[T](follow: _Follow, call: Callable[[], T]) -> T | None:
@@ -937,7 +1023,9 @@ class Inbox:
                 return None
             sitting = read
         assert result is not None, "an unbounded response stream ends with its result"
-        conversation = sitting.conversation or controller.session(env, name).session_id
+        # The session names the conversation after each turn: the engine may mint it anew.
+        status = self._closed(lambda: controller.session(env, name))
+        conversation = (status and status.session_id) or sitting.conversation
         now = stamp(self.clock())
 
         def answer(current: Sitting) -> Sitting:
@@ -1052,12 +1140,6 @@ class Inbox:
         follow took over keeps its environment."""
         made = sitting.model_copy(update={"session": session})
         self._close(made, environment=self.file.read(sitting.id) is None)
-
-    def _close_unless_closed(self, sitting: Sitting) -> None:
-        """`_close` for a sitting the expiry has not closed: the environment the expiry stopped
-        may since run for another caller."""
-        if not sitting.closed:
-            self._close(sitting)
 
     def _close(self, sitting: Sitting, environment: bool = True) -> None:
         """End the sitting's session and, with `environment`, stop the environment the API

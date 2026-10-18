@@ -39,9 +39,3 @@ export const clock = (iso: string): string => {
   const d = new Date(iso);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
-/** An idle time given in minutes, to a tenth: `30 minutes`. */
-export const minutes = (count: number): string => {
-  const shown = Math.round(count * 10) / 10;
-  return `${shown} minute${shown === 1 ? '' : 's'}`;
-};

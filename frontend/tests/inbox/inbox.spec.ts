@@ -1,6 +1,6 @@
 /**
  * The inbox screen (FR-28 to FR-32): Start, the transcript with the working box under it, a reply
- * as its turn's messages, the composer, a lost sitting, one the idle expiry ended, and End. The
+ * as its turn's messages, the composer, a lost sitting, one the idle time rested, and End. The
  * worker backend's fake controller plays the sitting's session. Every sitting, card id and title
  * is invented.
  */
@@ -697,8 +697,8 @@ test.describe('a lost sitting', () => {
   });
 });
 
-test.describe('a sitting the expiry ended', () => {
-  test('keeps its transcript, closing on when it ended and after how long idle; Send is withdrawn, the Inbox pill amber, End promises nothing of the session it ended, and a new Start clears it', async ({ controller, inbox, appBar, page }) => {
+test.describe('a sitting the idle time rested', () => {
+  test('stays live, its transcript, Send and the steady Inbox pill kept; the next Send starts the environment again and resumes the session (FN-52)', async ({ controller, inbox, appBar }) => {
     await controller.layOut({
       environments: [{ env_id: 'env-1', status: 'stopped' }],
       turns: [{ held: true }, { held: true }, { held: true }],
@@ -710,39 +710,29 @@ test.describe('a sitting the expiry ended', () => {
     await controller.finish('Recorded.');
     await expect(inbox.sessionMessages).toHaveCount(2);
 
-    await controller.expire();
-    await inbox.reload();
-    await expect(inbox.ended).toHaveText(/^Ended at \d\d:\d\d after 30 minutes idle\.$/);
-    await expect(inbox.opening).toBeVisible();
-    await expect(inbox.sessionMessages).toHaveText([/One question\./, /Recorded\./]);
-    await expect(inbox.operatorMessages).toHaveText([/Yes\./]);
-    await expect(inbox.lost).toHaveCount(0);
-    await expect(inbox.field).toHaveCount(0);
-    await expect(inbox.sendButton).toHaveCount(0);
-    await expect(inbox.restart).toContainText('The session has ended, and Send with it.');
-    await appBar.expectPill(
-      appBar.inboxPill,
-      'ended',
-      /^The inbox sitting ended at \d{4}-\d\d-\d\d \d\d:\d\d after 30 minutes idle$/,
-    );
+    await controller.rest();
     await expect
       .poll(async () => (await controller.read()).environments)
       .toEqual([{ env_id: 'env-1', status: 'stopped', sessions: [] }]);
-
-    await inbox.end.click();
-    await expect(inbox.endDialog).toContainText('The transcript goes with it.');
-    await expect(inbox.endDialog).not.toContainText('The session ends');
-    await expect(inbox.endDialog).not.toContainText('was started for this sitting');
-    await page.keyboard.press('Escape');
-    await expect(inbox.endDialog).toHaveCount(0);
-
-    await inbox.restartStart.click();
-    await expect(inbox.ended).toHaveCount(0);
-    await expect(inbox.sessionMessages).toHaveCount(0);
-    await expect(inbox.operatorMessages).toHaveCount(0);
-    await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1, started for this sitting$/);
+    await inbox.reload();
+    await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1$/);
+    await expect(inbox.sessionMessages).toHaveText([/One question\./, /Recorded\./]);
+    await expect(inbox.operatorMessages).toHaveText([/Yes\./]);
+    await expect(inbox.lost).toHaveCount(0);
+    await expect(inbox.restart).toHaveCount(0);
     await expect(inbox.field).toBeVisible();
-    await appBar.expectPill(appBar.inboxPill, 'working', /is working/);
+    await appBar.expectPill(appBar.inboxPill, 'waiting', /waits for your answer/);
+
+    await inbox.send('And EX-3?');
+    await expect(inbox.working).toBeVisible();
+    await controller.finish('EX-3 is closed.');
+    await expect(inbox.sessionMessages).toHaveText([/One question\./, /Recorded\./, /EX-3 is closed\./]);
+    await expect(inbox.operatorMessages).toHaveText([/Yes\./, /And EX-3\?/]);
+    await expect(inbox.opening).toHaveText(/^\/dev:inbox · began \d\d:\d\d in env-1, started for this sitting$/);
+    const [env] = (await controller.read()).environments;
+    expect(env.status).toBe('running');
+    // A new session, the conversation resumed in it: it was sent the new turn alone.
+    expect(env.sessions.map((s) => s.messages)).toEqual([['And EX-3?']]);
   });
 
   test('End clears it', async ({ controller, inbox, request, backendUrl }) => {
@@ -751,9 +741,9 @@ test.describe('a sitting the expiry ended', () => {
     await inbox.begin();
     await controller.finish('Sorted.');
     await expect(inbox.sessionMessages).toHaveCount(1);
-    await controller.expire();
+    await controller.rest();
     await inbox.reload();
-    await expect(inbox.ended).toBeVisible();
+    await expect(inbox.sessionMessages).toHaveCount(1);
 
     await inbox.end.click();
     await inbox.endConfirm.click();
@@ -792,7 +782,7 @@ test.describe('End', () => {
   });
 });
 
-test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, a lost one, an ended one', async ({ controller, inbox, page }) => {
+test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, a lost one', async ({ controller, inbox, page }) => {
   await controller.layOut({ environments: [{ env_id: 'env-1' }], turns: [{ held: true }, { held: true }, { held: true }] });
   await inbox.open();
 
@@ -815,16 +805,6 @@ test('the inbox screen meets WCAG AA in both themes: Start, a sitting mid-turn, 
   for (const theme of ['light', 'dark'] as const) {
     await inbox.setTheme(theme);
     views[`lost, ${theme}`] = await contrastFailures(page);
-  }
-  await inbox.restartStart.click();
-  await controller.finish('Sorted.');
-  await expect(inbox.sessionMessages).toHaveCount(1);
-  await controller.expire();
-  await inbox.reload();
-  await expect(inbox.ended).toBeVisible();
-  for (const theme of ['light', 'dark'] as const) {
-    await inbox.setTheme(theme);
-    views[`ended, ${theme}`] = await contrastFailures(page);
   }
 
   expect(Object.fromEntries(Object.entries(views).filter(([, failures]) => failures.length))).toEqual({});

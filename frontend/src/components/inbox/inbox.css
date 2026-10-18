@@ -61,7 +61,7 @@
   overflow-wrap: anywhere;
 }
 
-/* A sitting lost or ended: the line it closes on. */
+/* A lost sitting: the line it closes on. */
 .closed-line {
   display: flex;
   gap: 10px;

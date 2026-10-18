@@ -2,13 +2,13 @@
 // the session's as its messages in order, each a block as the skill writes it (markdown.tsx), set
 // further apart than paragraphs are and all alike; the operator's messages as they typed them; each
 // entry with its time under it. Under the last one, while a turn is in flight, the working box over
-// the session's condensed log, and no message of the turn. A sitting the expiry ended (FR-31) or a
-// lost one (FR-32) ends on a line saying so.
+// the session's condensed log, and no message of the turn. A lost sitting (FR-32) ends on a line
+// saying so.
 
-import { TimerOff, TriangleAlert } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import { WorkingBox } from '@/components/shell/working-box';
 import type { Entry, Sitting } from '@/hooks/use-inbox';
-import { clock, minutes } from '@/lib/inbox/text';
+import { clock } from '@/lib/inbox/text';
 import { stamp } from '@/lib/triage/time';
 import { Markdown } from './markdown';
 
@@ -73,14 +73,6 @@ export function Transcript({ sitting, tracker, lines }: TranscriptProps) {
             <strong>Lost at {clock(sitting.lost.at)}.</strong> {sentence(sitting.lost.reason)} What the session
             wrote on the tracker stands, and a new sitting reads it there.
           </div>
-        </div>
-      )}
-      {sitting.ended && (
-        <div className="closed-line" role="status" data-testid="inbox.ended">
-          <TimerOff className="icon" aria-hidden="true" />
-          <strong>
-            Ended at {clock(sitting.ended.at)} after {minutes(sitting.ended.idle_minutes)} idle.
-          </strong>
         </div>
       )}
     </div>

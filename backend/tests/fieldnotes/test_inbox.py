@@ -208,7 +208,6 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
             "moved": AT,
             "turn": {"task": task_id, "began": AT, "lines": []},
             "lost": None,
-            "ended": None,
             "transcript": [entry("operator", "/dev:inbox EX")],
         },
     }
@@ -219,7 +218,6 @@ def test_start_takes_a_running_environment_and_follows_the_prompts_turn(
         "moved": AT,
         "turn": None,
         "lost": None,
-        "ended": None,
         "transcript": [
             entry("operator", "/dev:inbox EX"),
             entry("session", WRITE_UP),
@@ -668,17 +666,17 @@ def test_a_live_sitting_written_before_replies_held_messages_loads_and_goes_on(
     assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
 
 
-def test_a_kept_sitting_written_before_replies_held_messages_loads(
+def test_a_rested_sitting_written_before_replies_held_messages_loads(
     start, kubecoder, eventually, environ
 ):
     kubecoder.add_environment(ENV)
     with start() as api:
         opened(api, eventually, kubecoder)
-        assert api.runtime.inbox.expire(timedelta(0))
+        assert api.runtime.inbox.rest(timedelta(0))
         written_before(environ)
         state = inbox(api)
 
-    assert state["sitting"]["ended"] is not None
+    assert state["sitting"]["lost"] is None
     assert state["sitting"]["transcript"] == [
         entry("operator", "/dev:inbox"),
         entry("session", WRITE_UP),

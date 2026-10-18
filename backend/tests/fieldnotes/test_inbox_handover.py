@@ -5,9 +5,10 @@ the messages read before it are on file with that offset, so the reply holds eac
 another turn's; the result lands once and the first turn is sent once; every write is checked against the sitting
 and the follow, across both pods; a failure that is not a loss is tried again, a loss loses the
 sitting, and so does a call the controller refuses outright (FN-37); a pod whose shutdown is announced leaves its turn at once, which the other pod takes over
-at its next read, and takes none over itself (FR-30); and the timer closes a sitting idle for the
-idle time and keeps it ended (FR-31), and a lost one the idle time after its loss, kept lost
-(FR-32), each closed once.
+at its next read, and takes none over itself (FR-30); a send that finds the session gone between
+turns resumes the conversation in the sitting's own environment, once, and a session gone mid-turn
+loses the sitting (FR-32, FN-52); and the timer rests a sitting idle for the idle time and keeps it
+live (FR-31), and closes a lost one the idle time after its loss, kept lost (FR-32), each once.
 
 Two pods are two instances over one cache directory: the app's own, and a second `Inbox` beside it.
 A pod retired mid-turn is the file it left behind: a follow whose last heartbeat is two minutes
@@ -15,6 +16,7 @@ old. A pod stopped mid-turn is the app shut down through its lifecycle coordinat
 drain shuts it down, beside a second pod with a task service of its own. Against the fake
 controller; every environment, line and message is invented."""
 
+import json
 import logging
 import threading
 import time
@@ -28,7 +30,6 @@ from app.fieldnotes.inbox import (
     Author,
     Follower,
     Inbox,
-    InboxEnd,
     InboxEntry,
     PendingMessage,
     Sitting,
@@ -47,6 +48,7 @@ from tests.fieldnotes.test_inbox import (
     LATER,
     LINES,
     NARRATION,
+    SPARE,
     WRITE_UP,
     begin,
     end,
@@ -375,11 +377,12 @@ def test_a_turn_the_retired_pod_never_sent_is_sent_once_by_the_takeover(
         result = finished(api, eventually, inbox(api)["sitting"]["turn"]["task"])
 
     assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "close EX-7"]
-    # Asked first whether the session had taken it.
+    # Asked first whether the session had taken it; and after the result, the conversation.
     assert calls(kubecoder, since) == [
         "GET claude",
         "POST messages",
         "GET response",
+        "GET claude",
     ]
     assert result == {"reply": entry("session", ANSWER)}
 
@@ -835,6 +838,7 @@ def test_a_failing_controller_is_tried_again_and_the_message_sent_once(
         "GET claude",
         "POST messages",
         "GET response",
+        "GET claude",
     ]
     assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
     assert result == {"reply": entry("session", ANSWER)}
@@ -973,22 +977,18 @@ def test_a_session_the_controller_no_longer_knows_is_the_sitting_lost(
     assert again.json()["sitting"]["began"] == LATER
 
 
-@pytest.mark.parametrize("when", ["mid-turn", "between turns"])
-def test_an_environment_a_controller_run_stopped_is_the_sitting_lost_and_left_to_it(
-    start, kubecoder, eventually, environ, when
+def test_an_environment_a_controller_run_stopped_mid_turn_is_the_sitting_lost_and_left_to_it(
+    start, kubecoder, eventually, environ
 ):
     """Ruling r1 Q2: the API took the environment running, so it never stops it."""
     kubecoder.add_environment(ENV)
     with start() as api:
         quick(api.runtime.inbox)
         opened(api, eventually, kubecoder)
-        if when == "between turns":
-            kubecoder.stop_environment(ENV)
         kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
         task_id = send(api, "go").json()["sitting"]["turn"]["task"]
-        if when == "mid-turn":
-            eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
-            kubecoder.stop_environment(ENV)
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
+        kubecoder.stop_environment(ENV)
         result = finished(api, eventually, task_id)
         state = inbox(api)
         ended = end(api)
@@ -1000,15 +1000,204 @@ def test_an_environment_a_controller_run_stopped_is_the_sitting_lost_and_left_to
     assert not any(call.path.endswith("/stop") for call in kubecoder.calls)
 
 
-# -- the idle expiry -----------------------------------------------------------------------------
+# -- the resume ----------------------------------------------------------------------------------
+
+
+def test_a_send_resumes_a_session_the_worker_no_longer_knows_in_its_environment(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """FR-32 (FN-52): the worker reaped or restarted the session between turns; the send resumes
+    the conversation as a new session of the same environment, its log and turns counted from the
+    start, and the transcript goes on as one."""
+    kubecoder.add_environment(ENV)
+    kubecoder.add_environment(SPARE)
+    with start() as api:
+        heard = listen(api, monkeypatch)
+        opened(api, eventually, kubecoder)
+        kubecoder.forget_session(ENV, "claude")
+        since = len(kubecoder.calls)
+        kubecoder.turns.append(FakeTurn([LINES[0], FakeMessage(NARRATION)], ANSWER))
+        task_id = send(api, "and EX-3?").json()["sitting"]["turn"]["task"]
+        result = finished(api, eventually, task_id)
+        state = inbox(api)
+        made = calls(kubecoder, since)
+
+    session = kubecoder.session(ENV, "claude")
+    assert session.body == {"cwd": "Fieldnotes/inbox", "resume": "conversation-1"}
+    assert session.messages == ["and EX-3?"]
+    assert result == {"reply": entry("session", NARRATION, ANSWER)}
+    assert state["sitting"]["lost"] is None
+    assert state["sitting"]["started_environment"] is False
+    assert [m["messages"] for m in state["sitting"]["transcript"]] == [
+        ["/dev:inbox"],
+        [WRITE_UP],
+        ["and EX-3?"],
+        [NARRATION, ANSWER],
+    ]
+    assert progress(heard, task_id) == ["Resuming the conversation", LINES[0]]
+    assert "POST start" not in made
+    assert kubecoder.environments[SPARE].sessions == {}
+    sitting = held(environ)
+    assert (sitting.status, sitting.session, sitting.conversation) == (
+        "idle",
+        "claude",
+        "conversation-1",
+    )
+    assert (sitting.turns, sitting.offset) == (1, session.log[-1][1])
+
+
+def test_a_send_resumes_in_the_environment_a_controller_run_stopped_and_starts_it(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """FR-32 (FN-52): the environment stopped between turns; the send starts it, records that it
+    did, as Start records it, so End stops it again."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        heard = listen(api, monkeypatch)
+        opened(api, eventually, kubecoder)
+        kubecoder.stop_environment(ENV)
+        kubecoder.turns.append(FakeTurn([LINES[0]], ANSWER))
+        task_id = send(api, "and EX-3?").json()["sitting"]["turn"]["task"]
+        result = finished(api, eventually, task_id)
+        state = inbox(api)
+        ended = end(api)
+
+    assert result == {"reply": entry("session", ANSWER)}
+    assert state["sitting"]["started_environment"] is True
+    assert progress(heard, task_id) == [
+        f"Starting {ENV}, which was stopped",
+        "Resuming the conversation",
+        LINES[0],
+    ]
+    assert starts(kubecoder) == [f"/environments/{ENV}/start"]
+    assert ended.status_code == 204
+    assert kubecoder.environments[ENV].status == "stopped"
+
+
+def test_a_resume_takes_the_conversation_as_the_session_last_named_it(
+    start, kubecoder, eventually, environ
+):
+    """The engine may mint the conversation anew in a turn: the sitting keeps the id the session
+    names after each turn, and a resume goes on with that one."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        kubecoder.session(ENV, "claude").session_id = "conversation-7"
+        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
+        renamed = held(environ).conversation
+        kubecoder.forget_session(ENV, "claude")
+        finished(
+            api, eventually, send(api, "and EX-3?").json()["sitting"]["turn"]["task"]
+        )
+
+    assert renamed == "conversation-7"
+    assert kubecoder.session(ENV, "claude").body["resume"] == "conversation-7"
+
+
+def test_a_resumed_session_gone_again_at_its_send_is_the_sitting_lost(
+    start, kubecoder, eventually, environ, monkeypatch
+):
+    """A follow resumes once: a send the new session refuses as gone too loses the sitting."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        quick(api.runtime.inbox)
+        opened(api, eventually, kubecoder)
+        kubecoder.forget_session(ENV, "claude")
+        controller = api.runtime.controller
+
+        def gone_(*args, **kwargs):
+            raise ControllerError("gone", "no session with that name", 404, "not-found")
+
+        monkeypatch.setattr(controller, "send", gone_)
+        since = len(kubecoder.calls)
+        result = finished(
+            api, eventually, send(api, "go").json()["sitting"]["turn"]["task"]
+        )
+        made = calls(kubecoder, since)
+
+    assert result == {"reply": None}
+    assert held(environ).lost.reason == "no session with that name"
+    assert made.count("POST headless") == 1
+
+
+@pytest.mark.parametrize(
+    ("lay_out", "reason"),
+    [
+        ("forgotten", f"{ENV} is gone"),
+        ("no id", "the session is gone, and its conversation has no id to resume"),
+    ],
+)
+def test_a_send_that_cannot_resume_the_session_is_the_sitting_lost(
+    start, kubecoder, eventually, environ, lay_out, reason
+):
+    """The environment is gone, or the conversation has no id to resume: the sitting is lost,
+    its transcript kept, and nothing is created."""
+    kubecoder.add_environment(ENV)
+    with start() as api:
+        quick(api.runtime.inbox)
+        opened(api, eventually, kubecoder)
+        if lay_out == "forgotten":
+            kubecoder.forget_environment(ENV)
+        else:
+            lay(environ, held(environ).model_copy(update={"conversation": None}))
+            kubecoder.forget_session(ENV, "claude")
+        since = len(kubecoder.calls)
+        result = finished(
+            api, eventually, send(api, "go").json()["sitting"]["turn"]["task"]
+        )
+        state = inbox(api)
+        made = calls(kubecoder, since)
+
+    assert result == {"reply": None}
+    assert state["sitting"]["lost"] == {"at": AT, "reason": reason}
+    assert state["sitting"]["transcript"][-1] == entry("operator", "go")
+    assert "POST headless" not in made
+
+
+def test_a_sitting_the_old_expiry_ended_loads_live_at_rest_and_a_send_resumes_it(
+    start, kubecoder, eventually, environ
+):
+    """A sitting file of the layout before 2026-10-18 (FN-52): a sitting the idle expiry ended
+    and closed reads as a live one at rest, and the next send resumes it."""
+    kubecoder.add_environment(ENV, "stopped")
+    with start() as api:
+        opened(api, eventually, kubecoder)
+        kubecoder.stop_environment(ENV)
+        path = the_file(environ).path
+        raw = json.loads(path.read_text())
+        raw |= {
+            "status": "ended",
+            "ended": {"at": LATER, "idle_minutes": 30},
+            "closed": True,
+        }
+        path.write_text(json.dumps(raw))
+        loaded = inbox(api)
+        rested = held(environ)
+        kubecoder.turns.append(FakeTurn([LINES[0]], ANSWER))
+        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
+        state = inbox(api)
+
+    assert "ended" not in loaded["sitting"]
+    assert loaded["sitting"]["lost"] is None
+    assert (rested.status, rested.session, rested.started_environment) == (
+        "idle",
+        None,
+        False,
+    )
+    assert state["sitting"]["transcript"][-1] == entry("session", ANSWER)
+    assert state["sitting"]["started_environment"] is True
+    assert kubecoder.session(ENV, "claude").body["resume"] == "conversation-1"
+
+
+# -- the idle time -------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("found", ["running", "stopped"])
-def test_a_sitting_that_has_not_moved_for_the_idle_time_is_closed_and_kept_ended(
+def test_a_sitting_that_has_not_moved_for_the_idle_time_rests_and_stays_live(
     start, kubecoder, eventually, environ, clock, found
 ):
-    """R3 (FN-40): the expiry ends the session and stops an environment the API started, as End
-    does, and keeps the sitting, ended, its transcript read-only."""
+    """FR-31 (FN-52): the idle time ends the session and stops an environment the API started, as
+    End does, and keeps the sitting live, the screen unchanged; the next send resumes it."""
     kubecoder.add_environment(ENV, found)
     with start() as api:
         opened(api, eventually, kubecoder)
@@ -1016,31 +1205,45 @@ def test_a_sitting_that_has_not_moved_for_the_idle_time_is_closed_and_kept_ended
         api.runtime.inbox.sweep(tasks(api))
         kept = held(environ)
         clock.tick(1)
+        since = len(kubecoder.calls)
         api.runtime.inbox.sweep(tasks(api))
+        closing = calls(kubecoder, since)
+        rested = held(environ)
         state = inbox(api)
-        refused = send(api, "and EX-3?")
+        status = kubecoder.environments[ENV].status
+        kubecoder.turns.append(FakeTurn([LINES[0]], ANSWER))
+        reply = send(api, "and EX-3?")
+        finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
+        after = inbox(api)
 
-    assert (kept.status, kept.ended, kept.closed) == ("idle", None, False)
-    assert state["sitting"]["ended"] == {
-        "at": "2026-09-19T10:30:00Z",
-        "idle_minutes": 30,
-    }
+    assert (kept.session, kept.started_environment) == ("claude", found == "stopped")
+    assert (rested.status, rested.session, rested.started_environment) == (
+        "idle",
+        None,
+        False,
+    )
+    assert rested.conversation == "conversation-1"
     assert (state["sitting"]["lost"], state["sitting"]["turn"]) == (None, None)
     assert state["sitting"]["transcript"] == [
         entry("operator", "/dev:inbox"),
         entry("session", WRITE_UP),
     ]
-    assert (held(environ).status, held(environ).closed) == ("ended", True)
-    assert refused.status_code == 409
-    assert refused.json()["type"] == "conflict"
-    assert kubecoder.environments[ENV].sessions == {}
     # Stopped only when the API started it.
-    assert kubecoder.environments[ENV].status == found
+    if found == "stopped":
+        assert closing == ["DELETE claude", "GET sessions", "POST stop"]
+    else:
+        assert closing == ["DELETE claude"]
+    assert status == found
+    assert reply.status_code == 202
+    assert after["sitting"]["transcript"][-2:] == [
+        entry("operator", "and EX-3?", at="2026-09-19T10:30:00Z"),
+        entry("session", ANSWER, at="2026-09-19T10:30:00Z"),
+    ]
+    assert after["sitting"]["started_environment"] is (found == "stopped")
+    assert kubecoder.session(ENV, "claude").body["resume"] == "conversation-1"
 
 
-def test_the_idle_time_is_configured_and_the_ended_sitting_names_it(
-    start, kubecoder, eventually, environ, clock
-):
+def test_the_idle_time_is_configured(start, kubecoder, eventually, environ, clock):
     kubecoder.add_environment(ENV)
     with start(FIELDNOTES_KUBECODER_INBOX_IDLE="5") as api:
         opened(api, eventually, kubecoder)
@@ -1050,11 +1253,11 @@ def test_the_idle_time_is_configured_and_the_ended_sitting_names_it(
         clock.tick(1)
         api.runtime.inbox.sweep(tasks(api))
 
-    assert kept.ended is None
-    assert held(environ).ended == InboxEnd(at=LATER, idle_minutes=5)
+    assert kept.session == "claude"
+    assert held(environ).session is None
 
 
-def test_a_turn_in_flight_is_not_ended_however_long_it_runs(
+def test_a_turn_in_flight_does_not_rest_however_long_it_runs(
     start, kubecoder, eventually, environ, clock
 ):
     kubecoder.add_environment(ENV)
@@ -1076,18 +1279,19 @@ def test_a_turn_in_flight_is_not_ended_however_long_it_runs(
         api.runtime.inbox.sweep(tasks(api))
 
     assert kept.turn.task == task_id
-    assert kept.ended is None
+    assert kept.session == "claude"
     # Idle since the result, not since the send.
-    assert idle.ended is None
-    assert held(environ).status == "ended"
+    assert idle.session == "claude"
+    assert held(environ).session is None
+    assert held(environ).live
 
 
 def test_a_lost_sitting_is_closed_the_idle_time_after_its_loss_and_kept_lost(
     start, kubecoder, eventually, environ, clock
 ):
-    """R3 (FN-40): the expiry no longer clears a lost sitting, but closes it, so an environment
-    the API started for it does not run on until the operator acts; its idle time counts from the
-    loss, not from the last send."""
+    """R3 (FN-40): the idle time closes a lost sitting, so an environment the API started for it
+    does not run on until the operator acts; its idle time counts from the loss, not from the last
+    send."""
     kubecoder.add_environment(ENV, "stopped")
     with start() as api:
         quick(api.runtime.inbox)
@@ -1109,19 +1313,22 @@ def test_a_lost_sitting_is_closed_the_idle_time_after_its_loss_and_kept_lost(
         state = inbox(api)
 
     assert waiting.moved == AT
-    assert (waiting.status, waiting.closed, running) == ("lost", False, "running")
+    assert (waiting.status, waiting.started_environment, running) == (
+        "lost",
+        True,
+        "running",
+    )
     assert state["sitting"]["lost"] == {
         "at": "2026-09-19T10:20:00Z",
         "reason": "no session with that name",
     }
-    assert state["sitting"]["ended"] is None
     assert [m["messages"] for m in state["sitting"]["transcript"]] == [
         ["/dev:inbox"],
         [WRITE_UP],
         ["go"],
     ]
-    assert (held(environ).status, held(environ).closed) == ("lost", True)
-    # Its session is gone: the expiry ends none, and stops the environment it started.
+    assert (held(environ).status, held(environ).started_environment) == ("lost", False)
+    # Its session is gone: the idle time ends none, and stops the environment it started.
     assert closing == ["GET sessions", "POST stop"]
     assert kubecoder.environments[ENV].status == "stopped"
 
@@ -1136,9 +1343,13 @@ def test_closing_a_lost_sitting_leaves_the_session_that_now_has_its_name(
     it running, though the API started it."""
     kubecoder.add_environment(ENV, "stopped")
     with start() as api:
+        quick(api.runtime.inbox)
         opened(api, eventually, kubecoder)
+        kubecoder.turns.append(FakeTurn(LINES[:1], held=True))
+        task_id = send(api, "go").json()["sitting"]["turn"]["task"]
+        eventually(lambda: held(environ).turn.lines == [LINES[0]], "the first line")
         kubecoder.forget_session(ENV, "claude")
-        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
+        finished(api, eventually, task_id)
         lost = held(environ)
         kubecoder.add_session(ENV, "claude", working=True, headless=True)
         since = len(kubecoder.calls)
@@ -1161,19 +1372,22 @@ def test_closing_a_lost_sitting_leaves_the_session_that_now_has_its_name(
     assert kubecoder.session(ENV, "claude").status == "busy"
     assert kubecoder.environments[ENV].status == "running"
     if then == "sweep":
-        assert (held(environ).status, held(environ).closed) == ("lost", True)
+        assert (held(environ).status, held(environ).started_environment) == (
+            "lost",
+            False,
+        )
     elif then == "start":
         assert held(environ).environment == ENV
         assert held(environ).session == "claude-2"
 
 
-@pytest.mark.parametrize("then", ["sweep", "start", "end"])
-def test_a_sitting_the_expiry_closed_is_closed_once(
+@pytest.mark.parametrize("then", ["sweep", "send", "end"])
+def test_a_sitting_the_idle_time_rested_is_closed_once(
     start, kubecoder, eventually, environ, clock, then
 ):
-    """The environment the expiry stopped may since run for another caller, such as an actioner
-    run: a later sweep closes nothing, and Start and End clear the kept sitting and close
-    nothing."""
+    """The environment the idle time stopped may since run for another caller, such as an
+    actioner run: a later sweep closes nothing, End clears the sitting and closes nothing, and a
+    send resumes the session there without taking the environment as the API's to stop."""
     kubecoder.add_environment(ENV, "stopped")
     with start() as api:
         opened(api, eventually, kubecoder)
@@ -1186,8 +1400,8 @@ def test_a_sitting_the_expiry_closed_is_closed_once(
         if then == "sweep":
             clock.tick(60 * 60)
             api.runtime.inbox.sweep(tasks(api))
-        elif then == "start":
-            opened(api, eventually, kubecoder)
+        elif then == "send":
+            finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
         else:
             assert end(api).status_code == 204
         after = calls(kubecoder, since)
@@ -1198,17 +1412,19 @@ def test_a_sitting_the_expiry_closed_is_closed_once(
     assert kubecoder.environments[ENV].status == "running"
     if then == "sweep":
         assert after == []
-        assert held(environ).status == "ended"
-    elif then == "start":
-        assert state["sitting"]["ended"] is None
+        assert (held(environ).status, held(environ).session) == ("idle", None)
+    elif then == "send":
+        assert "POST start" not in after
         assert state["sitting"]["started_environment"] is False
-        assert state["sitting"]["began"] == "2026-09-19T10:30:00Z"
+        assert state["sitting"]["transcript"][-1] == entry(
+            "session", "done", at="2026-09-19T10:30:00Z"
+        )
     else:
         assert after == []
         assert state["sitting"] is None
 
 
-def test_both_pods_sweeping_end_the_sitting_once(
+def test_both_pods_sweeping_rest_the_sitting_once(
     start, kubecoder, eventually, environ, clock, second
 ):
     kubecoder.add_environment(ENV)
@@ -1225,15 +1441,15 @@ def test_both_pods_sweeping_end_the_sitting_once(
         for sweep in sweeps:
             sweep.join(5)
 
-    assert held(environ).status == "ended"
+    assert (held(environ).status, held(environ).session) == ("idle", None)
     assert calls(kubecoder, since) == ["DELETE claude"]
 
 
-def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires(
+def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_rests(
     start, kubecoder, eventually, environ, clock, swept
 ):
     """R9 through a rollout: the follow's pod retired mid-turn and no page reads the sitting; the
-    timer the serving pod's runtime started finishes the turn, then ends the sitting."""
+    timer the serving pod's runtime started finishes the turn, then rests the sitting."""
     kubecoder.add_environment(ENV, "stopped")
     with start() as api:
         opened(api, eventually, kubecoder)
@@ -1243,10 +1459,11 @@ def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_expires
         eventually(lambda: held(environ).turn is None, "the turn finished")
         answered = held(environ)
         clock.tick(30 * 60)
-        eventually(lambda: held(environ).status == "ended", "the expiry")
+        eventually(lambda: held(environ).session is None, "the rest")
 
     assert [m.messages for m in answered.transcript][-2:] == [["close EX-7"], [ANSWER]]
     assert answered.lost is None
+    assert held(environ).live
     assert kubecoder.environments[ENV].sessions == {}
     assert kubecoder.environments[ENV].status == "stopped"
 

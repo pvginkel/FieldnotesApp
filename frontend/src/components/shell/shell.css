@@ -19,8 +19,7 @@
 
 .topbar-fill { flex: 1; }
 
-/* The dot breathes while either works; it is amber on a lost or ended sitting and red on a failed
-   run. */
+/* The dot breathes while either works; it is amber on a lost sitting and red on a failed run. */
 .app-pills { display: flex; align-items: center; gap: 8px; }
 .app-pill {
   display: inline-flex;
@@ -39,9 +38,9 @@
 :is(a, button).app-pill:hover { background: rgb(0 0 0 / 0.3); text-decoration: none; }
 .app-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
 .app-pill[data-state="working"] .dot { animation: breathe 1.4s ease-in-out infinite; }
-.app-pill[data-state="lost"] .dot, .app-pill[data-state="ended"] .dot { background: hsl(48 95% 62%); }
+.app-pill[data-state="lost"] .dot { background: hsl(48 95% 62%); }
 .app-pill[data-state="failed"] .dot { background: hsl(0 90% 72%); }
-.app-pill:is([data-state="lost"], [data-state="ended"], [data-state="failed"]) { background: rgb(0 0 0 / 0.32); }
+.app-pill:is([data-state="lost"], [data-state="failed"]) { background: rgb(0 0 0 / 0.32); }
 @keyframes breathe { 50% { opacity: 0.25; } }
 
 /* ---- The actioner's failure, opened from its pill (actioner-failure-dialog.tsx) -------- */

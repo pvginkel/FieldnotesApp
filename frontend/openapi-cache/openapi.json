@@ -291,25 +291,6 @@
         "title": "Author",
         "type": "string"
       },
-      "InboxState.5430f38.InboxEnd": {
-        "description": "FR-31: when the expiry ended the sitting, and the idle time it had not moved for, in\nminutes: the configured one.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "idle_minutes": {
-            "title": "Idle Minutes",
-            "type": "number"
-          }
-        },
-        "required": [
-          "at",
-          "idle_minutes"
-        ],
-        "title": "InboxEnd",
-        "type": "object"
-      },
       "InboxState.5430f38.InboxEntry": {
         "description": "An entry of the sitting's transcript: what the API sent the session as a turn, the first\nbeing the inbox prompt with the operator's scope, its one message; or the session's reply to a\nturn, its messages in stream order. `at` is when the API sent it, or when the reply was\nwritten at the turn's result.",
         "properties": {
@@ -361,16 +342,6 @@
           "began": {
             "title": "Began",
             "type": "string"
-          },
-          "ended": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/InboxState.5430f38.InboxEnd"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "environment": {
             "anyOf": [
@@ -426,7 +397,6 @@
           "moved",
           "turn",
           "lost",
-          "ended",
           "transcript"
         ],
         "title": "InboxSitting",
@@ -2229,22 +2199,6 @@
         "x-required-role": "editor"
       }
     },
-    "/api/testing/controller/expire": {
-      "post": {
-        "description": "",
-        "operationId": "post__api_testing_controller_expire",
-        "parameters": [],
-        "responses": {},
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "The sitting closed as the expiry closes it once the idle time has passed, now: ended, or a lost one kept lost; a conflict when it has a turn in flight, is closed already, or there is none.",
-        "tags": [],
-        "x-required-role": "editor"
-      }
-    },
     "/api/testing/controller/finish": {
       "post": {
         "description": "",
@@ -2273,6 +2227,22 @@
           }
         ],
         "summary": "A `LossBody`: the sitting lost at the controller, which the API finds on its next call.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/controller/rest": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_rest",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The sitting rested as the timer rests it once the idle time has passed, now: a live one's session ended and the environment the API started stopped, the sitting kept live, or a lost one's environment stopped; a conflict when it has a turn in flight, holds nothing to close, or there is none.",
         "tags": [],
         "x-required-role": "editor"
       }

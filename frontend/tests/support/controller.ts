@@ -100,9 +100,11 @@ export class Controller {
     return this.call('post', '/lose', { what });
   }
 
-  /** The sitting closed now as the idle expiry closes it: ended, or a lost one kept lost. */
-  expire(): Promise<void> {
-    return this.call('post', '/expire', {});
+  /** The sitting rested now as the idle time rests it: a live one's session ended and the
+   *  environment the API started stopped, the sitting kept live for the next Send to resume; a
+   *  lost one's environment stopped, kept lost. */
+  rest(): Promise<void> {
+    return this.call('post', '/rest', {});
   }
 
   /** A line of the turn in flight of the last prompt run the controller accepted. */

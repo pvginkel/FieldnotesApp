@@ -9,9 +9,9 @@ sitting the last one held is ended as End ends it, and the actioner starts afres
 plays what the controller does while the screen is open: the log lines, the messages and the
 result of the sitting's turn in flight (`emit`, `finish`) and of the actioner run's (`run-emit`,
 `run-finish`), the sitting lost under the API (`lose`), the actioner's run ending as the
-controller's webhook reports it (`run-end`). The suite has no clock to move, so the API's own expiry is played too: the
-sitting brought to its idle end now (`expire`). `GET` answers what the controller holds, for a
-test to read what the API did there.
+controller's webhook reports it (`run-end`). The suite has no clock to move, so the API's own idle
+time is played too: the sitting rested now (`rest`). `GET` answers what the controller holds, for
+a test to read what the API did there.
 
 Every sitting and run a test plays is invented: FieldnotesApp is public.
 """
@@ -340,17 +340,20 @@ def lose(
     return "", 204
 
 
-@testing_controller_bp.route("/expire", methods=["POST"])
+@testing_controller_bp.route("/rest", methods=["POST"])
 @inject
-def expire(
+def rest(
     service: FieldnotesService = Provide[ServiceContainer.fieldnotes_service],
 ) -> Any:
-    """The sitting closed as the expiry closes it once the idle time has passed, now: ended, or a
-    lost one kept lost; a conflict when it has a turn in flight, is closed already, or there is
-    none."""
+    """The sitting rested as the timer rests it once the idle time has passed, now: a live one's
+    session ended and the environment the API started stopped, the sitting kept live, or a lost
+    one's environment stopped; a conflict when it has a turn in flight, holds nothing to close, or
+    there is none."""
     runtime, _ = _served(service)
-    if not runtime.inbox.expire(timedelta(0)):
-        raise _conflict("the sitting has a turn in flight, is closed, or there is none")
+    if not runtime.inbox.rest(timedelta(0)):
+        raise _conflict(
+            "the sitting has a turn in flight, holds nothing to close, or there is none"
+        )
     return "", 204
 
 

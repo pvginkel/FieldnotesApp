@@ -10,8 +10,8 @@ interface EndDialogProps {
 }
 
 export function EndDialog({ sitting, onCancel, onEnd }: EndDialogProps) {
-  // A lost sitting's session is gone; an ended one's the expiry ended, stopping what the API started.
-  const live = !sitting.lost && !sitting.ended;
+  // A lost sitting's session is gone.
+  const live = !sitting.lost;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCancel();

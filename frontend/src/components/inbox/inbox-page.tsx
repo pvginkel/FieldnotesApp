@@ -85,8 +85,8 @@ export function InboxPage() {
     if (main && working && following.current) main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   }, [working]);
 
-  // A sitting lost or ended: its line, at the end, in view.
-  const closed = Boolean(sitting?.lost || sitting?.ended);
+  // A lost sitting: its line, at the end, in view.
+  const closed = Boolean(sitting?.lost);
   useLayoutEffect(() => {
     if (closed) mainRef.current?.scrollTo({ top: mainRef.current.scrollHeight, behavior: 'smooth' });
   }, [closed]);
@@ -138,7 +138,7 @@ export function InboxPage() {
           <div className="composer restart-bar" data-testid="inbox.restart">
             <div className="column composer-row">
               <span className="restart-note">
-                The session {sitting.lost ? 'is gone' : 'has ended'}, and Send with it. A new sitting clears this one.
+                The session is gone, and Send with it. A new sitting clears this one.
               </span>
               <button
                 type="button"

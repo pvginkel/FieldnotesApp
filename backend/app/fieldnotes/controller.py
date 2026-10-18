@@ -1,6 +1,7 @@
 """The KubeCoder controller's client: the actioner's prompt runs (FR-27), and the calls the inbox
 sitting's relay makes (FR-29 to FR-32): the project's environments, an environment's start and
-stop, its sessions, and a headless session's create, status, turns, response stream and end.
+stop, its sessions, and a headless session's create, a resumed one's included, status, turns,
+response stream and end.
 
 The contract is KubeCoder's `docs/api/controller-api.md` (Environments, Sessions, Headless
 sessions) and `docs/api/worker-api.md` (the headless drive surface). Every route takes the API's
@@ -349,16 +350,20 @@ class HttpController:
         cwd: str,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        resume: str | None = None,
     ) -> HeadlessSession:
         """Create a headless session working in `cwd`, `/work`-relative or absolute; `None` for
-        the model or the effort leaves it to the engine. A `cwd` that does not exist fails the
-        first turn, not the create."""
+        the model or the effort leaves it to the engine. With `resume`, a conversation's id, the
+        session goes on with that conversation, which its snapshot names from the create on. A
+        `cwd` that does not exist fails the first turn, not the create."""
         path = f"/environments/{env_id}/sessions/headless"
         body = {"cwd": cwd}
         if model is not None:
             body["model"] = model
         if reasoning_effort is not None:
             body["reasoningEffort"] = reasoning_effort
+        if resume is not None:
+            body["resume"] = resume
         response = self._call("POST", path, (200,), json=body)
         return self._parse(HeadlessSession, "POST", path, _problem(response))
 

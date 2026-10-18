@@ -33,7 +33,7 @@
 | `FIELDNOTES_KUBECODER_INBOX_PROMPT` | `/dev:inbox` | the inbox sitting's first turn, the scope appended |
 | `FIELDNOTES_KUBECODER_INBOX_CWD` | `Fieldnotes/inbox` | its session's working directory |
 | `FIELDNOTES_KUBECODER_INBOX_MODEL`, `_EFFORT` | the engine's | its model and reasoning effort |
-| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes without a turn before a sitting is ended |
+| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes without a turn before a sitting rests: its session ended, the environment the API started stopped |
 | `FIELDNOTES_KUBECODER_INBOX_TRACKER` | the tracker's | the issue address a browser opens, a card id appended |
 | `FIELDNOTES_API_HOST`, `_PORT` | `0.0.0.0`, 8080 | where the API listens |
 | `FIELDNOTES_LOG_LEVEL` | `INFO` | |

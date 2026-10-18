@@ -195,24 +195,29 @@ def test_a_sitting_lost_at_the_controller_is_lost(backend, eventually, what):
     assert sitting(backend)["transcript"][0]["messages"] == ["/dev:inbox"]
 
 
-def test_a_sitting_is_brought_to_its_idle_end_now(backend, eventually):
-    """The suite has no clock to move: the expiry closes the sitting now, and keeps it ended."""
+def test_a_sitting_is_rested_now_and_a_send_resumes_it(backend, eventually):
+    """The suite has no clock to move: the idle time rests the sitting now, its session ended and
+    the environment the API started stopped, and keeps it live; a send resumes it (FN-52)."""
     lay_out(backend, environments=[{"env_id": ENV, "status": "stopped"}])
     begin(backend)
     eventually(lambda: sitting(backend)["turn"] is None, "the prompt's result")
 
-    assert play(backend, "expire").status_code == 204
+    assert play(backend, "rest").status_code == 204
 
-    ended = sitting(backend)
-    assert ended["ended"]["idle_minutes"] == 30
-    assert ended["lost"] is None
-    assert ended["transcript"][0]["messages"] == ["/dev:inbox"]
+    rested = sitting(backend)
+    assert rested["lost"] is None
+    assert rested["transcript"][0]["messages"] == ["/dev:inbox"]
     assert controller(backend)["environments"] == [
         {"env_id": ENV, "status": "stopped", "sessions": []}
     ]
-    again = play(backend, "expire")
+    again = play(backend, "rest")
     assert again.status_code == 409
     assert again.json()["type"] == "conflict"
+
+    assert send(backend, "go").status_code == 202
+    eventually(lambda: sitting(backend)["turn"] is None, "the resumed turn's result")
+    assert sitting(backend)["transcript"][-2]["messages"] == ["go"]
+    assert controller(backend)["environments"][0]["status"] == "running"
 
 
 def test_a_lost_sitting_is_closed_and_kept_lost(backend, eventually):
@@ -228,28 +233,27 @@ def test_a_lost_sitting_is_closed_and_kept_lost(backend, eventually):
     assert play(backend, "lose", what="session").status_code == 204
     eventually(lambda: sitting(backend)["lost"] is not None, "the loss")
 
-    assert play(backend, "expire").status_code == 204
+    assert play(backend, "rest").status_code == 204
 
     assert sitting(backend)["lost"] is not None
-    assert sitting(backend)["ended"] is None
     assert controller(backend)["environments"][0]["status"] == "stopped"
 
 
-def test_a_sitting_with_a_turn_in_flight_or_none_is_not_expired(backend, eventually):
+def test_a_sitting_with_a_turn_in_flight_or_none_is_not_rested(backend, eventually):
     lay_out(
         backend,
         environments=[{"env_id": ENV}],
         turns=[{"lines": LINES[:1], "held": True}],
     )
-    nothing = play(backend, "expire")
+    nothing = play(backend, "rest")
     begin(backend)
     eventually(
         lambda: sitting(backend)["turn"]["lines"][-1:] == LINES[:1], "the first line"
     )
-    in_flight = play(backend, "expire")
+    in_flight = play(backend, "rest")
 
     assert (nothing.status_code, in_flight.status_code) == (409, 409)
-    assert sitting(backend)["ended"] is None
+    assert sitting(backend)["turn"] is not None
 
 
 def sessions(api, env_id=ENV):

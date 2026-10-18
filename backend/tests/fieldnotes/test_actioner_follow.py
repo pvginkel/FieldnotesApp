@@ -23,7 +23,7 @@ from app.fieldnotes.actioner import (
     Held,
     Hold,
 )
-from app.fieldnotes.inbox import Follower, InboxEnd, InboxLoss, Sitting, SittingFile
+from app.fieldnotes.inbox import Follower, InboxLoss, Sitting, SittingFile
 from app.fieldnotes.runtime import ACTIONER_HOLD, INBOX_SITTING
 from app.fieldnotes.testing import FakeMessage, FakeTurn
 from app.services.base_task import BaseTask, ProgressHandle
@@ -141,9 +141,11 @@ def test_the_run_s_session_is_found_past_those_working_before_it_and_the_inbox_s
 @pytest.mark.parametrize(
     "kept",
     [
+        {"status": "idle", "session": None},
+        # A sitting file of the layout before 2026-10-18, the idle expiry's ended sitting.
         {
             "status": "ended",
-            "ended": InboxEnd(at="2026-09-19T09:55:00Z", idle_minutes=30),
+            "ended": {"at": "2026-09-19T09:55:00Z", "idle_minutes": 30},
             "closed": True,
         },
         {
@@ -151,25 +153,28 @@ def test_the_run_s_session_is_found_past_those_working_before_it_and_the_inbox_s
             "lost": InboxLoss(at="2026-09-19T09:55:00Z", reason="Session not found"),
         },
     ],
-    ids=["ended", "lost"],
+    ids=["rested", "ended", "lost"],
 )
 def test_a_kept_sitting_s_session_name_does_not_hide_the_run_s(
     start, remote, kubecoder, eventually, environ, kept
 ):
-    """An ended or lost sitting, kept until Start or End, takes no turn: the run's session is
-    found though it carries the name the sitting's file names."""
+    """A sitting the idle time rested holds no session, and a lost one, kept until Start or End,
+    takes no turn: the run's session is found though it carries the name the sitting's session
+    had."""
     seed(remote, item(IDS[0], ruling=ruling()))
     kubecoder.add_environment(ENV)
     SittingFile(Path(environ["FIELDNOTES_CACHE_DIR"]) / INBOX_SITTING).change(
         lambda _: (
             None,
-            Sitting(
-                id="01J0INBOXSITTING0000000000",
-                environment=ENV,
-                session="claude",
-                began="2026-09-19T09:20:00Z",
-                moved="2026-09-19T09:25:00Z",
-                **kept,
+            Sitting.model_validate(
+                {
+                    "id": "01J0INBOXSITTING0000000000",
+                    "environment": ENV,
+                    "session": "claude",
+                    "began": "2026-09-19T09:20:00Z",
+                    "moved": "2026-09-19T09:25:00Z",
+                }
+                | kept
             ),
         )
     )

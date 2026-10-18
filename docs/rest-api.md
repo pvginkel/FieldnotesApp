@@ -351,16 +351,14 @@ the screen's links) and `sitting`, the one sitting the API holds, or null:
   Start's steps and the condensed log lines read, oldest first, `[]` as the turn begins. No
   message of the turn is on it: the messages land whole, as its reply.
 - `lost`: `{at, reason}` once the sitting is lost, else null.
-- `ended`: `{at, idle_minutes}` once the idle expiry has ended the sitting, else null: when the
-  sweep ended it, and the configured idle time in minutes.
 - `transcript`: every entry, `{author, messages, at}`, `author` being `operator` or `session` and
   `messages` never empty. An operator's entry has one message, what the API sends the session: the
   first entry is the prompt, each later one the operator's words for a turn, `at` the time of the
   Start or the turn. A session's entry is its reply to a turn (below), `at` the time of the turn's
   result.
 
-**Start** with a live sitting, neither lost nor ended, answers it, `200`, and starts nothing; a
-lost or ended one it clears first, as End does. Otherwise it writes a new sitting whose first
+**Start** with a live sitting, one not lost, answers it, `200`, and starts nothing; a lost one it
+clears first, as End does. Otherwise it writes a new sitting whose first
 message is `FIELDNOTES_KUBECODER_INBOX_PROMPT` (`/dev:inbox`) with the operator's scope appended
 after a space, answers `202`, and runs a task that lists the project's environments in `normal`
 mode and takes a running one, else starts a stopped one, records that the API started it, and
@@ -373,8 +371,21 @@ lines.
 
 **A turn** appends the operator's message and answers `202`, the turn in flight in the sitting; its
 task sends the message and follows it. While a turn is in flight, a Start's included, a turn is
-refused with `session-busy`, and without a live sitting, none, a lost one or an ended one, with
-`conflict`.
+refused with `session-busy`, and without a live sitting, none or a lost one, with `conflict`.
+
+**A resume.** A turn whose send finds the session gone, the controller answering that it does not
+know it (`404 not-found`) or that its environment is not running (`409 conflict`), resumes it once
+a turn has given the conversation an id: the idle time ended it, the worker reaped or restarted it,
+or the environment stopped. In the sitting's own environment, never another, the task starts the
+environment when it is stopped, recording that the API started it, creates a headless session as
+Start does with the conversation id as its `resume`, and sends the operator's message there; the
+sitting's offset and turn number count from the start again, as the new session's log and turns
+do. Its progress texts are `Starting <env>, which was stopped` where it starts it, then `Resuming
+the conversation`, then the turn's log lines. A turn resumes once: a resumed session gone again at
+its send loses the sitting, and so does an environment the controller no longer lists, or lists in
+`error` or `deleting`. One coming up or going down is waited for, as a failure is tried again.
+After each turn the API reads the conversation id the session names, which the engine may mint
+anew, so a resume goes on with the latest.
 
 **Following** a turn reads the session's response stream from the log offset the sitting last
 read, past log lines and messages alike. Each condensed log line becomes the task's progress text
@@ -387,8 +398,8 @@ message the stream carried for the turn, final or not, in stream order, one of t
 lines, and is not shown again: it follows the messages only where it is not empty and differs from
 that join, so it is the reply of a turn whose stream carried no message and follows the messages
 of a turn that ends in an error no message carried. A turn with neither has one empty message. The
-task completes with `{reply}`, the transcript's new entry, null when the sitting was ended, lost or
-taken over under it.
+task completes with `{reply}`, the transcript's new entry, null when End cleared the sitting, or it
+was lost or taken over under it.
 
 **The page's events.** A task's events carry the session's words, so they reach only the SSE
 connections bound to the editor whose request began the turn, a takeover's task's included (with
@@ -400,11 +411,11 @@ gets the reply by fetching `GET /api/inbox` again.
 hold, written whole through a rename. Its writers, on either pod, take turns on an exclusive
 `flock` of a lock file beside it, and each write a task makes is checked against the sitting it was
 made for, so a task never brings back a sitting End cleared or writes into a newer one. Beyond the
-wire, the file holds its status (`starting`, `busy`, `idle`, `lost` or `ended`), the subject of the
-editor whose request began the last turn, the session's name, the conversation id once known, the
-log offset after the last log line or message read, the number of the session's last turn whose
-reply the transcript holds, whether the expiry has closed it, the messages of the turn in flight
-read so far, and the follow holding that turn: its pod and a heartbeat it refreshes every 15
+wire, the file holds its status (`starting`, `busy`, `idle` or `lost`), the subject of the editor
+whose request began the last turn, the session's name, none once the idle time has rested the
+sitting, the conversation id once known, the log offset after the last log line or message read,
+the number of the session's last turn whose reply the transcript holds, the messages of the turn in
+flight read so far, and the follow holding that turn: its pod and a heartbeat it refreshes every 15
 seconds. A turn no follow holds, or whose heartbeat is a minute old, its pod retired or gone, is
 taken over by whichever pod notices first, on a `GET /api/inbox` or on the sweep each pod runs
 every 15 seconds, as a new task (`turn.task` changes) that goes on from the file: a message the
@@ -422,26 +433,32 @@ announcement leaves at once. A pod shutting down takes no turn over, and quietly
 `GET /api/inbox` answers the sitting as it stands.
 
 **Failures.** A controller answer that it does not know the environment or the session (`404
-not-found`), or that the environment is not running (`409 conflict`), loses the sitting: `lost` is
-set, the turn cleared with no reply, and the transcript kept. A Start also loses it when the
+not-found`), or that the environment is not running (`409 conflict`), loses the sitting where no
+resume takes it on (above): mid-turn, or before the first turn has given the conversation an id.
+`lost` is set, the turn cleared with no reply, and the transcript kept. A Start also loses it when the
 project has no running or stopped environment, or the one it started did not settle. Any other
 failure, a `5xx`, an unreachable controller or a dropped stream, is tried again after 2 seconds,
 the wait doubling up to 60, for as long as the follow holds the turn.
 
 **End** clears the file first, then ends the session and stops the environment, but only one the
-API started and only while no other session is working in it, and neither for a sitting the expiry
-has closed already. A lost sitting's session is gone, and the worker may since have given its name
+API started and only while no other session is working in it, and neither for a sitting the idle
+time has rested and no Send has resumed since. A lost sitting's session is gone, and the worker may since have given its name
 to another session, an actioner run's, so End ends none for it and counts every session working in
 the environment. What the controller no longer knows, or no longer runs, counts as closed; any
 other failure there is logged and left, so End always answers `204`.
 
-**The idle expiry.** The same sweep closes a sitting with no turn in flight once it is due, as End
-closes it, and keeps it. A live sitting is due once its `moved` is `FIELDNOTES_KUBECODER_INBOX_IDLE`
-minutes old (30), and is kept with status `ended`, its `ended` set. A lost one is due once that time
-has passed since `lost.at`, not since its last send, and stays lost; it reads the same on the wire
-before and after. Either is marked closed in the write that keeps it, so it is closed once: no
-later sweep, and neither Start nor End, which clear it, ends its session or stops its environment
-again. Both pods sweep, under the file's lock.
+**The idle time.** The API never ends a sitting for idleness (FN-52). The same sweep rests a
+sitting with no turn in flight once it is due: it ends the session and stops the environment the
+API started, as End closes them, and keeps the sitting live, for the next turn to resume (above).
+A live sitting is due once its `moved` is `FIELDNOTES_KUBECODER_INBOX_IDLE` minutes old (30) and it
+still holds a session or an environment the API started. A lost one is due once that time has
+passed since `lost.at`, not since its last send, while it holds an environment the API started,
+which is stopped, and stays lost. Either reads the same on the wire before and after, but for
+`started_environment`. The write that rests it drops the session and the environment as the API's
+to stop, so it is closed once: no later sweep, and neither Start nor End, ends its session or stops
+its environment again, since another caller may run it since. Both pods sweep, under the file's
+lock. A file written before 2026-10-18 holding a sitting the old expiry ended reads as a live one
+at rest.
 
 The log names each Start with its prompt and each turn by its length, not its text.
 
@@ -506,12 +523,12 @@ untyped, as the template's testing endpoints are:
   flight, and `POST …/run-emit` and
   `POST …/run-finish`, with the same bodies, those of the last run the fake accepted, whose session
   `run-finish` ends; each waits up to 5 seconds for its turn to be in flight. `POST …/lose {what:
-  session|environment}` loses the sitting at the controller, `POST …/expire` closes the sitting as
-  the idle expiry does once its time has passed, now, and `POST …/run-end {outcome, reason}`
+  session|environment}` loses the sitting at the controller, `POST …/rest` rests the sitting as
+  the idle time does once it has passed, now, and `POST …/run-end {outcome, reason}`
   delivers the webhook of the last run the fake accepted; `GET` answers the environments, their
   sessions and the messages sent to each, and the runs accepted. A body that does not validate is
   `422 validation-error`, nothing to play `409 conflict`, such as no turn in flight within the
-  wait, or for `expire` a sitting with a turn in flight, one closed already, or none.
+  wait, or for `rest` a sitting with a turn in flight, one that holds nothing to close, or none.
 
 ## The pinned surface
 
@@ -557,6 +574,6 @@ variable; secrets only ever come from the environment.
 | `FIELDNOTES_KUBECODER_INBOX_PROMPT` | `/dev:inbox` | the inbox sitting's first message, the operator's scope appended; see [The inbox sitting](#the-inbox-sitting) |
 | `FIELDNOTES_KUBECODER_INBOX_CWD` | `Fieldnotes/inbox` | the sitting's session's working directory, `/work`-relative or absolute |
 | `FIELDNOTES_KUBECODER_INBOX_MODEL`, `FIELDNOTES_KUBECODER_INBOX_EFFORT` | the engine's defaults | the sitting's model and reasoning effort |
-| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved, or a lost one stays lost, before the API closes it and keeps it; see [The inbox sitting](#the-inbox-sitting); a positive number |
+| `FIELDNOTES_KUBECODER_INBOX_IDLE` | 30 | minutes a sitting with no turn in flight goes unmoved, or a lost one stays lost, before the API ends its session and stops the environment it started, keeping the sitting; see [The inbox sitting](#the-inbox-sitting); a positive number |
 | `FIELDNOTES_KUBECODER_INBOX_TRACKER` | `https://issues.webathome.org/issue/` | the issue address the inbox screen appends a card id to |
 | `FIELDNOTES_API_HOST`, `FIELDNOTES_API_PORT`, `FIELDNOTES_LOG_LEVEL` | | read but unused since the port: the template's `HOST` and `PORT` and its logging apply |

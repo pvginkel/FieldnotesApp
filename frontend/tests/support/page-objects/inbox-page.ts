@@ -18,7 +18,6 @@ export class InboxPage {
   readonly workingWaiting: Locator;
   readonly workingSpinner: Locator;
   readonly lost: Locator;
-  readonly ended: Locator;
   readonly field: Locator;
   readonly sendButton: Locator;
   readonly restart: Locator;
@@ -47,7 +46,6 @@ export class InboxPage {
     this.workingWaiting = page.getByTestId('inbox.working.waiting');
     this.workingSpinner = page.getByTestId('inbox.working.spinner');
     this.lost = page.getByTestId('inbox.lost');
-    this.ended = page.getByTestId('inbox.ended');
     this.field = page.getByTestId('inbox.composer.text');
     this.sendButton = page.getByTestId('inbox.composer.send');
     this.restart = page.getByTestId('inbox.restart');

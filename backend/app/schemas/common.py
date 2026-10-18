@@ -21,8 +21,14 @@ class ErrorResponseSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    error: str = Field(..., description="Error message", json_schema_extra={"example": "Validation failed"})
-    details: ErrorDetailsSchema | list[ErrorDetailsSchema] = Field(..., description="Additional error details")
+    error: str = Field(
+        ...,
+        description="Error message",
+        json_schema_extra={"example": "Validation failed"},
+    )
+    details: ErrorDetailsSchema | list[ErrorDetailsSchema] = Field(
+        ..., description="Additional error details"
+    )
 
 
 class ApiErrorDetailsSchema(BaseModel):
@@ -46,7 +52,11 @@ class ApiErrorResponseSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    error: str = Field(..., description="Error message", json_schema_extra={"example": "Authorization failed"})
+    error: str = Field(
+        ...,
+        description="Error message",
+        json_schema_extra={"example": "Authorization failed"},
+    )
     details: ApiErrorDetailsSchema = Field(..., description="Error details")
     code: str | None = Field(
         None,
@@ -65,7 +75,11 @@ class SuccessResponseSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    message: str = Field(..., description="Success message", json_schema_extra={"example": "Operation completed successfully"})
+    message: str = Field(
+        ...,
+        description="Success message",
+        json_schema_extra={"example": "Operation completed successfully"},
+    )
     data: Any | None = Field(None, description="Response data")
 
 
@@ -74,7 +88,11 @@ class MessageResponseSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    message: str = Field(..., description="Response message", json_schema_extra={"example": "Record deleted successfully"})
+    message: str = Field(
+        ...,
+        description="Response message",
+        json_schema_extra={"example": "Record deleted successfully"},
+    )
 
 
 class PaginationMetaSchema(BaseModel):
@@ -82,10 +100,18 @@ class PaginationMetaSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    page: int = Field(..., description="Current page number", json_schema_extra={"example": 1})
-    per_page: int = Field(..., description="Items per page", json_schema_extra={"example": 20})
-    total: int = Field(..., description="Total number of items", json_schema_extra={"example": 150})
-    total_pages: int = Field(..., description="Total number of pages", json_schema_extra={"example": 8})
+    page: int = Field(
+        ..., description="Current page number", json_schema_extra={"example": 1}
+    )
+    per_page: int = Field(
+        ..., description="Items per page", json_schema_extra={"example": 20}
+    )
+    total: int = Field(
+        ..., description="Total number of items", json_schema_extra={"example": 150}
+    )
+    total_pages: int = Field(
+        ..., description="Total number of pages", json_schema_extra={"example": 8}
+    )
     sort_by: str | None = Field(None, description="The column the list is sorted by")
     sort_dir: SortDirection | None = Field(None, description="Sort direction")
 

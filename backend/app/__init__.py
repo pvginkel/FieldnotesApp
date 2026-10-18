@@ -11,7 +11,11 @@ from app.app_config import AppSettings
 from app.config import Settings
 
 
-def create_app(settings: "Settings | None" = None, app_settings: "AppSettings | None" = None, skip_background_services: bool = False) -> App:
+def create_app(
+    settings: "Settings | None" = None,
+    app_settings: "AppSettings | None" = None,
+    skip_background_services: bool = False,
+) -> App:
     """Create and configure Flask application.
 
     This factory follows a hook-based pattern where app-specific behavior
@@ -49,7 +53,7 @@ def create_app(settings: "Settings | None" = None, app_settings: "AppSettings | 
     container.app_config.override(app_settings)
 
     # Wire container to all API modules via package scanning
-    container.wire(packages=['app.api'])
+    container.wire(packages=["app.api"])
 
     app.container = container
 
@@ -58,10 +62,12 @@ def create_app(settings: "Settings | None" = None, app_settings: "AppSettings | 
 
     # Initialize correlation ID tracking
     from app.utils import _init_request_id
+
     _init_request_id(app)
 
     # Request count and duration for every route
     from app.utils.http_metrics import register_http_metrics
+
     register_http_metrics(app)
 
     # Enable stderr logging in testing mode so that request logs and exception
@@ -71,17 +77,21 @@ def create_app(settings: "Settings | None" = None, app_settings: "AppSettings | 
 
         root_logger = logging.getLogger()
         if not any(
-            isinstance(h, logging.StreamHandler) and getattr(h, 'stream', None) is sys.stderr
+            isinstance(h, logging.StreamHandler)
+            and getattr(h, "stream", None) is sys.stderr
             for h in root_logger.handlers
         ):
             stderr_handler = logging.StreamHandler(sys.stderr)
-            stderr_handler.setFormatter(ExtraFieldFormatter('%(name)s %(levelname)s: %(message)s'))
+            stderr_handler.setFormatter(
+                ExtraFieldFormatter("%(name)s %(levelname)s: %(message)s")
+            )
             root_logger.addHandler(stderr_handler)
         root_logger.setLevel(resolve_log_level(settings.log_level))
 
     # Set up log capture handler in testing mode
     if settings.is_testing:
         from app.utils.log_capture import LogCaptureHandler
+
         log_handler = LogCaptureHandler.get_instance()
 
         root_logger = logging.getLogger()
@@ -128,27 +138,33 @@ def create_app(settings: "Settings | None" = None, app_settings: "AppSettings | 
 
     # Always register testing blueprints (runtime check handles access control)
     from app.api.testing_logs import testing_logs_bp
+
     app.register_blueprint(testing_logs_bp)
 
     from app.api.testing_sse import testing_sse_bp
+
     app.register_blueprint(testing_sse_bp)
 
     # Register SSE Gateway callback blueprint
     from app.api.sse import sse_bp
+
     app.register_blueprint(sse_bp)
 
     # Register testing auth endpoints (runtime check handles access control)
     from app.api.testing_auth import testing_auth_bp
+
     app.register_blueprint(testing_auth_bp)
 
     # --- Role-based access startup hooks ---
     # Validate @allow_roles decorators against configured roles (fail fast on typos)
     if settings.oidc_enabled:
         from app.utils.auth import validate_allow_roles_at_startup
+
         validate_allow_roles_at_startup(app, container.auth_service())
 
     # Annotate OpenAPI spec with per-endpoint security information
     from app.utils.spectree_config import annotate_openapi_security
+
     annotate_openapi_security(app)
 
     # Start background services only when not in CLI mode

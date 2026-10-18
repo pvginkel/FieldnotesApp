@@ -46,6 +46,8 @@ def register_http_metrics(app: Flask) -> None:
             "status": str(response.status_code),
         }
         HTTP_REQUEST_TOTAL.labels(**labels).inc()
-        HTTP_REQUEST_DURATION_SECONDS.labels(**labels).observe(time.perf_counter() - start)
+        HTTP_REQUEST_DURATION_SECONDS.labels(**labels).observe(
+            time.perf_counter() - start
+        )
 
         return response

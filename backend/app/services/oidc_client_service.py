@@ -97,7 +97,10 @@ class OidcClientService:
                 self._discover_endpoints()
                 logger.info("OidcClientService initialized with OIDC enabled")
             except Exception as e:
-                logger.error("Failed to discover OIDC endpoints during initialization: %s", str(e))
+                logger.error(
+                    "Failed to discover OIDC endpoints during initialization: %s",
+                    str(e),
+                )
                 raise
         else:
             logger.info("OidcClientService initialized with OIDC disabled")
@@ -108,7 +111,9 @@ class OidcClientService:
         Raises:
             ValueError: If discovery fails or required endpoints are missing
         """
-        discovery_url = f"{self.config.oidc_issuer_url}/.well-known/openid-configuration"
+        discovery_url = (
+            f"{self.config.oidc_issuer_url}/.well-known/openid-configuration"
+        )
 
         logger.info("Discovering OIDC endpoints from %s", discovery_url)
 
@@ -195,9 +200,7 @@ class OidcClientService:
         sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
 
         # Base64-URL encode (without padding)
-        challenge = (
-            base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode("ascii")
-        )
+        challenge = base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode("ascii")
 
         return challenge
 
@@ -252,7 +255,9 @@ class OidcClientService:
             "code_challenge_method": "S256",
         }
 
-        authorization_url = f"{self.endpoints.authorization_endpoint}?{urlencode(params)}"
+        authorization_url = (
+            f"{self.endpoints.authorization_endpoint}?{urlencode(params)}"
+        )
 
         logger.info(
             "Generated authorization URL for redirect=%s nonce=%s",
@@ -306,9 +311,7 @@ class OidcClientService:
 
             access_token = token_data.get("access_token")
             if not access_token:
-                raise AuthenticationException(
-                    "Token response missing access_token"
-                )
+                raise AuthenticationException("Token response missing access_token")
 
             # Record successful token exchange
             OIDC_TOKEN_EXCHANGE_TOTAL.labels(status="success").inc()
@@ -334,7 +337,9 @@ class OidcClientService:
             try:
                 if hasattr(e, "response") and e.response is not None:
                     error_data = e.response.json()
-                    error_detail = error_data.get("error_description", error_data.get("error", str(e)))
+                    error_detail = error_data.get(
+                        "error_description", error_data.get("error", str(e))
+                    )
             except Exception:
                 error_detail = str(e)
 
@@ -377,9 +382,7 @@ class OidcClientService:
 
             access_token = token_data.get("access_token")
             if not access_token:
-                raise AuthenticationException(
-                    "Token response missing access_token"
-                )
+                raise AuthenticationException("Token response missing access_token")
 
             # Record successful refresh
             AUTH_TOKEN_REFRESH_TOTAL.labels(status="success").inc()

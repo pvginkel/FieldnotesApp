@@ -106,10 +106,13 @@ def test_app_settings() -> AppSettings:
     """Create test app settings."""
     return _build_test_app_settings()
 
+
 @pytest.fixture
 def app(test_settings: Settings, test_app_settings: AppSettings) -> Generator[Flask]:
     """Create Flask app for testing."""
-    app = create_app(test_settings, app_settings=test_app_settings, skip_background_services=True)
+    app = create_app(
+        test_settings, app_settings=test_app_settings, skip_background_services=True
+    )
 
     try:
         yield app
@@ -220,8 +223,12 @@ def generate_test_jwt(test_settings: Settings) -> Any:
 
         payload = {
             "sub": subject,
-            "iss": "https://wrong.example.com" if invalid_issuer else test_settings.oidc_issuer_url,
-            "aud": "wrong-client-id" if invalid_audience else test_settings.oidc_client_id,
+            "iss": "https://wrong.example.com"
+            if invalid_issuer
+            else test_settings.oidc_issuer_url,
+            "aud": "wrong-client-id"
+            if invalid_audience
+            else test_settings.oidc_client_id,
             "exp": exp,
             "iat": now,
             "realm_access": {"roles": roles},
@@ -233,9 +240,15 @@ def generate_test_jwt(test_settings: Settings) -> Any:
             payload["name"] = name
 
         # Use wrong key if invalid_signature requested
-        signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048) if invalid_signature else private_key
+        signing_key = (
+            rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            if invalid_signature
+            else private_key
+        )
 
-        token = jwt.encode(payload, signing_key, algorithm="RS256", headers={"kid": "test-key-id"})
+        token = jwt.encode(
+            payload, signing_key, algorithm="RS256", headers={"kid": "test-key-id"}
+        )
         return token
 
     # Attach keys for test verification
@@ -257,10 +270,12 @@ def oidc_app(
     Keeps httpx.get and PyJWKClient mocks active so that AuthService can
     discover endpoints and validate tokens throughout the test.
     """
-    settings = test_settings.model_copy(update={
-        "oidc_enabled": True,
-        "oidc_client_secret": "test-secret",
-    })
+    settings = test_settings.model_copy(
+        update={
+            "oidc_enabled": True,
+            "oidc_client_secret": "test-secret",
+        }
+    )
 
     with patch("httpx.get") as mock_get:
         mock_response = MagicMock()
@@ -275,7 +290,9 @@ def oidc_app(
             mock_jwk_client.get_signing_key_from_jwt.return_value = mock_signing_key
             mock_jwk_client_class.return_value = mock_jwk_client
 
-            app = create_app(settings, app_settings=test_app_settings, skip_background_services=True)
+            app = create_app(
+                settings, app_settings=test_app_settings, skip_background_services=True
+            )
 
             try:
                 yield app

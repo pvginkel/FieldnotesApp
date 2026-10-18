@@ -62,21 +62,39 @@ class LogCaptureHandler(logging.Handler):
         # Extract extra fields from log record
         extra = {}
         skip_attrs = {
-            'name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename',
-            'module', 'exc_info', 'exc_text', 'stack_info', 'lineno', 'funcName',
-            'created', 'msecs', 'relativeCreated', 'thread', 'threadName',
-            'processName', 'process', 'getMessage', 'message'
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "getMessage",
+            "message",
         }
 
         for key, value in record.__dict__.items():
-            if key not in skip_attrs and not key.startswith('_'):
+            if key not in skip_attrs and not key.startswith("_"):
                 extra[key] = value
 
         log_data: dict[str, Any] = {
             "timestamp": timestamp,
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage()
+            "message": record.getMessage(),
         }
 
         if correlation_id:
@@ -95,9 +113,9 @@ class LogCaptureHandler(logging.Handler):
             for client in list(self._clients):
                 try:
                     # Send event to client (this depends on SSE implementation)
-                    if hasattr(client, 'send_event'):
+                    if hasattr(client, "send_event"):
                         client.send_event(event_type, data)
-                    elif hasattr(client, 'put'):
+                    elif hasattr(client, "put"):
                         # Queue-based client
                         client.put((event_type, data))
                 except Exception:

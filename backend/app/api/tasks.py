@@ -18,14 +18,17 @@ import logging
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
-from flask import Blueprint, jsonify
+from flask import Blueprint
+from spectree import Response as SpectreeResponse
 
 from app.config import Settings
 from app.exceptions import RecordNotFoundException
-from app.schemas.task_schema import TaskInfo
+from app.schemas.common import ApiErrorResponseSchema
+from app.schemas.task_schema import TaskActionResponse, TaskInfo
 from app.services.container import ServiceContainer
 from app.services.task_service import TaskService
 from app.utils.auth import LOCAL_USER_SUBJECT, get_auth_context
+from app.utils.spectree_config import api
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,9 @@ def _caller_owns(task_info: TaskInfo, settings: Settings) -> bool:
     return task_info.subject is not None and task_info.subject == auth_context.subject
 
 
-def _find_caller_task(task_service: TaskService, task_id: str, settings: Settings) -> TaskInfo | None:
+def _find_caller_task(
+    task_service: TaskService, task_id: str, settings: Settings
+) -> TaskInfo | None:
     """Return the task, or None when it doesn't exist or the caller doesn't own it."""
     task_info = task_service.get_task_status(task_id)
     if task_info is None:
@@ -54,6 +59,7 @@ def _find_caller_task(task_service: TaskService, task_id: str, settings: Setting
 
 
 @tasks_bp.route("/<task_id>/status", methods=["GET"])
+@api.validate(resp=SpectreeResponse(HTTP_200=TaskInfo, HTTP_404=ApiErrorResponseSchema))
 @inject
 def get_task_status(
     task_id: str,
@@ -65,10 +71,13 @@ def get_task_status(
     if not task_info:
         raise RecordNotFoundException("Task", task_id)
 
-    return jsonify(task_info.model_dump())
+    return task_info
 
 
 @tasks_bp.route("/<task_id>/cancel", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(HTTP_200=TaskActionResponse, HTTP_404=ApiErrorResponseSchema)
+)
 @inject
 def cancel_task(
     task_id: str,
@@ -83,10 +92,13 @@ def cancel_task(
     if not success:
         raise RecordNotFoundException("Cancellable task", task_id)
 
-    return jsonify({"success": True, "message": "Task cancellation requested"})
+    return TaskActionResponse(success=True, message="Task cancellation requested")
 
 
 @tasks_bp.route("/<task_id>", methods=["DELETE"])
+@api.validate(
+    resp=SpectreeResponse(HTTP_200=TaskActionResponse, HTTP_404=ApiErrorResponseSchema)
+)
 @inject
 def remove_task(
     task_id: str,
@@ -101,4 +113,4 @@ def remove_task(
     if not success:
         raise RecordNotFoundException("Finished task", task_id)
 
-    return jsonify({"success": True, "message": "Task removed from registry"})
+    return TaskActionResponse(success=True, message="Task removed from registry")

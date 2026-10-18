@@ -22,7 +22,9 @@ def reject_if_not_testing() -> Any:
         exception = RouteNotAvailableException()
         return build_error_response(
             exception.message,
-            {"message": "Testing endpoints require FLASK_ENV=testing and a STAGE other than prd"},
+            {
+                "message": "Testing endpoints require FLASK_ENV=testing and a STAGE other than prd"
+            },
             code=exception.error_code,
             status_code=400,
         )

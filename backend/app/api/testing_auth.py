@@ -31,6 +31,7 @@ testing_auth_bp = Blueprint("testing_auth", __name__, url_prefix="/api/testing")
 def check_testing_mode() -> Any:
     """Reject requests when the server is not running in testing mode."""
     from app.api.testing_guard import reject_if_not_testing
+
     return reject_if_not_testing()
 
 

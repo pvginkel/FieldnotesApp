@@ -147,9 +147,11 @@ def allow_roles(*roles: str) -> Callable[[Callable[..., Any]], Callable[..., Any
         def admin_endpoint():
             return {"status": "admin only"}
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         func.allowed_roles = set(roles)  # type: ignore[attr-defined]
         return func
+
     return decorator
 
 
@@ -162,7 +164,9 @@ def get_auth_context() -> AuthContext | None:
     return getattr(g, "auth_context", None)
 
 
-def extract_token_from_request(config: Settings, *, include_header: bool = True) -> str | None:
+def extract_token_from_request(
+    config: Settings, *, include_header: bool = True
+) -> str | None:
     """Extract JWT token from request cookie or Authorization header.
 
     Checks cookie first, then Authorization header with Bearer prefix.
@@ -382,7 +386,9 @@ def authenticate_request(
     access_token = extract_token_from_request(config, include_header=throw_on_error)
 
     try:
-        auth_context = resolve_auth_identity(access_token, auth_service, config, testing_service)
+        auth_context = resolve_auth_identity(
+            access_token, auth_service, config, testing_service
+        )
     except AuthenticationException as e:
         if "expired" not in str(e).lower():
             # Not an expiry issue: no refresh, no cookie clearing
@@ -490,16 +496,20 @@ def serialize_auth_state(auth_state: AuthState, secret_key: str) -> str:
     import json
 
     fernet = Fernet(_derive_fernet_key(secret_key))
-    data = json.dumps({
-        "code_verifier": auth_state.code_verifier,
-        "redirect_url": auth_state.redirect_url,
-        "nonce": auth_state.nonce,
-        "origin": auth_state.origin,
-    }).encode()
+    data = json.dumps(
+        {
+            "code_verifier": auth_state.code_verifier,
+            "redirect_url": auth_state.redirect_url,
+            "nonce": auth_state.nonce,
+            "origin": auth_state.origin,
+        }
+    ).encode()
     return fernet.encrypt(data).decode("ascii")
 
 
-def deserialize_auth_state(encrypted_data: str, secret_key: str, max_age: int = 600) -> AuthState:
+def deserialize_auth_state(
+    encrypted_data: str, secret_key: str, max_age: int = 600
+) -> AuthState:
     """Decrypt and deserialize AuthState from the OAuth state parameter.
 
     Args:
@@ -607,6 +617,4 @@ def validate_redirect_url(redirect_url: str) -> None:
         or "\\" in redirect_url
         or any(ord(char) < 0x20 or ord(char) == 0x7F for char in redirect_url)
     ):
-        raise ValidationException(
-            "Invalid redirect URL - must be a path on this site"
-        )
+        raise ValidationException("Invalid redirect URL - must be a path on this site")

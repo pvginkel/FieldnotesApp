@@ -73,4 +73,3 @@ class BaseTask(ABC):
     def is_cancelled(self) -> bool:
         """Check if the task has been cancelled."""
         return self._cancelled.is_set()
-

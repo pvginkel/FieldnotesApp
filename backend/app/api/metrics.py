@@ -18,6 +18,5 @@ def get_metrics() -> Any:
     metrics_text = generate_latest().decode("utf-8")
 
     return Response(
-        metrics_text,
-        content_type='text/plain; version=0.0.4; charset=utf-8'
+        metrics_text, content_type="text/plain; version=0.0.4; charset=utf-8"
     )

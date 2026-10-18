@@ -142,121 +142,105 @@ class Environment(BaseSettings):
     FLASK_ENV: str = Field(default="development")
     STAGE: StageName | None = Field(
         default=None,
-        description="Deployment tier, apart from FLASK_ENV (unset: see default_stage())"
+        description="Deployment tier, apart from FLASK_ENV (unset: see default_stage())",
     )
     HOMELAB_INTERNAL: bool = Field(
         default=False,
-        description="An internal app: show internal detail, such as exception text, even on prd"
+        description="An internal app: show internal detail, such as exception text, even on prd",
     )
     DEBUG: bool = Field(default=True)
     CORS_ORIGINS: list[str] = Field(
         default=["http://localhost:3400"], description="Allowed CORS origins"
     )
     TASK_MAX_WORKERS: int = Field(
-        default=4,
-        description="Maximum number of concurrent background tasks"
+        default=4, description="Maximum number of concurrent background tasks"
     )
     TASK_TIMEOUT_SECONDS: int = Field(
-        default=300,
-        description="Task execution timeout in seconds (5 minutes)"
+        default=300, description="Task execution timeout in seconds (5 minutes)"
     )
     TASK_CLEANUP_INTERVAL_SECONDS: int = Field(
         default=600,
-        description="How often to clean up completed tasks in seconds (10 minutes)"
+        description="How often to clean up completed tasks in seconds (10 minutes)",
     )
     METRICS_UPDATE_INTERVAL: int = Field(
-        default=60,
-        description="Metrics background update interval in seconds"
+        default=60, description="Metrics background update interval in seconds"
     )
     GRACEFUL_SHUTDOWN_TIMEOUT: int = Field(
         default=600,
-        description="Maximum seconds to wait for tasks during shutdown (10 minutes)"
+        description="Maximum seconds to wait for tasks during shutdown (10 minutes)",
     )
     DRAIN_AUTH_KEY: str = Field(
-        default="",
-        description="Bearer token for authenticating drain endpoint access"
+        default="", description="Bearer token for authenticating drain endpoint access"
     )
     LOG_LEVEL: str = Field(
         default="INFO",
-        description="Root logger level (DEBUG, INFO, WARNING, ERROR, CRITICAL); anything else means INFO"
+        description="Root logger level (DEBUG, INFO, WARNING, ERROR, CRITICAL); anything else means INFO",
     )
     MAX_UPLOAD_SIZE_MB: int = Field(
         default=50,
-        description="Largest request body accepted, in MB; a larger one gets 413"
+        description="Largest request body accepted, in MB; a larger one gets 413",
     )
 
     # ── use_oidc ───────────────────────────────────────────────────────
 
     BASEURL: str = Field(
         default="http://localhost:3400",
-        description="Base URL for the application (infers OIDC_COOKIE_SECURE; the OIDC redirect URIs come from the request origin)"
+        description="Base URL for the application (infers OIDC_COOKIE_SECURE; the OIDC redirect URIs come from the request origin)",
     )
-    OIDC_ENABLED: bool = Field(
-        default=False,
-        description="Enable OIDC authentication"
-    )
+    OIDC_ENABLED: bool = Field(default=False, description="Enable OIDC authentication")
     OIDC_ISSUER_URL: str | None = Field(
         default=None,
-        description="OIDC issuer URL (e.g., https://auth.example.com/realms/myapp)"
+        description="OIDC issuer URL (e.g., https://auth.example.com/realms/myapp)",
     )
-    OIDC_CLIENT_ID: str | None = Field(
-        default=None,
-        description="OIDC client ID"
-    )
+    OIDC_CLIENT_ID: str | None = Field(default=None, description="OIDC client ID")
     OIDC_CLIENT_SECRET: str | None = Field(
-        default=None,
-        description="OIDC client secret (confidential client)"
+        default=None, description="OIDC client secret (confidential client)"
     )
     OIDC_SCOPES: str = Field(
-        default="openid profile email",
-        description="Space-separated OIDC scopes"
+        default="openid profile email", description="Space-separated OIDC scopes"
     )
     OIDC_AUDIENCE: str | None = Field(
         default=None,
-        description="Expected 'aud' claim in JWT (defaults to client_id if not set)"
+        description="Expected 'aud' claim in JWT (defaults to client_id if not set)",
     )
     OIDC_CLOCK_SKEW_SECONDS: int = Field(
-        default=30,
-        description="Clock skew tolerance for token validation"
+        default=30, description="Clock skew tolerance for token validation"
     )
     OIDC_COOKIE_NAME: str = Field(
-        default="access_token",
-        description="Cookie name for storing JWT access token"
+        default="access_token", description="Cookie name for storing JWT access token"
     )
     OIDC_COOKIE_SECURE: bool | None = Field(
         default=None,
-        description="Secure flag for cookie (inferred from BASEURL if None)"
+        description="Secure flag for cookie (inferred from BASEURL if None)",
     )
     OIDC_COOKIE_SAMESITE: str = Field(
-        default="Lax",
-        description="SameSite attribute for cookie"
+        default="Lax", description="SameSite attribute for cookie"
     )
     OIDC_COOKIE_PARTITIONED: bool = Field(
         default=False,
-        description="Partitioned (CHIPS) attribute for cookies, needed for cross-origin iframe embedding"
+        description="Partitioned (CHIPS) attribute for cookies, needed for cross-origin iframe embedding",
     )
     OIDC_REFRESH_COOKIE_NAME: str = Field(
-        default="refresh_token",
-        description="Cookie name for storing refresh token"
+        default="refresh_token", description="Cookie name for storing refresh token"
     )
 
     # ── use_sse ────────────────────────────────────────────────────────
 
     FRONTEND_VERSION_URL: str = Field(
         default="http://localhost:3400/version.json",
-        description="URL to fetch frontend version information"
+        description="URL to fetch frontend version information",
     )
     SSE_HEARTBEAT_INTERVAL: int = Field(
         default=5,
-        description="SSE heartbeat interval in seconds (5 for development, 30 for production)"
+        description="SSE heartbeat interval in seconds (5 for development, 30 for production)",
     )
     SSE_GATEWAY_URL: str = Field(
         default="http://localhost:3402",
-        description="SSE Gateway base URL for internal send endpoint"
+        description="SSE Gateway base URL for internal send endpoint",
     )
     SSE_CALLBACK_SECRET: str = Field(
         default="",
-        description="Shared secret for authenticating SSE Gateway callbacks (required in production)"
+        description="Shared secret for authenticating SSE Gateway callbacks (required in production)",
     )
 
 
@@ -279,7 +263,9 @@ class Settings(BaseModel):
     secret_key: Annotated[str, Sensitive] = _DEFAULT_SECRET_KEY
     flask_env: str = "development"
     # Resolved: from flask_env when not given (default_stage)
-    stage: Stage = Field(default_factory=lambda data: Stage(default_stage(data["flask_env"])))
+    stage: Stage = Field(
+        default_factory=lambda data: Stage(default_stage(data["flask_env"]))
+    )
     homelab_internal: bool = False
     debug: bool = True
     cors_origins: list[str] = Field(default=["http://localhost:3400"])
@@ -300,7 +286,9 @@ class Settings(BaseModel):
     oidc_client_id: str | None = None
     oidc_client_secret: Annotated[str | None, Sensitive] = None
     oidc_scopes: str = "openid profile email"
-    oidc_audience: str | None = None  # Resolved: falls back to oidc_client_id via load()
+    oidc_audience: str | None = (
+        None  # Resolved: falls back to oidc_client_id via load()
+    )
     oidc_clock_skew_seconds: int = 30
     oidc_cookie_name: str = "access_token"
     oidc_cookie_secure: bool = False  # Resolved: inferred from baseurl via load()
@@ -371,17 +359,11 @@ class Settings(BaseModel):
         # OIDC settings required when OIDC is enabled (any environment)
         if self.oidc_enabled:
             if not self.oidc_issuer_url:
-                errors.append(
-                    "OIDC_ISSUER_URL is required when OIDC_ENABLED=True"
-                )
+                errors.append("OIDC_ISSUER_URL is required when OIDC_ENABLED=True")
             if not self.oidc_client_id:
-                errors.append(
-                    "OIDC_CLIENT_ID is required when OIDC_ENABLED=True"
-                )
+                errors.append("OIDC_CLIENT_ID is required when OIDC_ENABLED=True")
             if not self.oidc_client_secret:
-                errors.append(
-                    "OIDC_CLIENT_SECRET is required when OIDC_ENABLED=True"
-                )
+                errors.append("OIDC_CLIENT_SECRET is required when OIDC_ENABLED=True")
 
         if errors:
             raise ConfigurationError(

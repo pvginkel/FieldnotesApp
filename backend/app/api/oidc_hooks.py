@@ -40,7 +40,10 @@ def authenticate_api_request(
     is_public = bool(view_func and getattr(view_func, "is_public", False))
 
     logger.debug(
-        "Authenticating request to %s %s (public=%s)", request.method, request.path, is_public
+        "Authenticating request to %s %s (public=%s)",
+        request.method,
+        request.path,
+        is_public,
     )
     try:
         authenticate_request(
@@ -73,7 +76,9 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
     @inject
     def before_request_authentication(
         auth_service: AuthService = Provide[ServiceContainer.auth_service],
-        oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
+        oidc_client_service: OidcClientService = Provide[
+            ServiceContainer.oidc_client_service
+        ],
         testing_service: TestingService = Provide[ServiceContainer.testing_service],
         config: Settings = Provide[ServiceContainer.config],
     ) -> None | tuple[dict[str, str], int]:
@@ -86,7 +91,9 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
         Returns:
             None if the request may proceed, else the error response tuple
         """
-        return authenticate_api_request(auth_service, oidc_client_service, testing_service, config)
+        return authenticate_api_request(
+            auth_service, oidc_client_service, testing_service, config
+        )
 
     @api_bp.after_request
     @inject
@@ -121,7 +128,9 @@ def register_oidc_hooks(api_bp: Blueprint) -> None:
             if pending.refresh_token:
                 refresh_max_age = get_token_expiry_seconds(pending.refresh_token)
                 if refresh_max_age is None:
-                    logger.error("Refreshed token missing 'exp' claim — clearing auth cookies")
+                    logger.error(
+                        "Refreshed token missing 'exp' claim — clearing auth cookies"
+                    )
                     _clear_auth_cookies(response, config)
                     return response
 

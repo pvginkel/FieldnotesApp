@@ -97,7 +97,9 @@ def get_current_user(
 @no_role_check
 @inject
 def login(
-    oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
+    oidc_client_service: OidcClientService = Provide[
+        ServiceContainer.oidc_client_service
+    ],
     config: Settings = Provide[ServiceContainer.config],
 ) -> Any:
     """Initiate OIDC login flow with PKCE.
@@ -151,7 +153,9 @@ def login(
 @no_role_check
 @inject
 def callback(
-    oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
+    oidc_client_service: OidcClientService = Provide[
+        ServiceContainer.oidc_client_service
+    ],
     auth_service: AuthService = Provide[ServiceContainer.auth_service],
     config: Settings = Provide[ServiceContainer.config],
 ) -> Any:
@@ -253,7 +257,9 @@ def callback(
 @no_role_check
 @inject
 def logout(
-    oidc_client_service: OidcClientService = Provide[ServiceContainer.oidc_client_service],
+    oidc_client_service: OidcClientService = Provide[
+        ServiceContainer.oidc_client_service
+    ],
     config: Settings = Provide[ServiceContainer.config],
 ) -> Any:
     """Log out current user.
@@ -303,7 +309,9 @@ def logout(
                 if id_token:
                     logout_params["id_token_hint"] = id_token
 
-                final_redirect_url = f"{end_session_endpoint}?{urlencode(logout_params)}"
+                final_redirect_url = (
+                    f"{end_session_endpoint}?{urlencode(logout_params)}"
+                )
                 logger.info(
                     "User logged out: redirecting to OIDC end_session_endpoint (id_token_hint=%s)",
                     "present" if id_token else "absent",

@@ -38,7 +38,9 @@ def parse_enum_list_query_param[EnumType: Enum](
     for raw_value in raw_values:
         if not raw_value:
             continue
-        tokens.extend(segment.strip() for segment in raw_value.split(",") if segment.strip())
+        tokens.extend(
+            segment.strip() for segment in raw_value.split(",") if segment.strip()
+        )
 
     if not tokens:
         return []
@@ -59,9 +61,7 @@ def parse_enum_list_query_param[EnumType: Enum](
             seen.add(enum_member)
 
     if invalid_values:
-        valid_values = ", ".join(
-            getattr(item, "value", str(item)) for item in enum_cls
-        )
+        valid_values = ", ".join(getattr(item, "value", str(item)) for item in enum_cls)
         raise ValueError(
             f"invalid value(s): {', '.join(invalid_values)}; valid values are: {valid_values}"
         )

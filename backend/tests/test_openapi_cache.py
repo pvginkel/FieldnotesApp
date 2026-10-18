@@ -7,6 +7,14 @@ API, and nothing else fails. This test does.
 
 It runs where the backend sits beside a frontend, as in the app's monorepo
 (the suite runner's backend suite and CI's included), and skips elsewhere.
+
+The document comes from an app built in a process of its own, from the
+environment and ``.env`` alone: the suite's fixtures (``test_settings``,
+``test_app_settings``) don't reach it. So a setting the app cannot start
+without, which the suite gives only through those fixtures, is missing there.
+A dev environment's ``.env`` hides that, and CI has none. Give such a setting
+a default at the top of ``tests/conftest.py``, which the process inherits:
+``os.environ.setdefault("MY_SETTING", "value")``.
 """
 
 import json
@@ -69,7 +77,10 @@ def test_frontend_openapi_cache_matches_the_backend(tmp_path: Path) -> None:
         timeout=120,
     )
     assert result.returncode == 0, (
-        f"Building the app for its OpenAPI document failed:\n{result.stderr[-4000:]}"
+        "Building the app for its OpenAPI document failed. It is built from the "
+        "environment alone, not from the suite's fixtures: a setting it needs "
+        "gets a default in tests/conftest.py (see this module's docstring).\n"
+        f"{result.stderr[-4000:]}"
     )
 
     current = json.loads(document_file.read_text(encoding="utf-8"))

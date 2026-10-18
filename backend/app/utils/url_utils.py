@@ -15,7 +15,7 @@ def get_filename_from_url(url: str, default_title: str) -> str:
     try:
         parsed_url = urlparse(url)
         filename = os.path.basename(parsed_url.path)
-        if filename and filename != '/':
+        if filename and filename != "/":
             return filename
     except Exception:
         pass  # Ignore URL parsing errors, will use fallback

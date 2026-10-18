@@ -51,9 +51,7 @@ class MetricsService:
     # Public API
     # ------------------------------------------------------------------
 
-    def register_for_polling(
-        self, name: str, callback: Callable[[], None]
-    ) -> None:
+    def register_for_polling(self, name: str, callback: Callable[[], None]) -> None:
         """Register a callback to be invoked on each background tick.
 
         Args:
@@ -111,9 +109,7 @@ class MetricsService:
                 try:
                     callback()
                 except Exception as e:
-                    logger.error(
-                        "Error in polling callback '%s': %s", name, e
-                    )
+                    logger.error("Error in polling callback '%s': %s", name, e)
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
         """Respond to lifecycle coordinator events."""

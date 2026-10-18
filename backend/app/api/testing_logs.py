@@ -28,13 +28,16 @@ _SHUTDOWN_SENTINEL = object()
 def check_testing_mode() -> Any:
     """Reject requests when the server is not running in testing mode."""
     from app.api.testing_guard import reject_if_not_testing
+
     return reject_if_not_testing()
 
 
 @testing_logs_bp.route("/stream", methods=["GET"])
 @inject
 def stream_logs(
-    lifecycle_coordinator: LifecycleCoordinatorProtocol = Provide[ServiceContainer.lifecycle_coordinator],
+    lifecycle_coordinator: LifecycleCoordinatorProtocol = Provide[
+        ServiceContainer.lifecycle_coordinator
+    ],
 ) -> Any:
     """SSE endpoint for streaming backend application logs in real-time.
 
@@ -76,7 +79,9 @@ def stream_logs(
         lifecycle_coordinator.register_lifecycle_notification(on_lifecycle_event)
 
         try:
-            yield format_sse_event("connection_open", {"status": "connected"}, correlation_id)
+            yield format_sse_event(
+                "connection_open", {"status": "connected"}, correlation_id
+            )
 
             last_heartbeat = time.perf_counter()
             heartbeat_interval = 30.0
@@ -100,11 +105,16 @@ def stream_logs(
                 except Empty:
                     current_time = time.perf_counter()
                     if current_time - last_heartbeat >= heartbeat_interval:
-                        yield format_sse_event("heartbeat", {"timestamp": time.time()}, correlation_id)
+                        yield format_sse_event(
+                            "heartbeat", {"timestamp": time.time()}, correlation_id
+                        )
                         last_heartbeat = current_time
 
         except GeneratorExit:
-            logger.info("Log stream client disconnected", extra={"correlation_id": correlation_id})
+            logger.info(
+                "Log stream client disconnected",
+                extra={"correlation_id": correlation_id},
+            )
         finally:
             # Tear down both registrations defensively so neither failure
             # blocks the other.
@@ -113,7 +123,9 @@ def stream_logs(
             except Exception:
                 logger.exception("Failed to unregister log stream client")
             try:
-                lifecycle_coordinator.unregister_lifecycle_notification(on_lifecycle_event)
+                lifecycle_coordinator.unregister_lifecycle_notification(
+                    on_lifecycle_event
+                )
             except Exception:
                 logger.exception("Failed to unregister lifecycle notification")
 

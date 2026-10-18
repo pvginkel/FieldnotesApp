@@ -18,6 +18,9 @@ from flask import Blueprint, jsonify, request
 from pydantic import BaseModel
 from spectree import Response as SpectreeResponse
 
+from app.core_exceptions import ExternalServiceException
+from app.exceptions import RecordNotFoundException
+from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.task_schema import TaskEvent, TaskEventType
 from app.schemas.testing_sse import (
     DeploymentTriggerRequestSchema,
@@ -27,7 +30,6 @@ from app.schemas.testing_sse import (
     TaskEventResponseSchema,
     TaskStartRequestSchema,
     TaskStartResponseSchema,
-    TestErrorResponseSchema,
 )
 from app.services.base_task import BaseTask, ProgressHandle
 from app.services.container import ServiceContainer
@@ -86,6 +88,12 @@ class _FailingTask(BaseTask):
         raise RuntimeError(error_message)
 
 
+# The schema's Literal holds the keys, so every task_type has its task
+_TASK_TYPES: dict[str, type[BaseTask]] = {
+    "demo_task": _DemoTask,
+    "failing_task": _FailingTask,
+}
+
 _EVENT_TYPE_MAP = {
     "task_started": TaskEventType.TASK_STARTED,
     "progress_update": TaskEventType.PROGRESS_UPDATE,
@@ -100,21 +108,16 @@ _EVENT_TYPE_MAP = {
 
 
 @testing_sse_bp.route("/tasks/start", methods=["POST"])
-@api.validate(json=TaskStartRequestSchema, resp=SpectreeResponse(HTTP_200=TaskStartResponseSchema))
+@api.validate(
+    json=TaskStartRequestSchema, resp=SpectreeResponse(HTTP_200=TaskStartResponseSchema)
+)
 @inject
 def start_test_task(
     task_service: TaskService = Provide[ServiceContainer.task_service],
 ) -> tuple[Any, int]:
     """Start a demo or failing task for integration testing."""
     payload = TaskStartRequestSchema.model_validate(request.get_json() or {})
-
-    task: BaseTask
-    if payload.task_type == "demo_task":
-        task = _DemoTask()
-    elif payload.task_type == "failing_task":
-        task = _FailingTask()
-    else:
-        return jsonify({"error": f"Unknown task_type: {payload.task_type}"}), 400
+    task = _TASK_TYPES[payload.task_type]()
 
     # This blueprint sits outside api_bp, so no auth hook runs here and the
     # task gets no subject. Its events go to the local admin's connections with
@@ -157,7 +160,11 @@ def trigger_version_event(
 @testing_sse_bp.route("/sse/task-event", methods=["POST"])
 @api.validate(
     json=TaskEventRequestSchema,
-    resp=SpectreeResponse(HTTP_200=TaskEventResponseSchema, HTTP_400=TestErrorResponseSchema),
+    resp=SpectreeResponse(
+        HTTP_200=TaskEventResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
 )
 @inject
 def send_task_event(
@@ -170,14 +177,15 @@ def send_task_event(
     Allows integration tests to simulate task events without running actual
     background tasks. The event is sent directly to the SSE connection
     identified by request_id.
+
+    Raises:
+        RecordNotFoundException: 404, no SSE connection has that request_id
+        ExternalServiceException: 502, the SSE Gateway did not take the event
     """
     payload = TaskEventRequestSchema.model_validate(request.get_json() or {})
 
     if not sse_connection_manager.has_connection(payload.request_id):
-        return jsonify({
-            "error": f"No SSE connection registered for request_id: {payload.request_id}",
-            "status": "not_found",
-        }), 400
+        raise RecordNotFoundException("SSE connection", payload.request_id)
 
     event = TaskEvent(
         event_type=_EVENT_TYPE_MAP[payload.event_type],
@@ -193,10 +201,10 @@ def send_task_event(
     )
 
     if not success:
-        return jsonify({
-            "error": f"Failed to send event to connection: {payload.request_id}",
-            "status": "send_failed",
-        }), 400
+        raise ExternalServiceException(
+            f"send the task event to SSE connection {payload.request_id}",
+            "the SSE Gateway did not deliver it",
+        )
 
     response = TaskEventResponseSchema(
         request_id=payload.request_id,
@@ -208,7 +216,9 @@ def send_task_event(
 
 
 @testing_sse_bp.route("/sse/force-callback-error", methods=["POST"])
-@api.validate(query=ForceSSECallbackErrorQuerySchema)
+@api.validate(
+    query=ForceSSECallbackErrorQuerySchema, resp=SpectreeResponse(HTTP_204=None)
+)
 @inject
 def force_sse_callback_error(
     testing_service: TestingService = Provide[ServiceContainer.testing_service],

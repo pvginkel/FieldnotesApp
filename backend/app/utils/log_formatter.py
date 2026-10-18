@@ -3,31 +3,33 @@
 import logging
 
 # LogRecord attributes that are not extra fields.
-_STANDARD_ATTRS = frozenset({
-    "name",
-    "msg",
-    "args",
-    "created",
-    "relativeCreated",
-    "filename",
-    "module",
-    "funcName",
-    "levelno",
-    "levelname",
-    "lineno",
-    "pathname",
-    "exc_info",
-    "exc_text",
-    "stack_info",
-    "thread",
-    "threadName",
-    "process",
-    "processName",
-    "taskName",
-    "message",
-    "asctime",
-    "msecs",
-})
+_STANDARD_ATTRS = frozenset(
+    {
+        "name",
+        "msg",
+        "args",
+        "created",
+        "relativeCreated",
+        "filename",
+        "module",
+        "funcName",
+        "levelno",
+        "levelname",
+        "lineno",
+        "pathname",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "thread",
+        "threadName",
+        "process",
+        "processName",
+        "taskName",
+        "message",
+        "asctime",
+        "msecs",
+    }
+)
 
 
 class ExtraFieldFormatter(logging.Formatter):

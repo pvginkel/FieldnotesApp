@@ -9,12 +9,11 @@ class HealthResponse(BaseModel):
     """Liveness and drain response."""
 
     status: str = Field(
-        description="Health status message",
-        examples=["alive", "unauthorized"]
+        description="Health status message", examples=["alive", "unauthorized"]
     )
     ready: bool = Field(
         description="Whether the service is ready to handle requests",
-        examples=[True, False]
+        examples=[True, False],
     )
 
 
@@ -30,7 +29,7 @@ class ReadinessCheckSchema(BaseModel):
     detail: str | None = Field(
         default=None,
         description="Why the check failed, or a note on its result",
-        examples=["connection failed", "2 migrations pending", "timed out after 0.8 s"]
+        examples=["connection failed", "2 migrations pending", "timed out after 0.8 s"],
     )
 
 
@@ -47,8 +46,7 @@ class ReadyzResponse(BaseModel):
         description="Whether the service takes traffic; false exactly when readyz answers 503"
     )
     stage: str = Field(
-        description="Deployment stage (STAGE)",
-        examples=["prd", "local-dev"]
+        description="Deployment stage (STAGE)", examples=["prd", "local-dev"]
     )
     checks: dict[str, ReadinessCheckSchema] = Field(
         description="Every registered check by name; empty while shutting down"

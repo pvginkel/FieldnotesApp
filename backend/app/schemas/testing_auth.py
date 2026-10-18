@@ -30,4 +30,6 @@ class ForceErrorQuerySchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    status: int = Field(..., description="HTTP status code to return on next /api/auth/self request")
+    status: int = Field(
+        ..., description="HTTP status code to return on next /api/auth/self request"
+    )

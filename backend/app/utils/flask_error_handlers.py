@@ -111,7 +111,6 @@ def register_core_error_handlers(app: Flask) -> None:
             status_code=400,
         )
 
-
     @app.errorhandler(404)
     def handle_not_found(error: Any) -> tuple[Response, int]:
         """Handle 404 Not Found errors (unknown routes)."""
@@ -165,7 +164,9 @@ def register_business_error_handlers(app: Flask) -> None:
     """
 
     @app.errorhandler(AuthenticationException)
-    def handle_authentication_exception(error: AuthenticationException) -> tuple[Response, int]:
+    def handle_authentication_exception(
+        error: AuthenticationException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Authentication failure: %s", error.message)
         return build_error_response(
@@ -176,7 +177,9 @@ def register_business_error_handlers(app: Flask) -> None:
         )
 
     @app.errorhandler(AuthorizationException)
-    def handle_authorization_exception(error: AuthorizationException) -> tuple[Response, int]:
+    def handle_authorization_exception(
+        error: AuthorizationException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Authorization failure: %s", error.message)
         return build_error_response(
@@ -209,7 +212,9 @@ def register_business_error_handlers(app: Flask) -> None:
         )
 
     @app.errorhandler(ResourceConflictException)
-    def handle_resource_conflict(error: ResourceConflictException) -> tuple[Response, int]:
+    def handle_resource_conflict(
+        error: ResourceConflictException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Resource conflict: %s", error.message)
         return build_error_response(
@@ -220,7 +225,9 @@ def register_business_error_handlers(app: Flask) -> None:
         )
 
     @app.errorhandler(InvalidOperationException)
-    def handle_invalid_operation(error: InvalidOperationException) -> tuple[Response, int]:
+    def handle_invalid_operation(
+        error: InvalidOperationException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Invalid operation: %s", error.message)
         return build_error_response(
@@ -231,7 +238,9 @@ def register_business_error_handlers(app: Flask) -> None:
         )
 
     @app.errorhandler(ExternalServiceException)
-    def handle_external_service(error: ExternalServiceException) -> tuple[Response, int]:
+    def handle_external_service(
+        error: ExternalServiceException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("External service error: %s", error.message)
         return build_error_response(
@@ -242,7 +251,9 @@ def register_business_error_handlers(app: Flask) -> None:
         )
 
     @app.errorhandler(RouteNotAvailableException)
-    def handle_route_not_available(error: RouteNotAvailableException) -> tuple[Response, int]:
+    def handle_route_not_available(
+        error: RouteNotAvailableException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Route not available: %s", error.message)
         return build_error_response(
@@ -254,7 +265,9 @@ def register_business_error_handlers(app: Flask) -> None:
 
     # Generic BusinessLogicException catch-all (least specific in hierarchy)
     @app.errorhandler(BusinessLogicException)
-    def handle_business_logic_exception(error: BusinessLogicException) -> tuple[Response, int]:
+    def handle_business_logic_exception(
+        error: BusinessLogicException,
+    ) -> tuple[Response, int]:
         _mark_request_failed()
         logger.warning("Business logic exception: %s", error.message)
         return build_error_response(

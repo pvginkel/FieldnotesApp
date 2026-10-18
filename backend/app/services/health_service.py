@@ -141,13 +141,21 @@ class HealthService:
         """
         stage = str(self.settings.stage)
         if self.lifecycle_coordinator.is_shutting_down():
-            return {"status": "shutting_down", "ready": False, "stage": stage, "checks": {}}, 503
+            return {
+                "status": "shutting_down",
+                "ready": False,
+                "stage": stage,
+                "checks": {},
+            }, 503
 
         app: Flask = current_app._get_current_object()  # type: ignore[attr-defined]
         started = time.monotonic()
         with self._lock:
             checks = list(self._checks.values())
-            outcomes = {check.name: self._cached_or_started(check, app, started) for check in checks}
+            outcomes = {
+                check.name: self._cached_or_started(check, app, started)
+                for check in checks
+            }
 
         results: dict[str, CheckResult] = {}
         for check in checks:
@@ -165,7 +173,9 @@ class HealthService:
                     CheckStatus.ERROR, f"timed out after {check.timeout:g} s"
                 )
 
-        critical_failed = any(check.critical and not results[check.name].passed for check in checks)
+        critical_failed = any(
+            check.critical and not results[check.name].passed for check in checks
+        )
         any_failed = any(not result.passed for result in results.values())
         if critical_failed:
             status = "not_ready"
@@ -178,7 +188,9 @@ class HealthService:
             "status": status,
             "ready": not critical_failed,
             "stage": stage,
-            "checks": {check.name: _describe(check, results[check.name]) for check in checks},
+            "checks": {
+                check.name: _describe(check, results[check.name]) for check in checks
+            },
         }
         return body, 503 if critical_failed else 200
 
@@ -221,7 +233,9 @@ class HealthService:
                 del self._running[check.name]
             # A check replaced while this run was going does not get cached.
             if result.passed and self._checks.get(check.name) is check:
-                self._cache[check.name] = _CachedResult(result, time.monotonic() + CACHE_TTL_SECONDS)
+                self._cache[check.name] = _CachedResult(
+                    result, time.monotonic() + CACHE_TTL_SECONDS
+                )
             previous = self._last_status.get(check.name)
             self._last_status[check.name] = result.status
 
@@ -231,7 +245,10 @@ class HealthService:
                 logger.info("Readiness check %s: %s", check.name, result.status.value)
             else:
                 logger.warning(
-                    "Readiness check %s failed: %s", check.name, result.detail, exc_info=error
+                    "Readiness check %s failed: %s",
+                    check.name,
+                    result.detail,
+                    exc_info=error,
                 )
 
         future.set_result(result)
@@ -267,7 +284,10 @@ class HealthService:
 
 
 def _describe(check: _Check, result: CheckResult) -> dict[str, Any]:
-    described: dict[str, Any] = {"status": result.status.value, "critical": check.critical}
+    described: dict[str, Any] = {
+        "status": result.status.value,
+        "critical": check.critical,
+    }
     if result.detail is not None:
         described["detail"] = result.detail
     return described

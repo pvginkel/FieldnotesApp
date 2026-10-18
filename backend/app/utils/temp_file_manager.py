@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class CachedContent(NamedTuple):
     """Cached download content with metadata."""
+
     content: bytes
     content_type: str
     timestamp: datetime
@@ -54,7 +55,9 @@ class TempFileManager:
         self.cache_path = self.base_path
 
         # Register lifecycle notification
-        self.lifecycle_coordinator.register_lifecycle_notification(self._on_lifecycle_event)
+        self.lifecycle_coordinator.register_lifecycle_notification(
+            self._on_lifecycle_event
+        )
 
     def start_cleanup_thread(self) -> None:
         """Start the background cleanup thread."""
@@ -118,6 +121,7 @@ class TempFileManager:
                     try:
                         # Remove directory and all contents
                         import shutil
+
                         shutil.rmtree(item)
                         cleaned_count += 1
                         logger.debug(f"Cleaned up old temporary directory: {item}")
@@ -152,7 +156,7 @@ class TempFileManager:
         Returns:
             SHA256 hash of the URL for use as filename
         """
-        return hashlib.sha256(url.encode('utf-8')).hexdigest()
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
     def get_cached(self, url: str) -> CachedContent | None:
         """
@@ -174,24 +178,23 @@ class TempFileManager:
 
         try:
             # Load metadata
-            with open(metadata_file, encoding='utf-8') as f:
+            with open(metadata_file, encoding="utf-8") as f:
                 metadata = json.load(f)
 
-            cached_time = datetime.fromisoformat(metadata['timestamp'])
+            cached_time = datetime.fromisoformat(metadata["timestamp"])
 
             # Check if cache is still valid
-            if (datetime.now() - cached_time >
-                timedelta(hours=self.cleanup_age_hours)):
+            if datetime.now() - cached_time > timedelta(hours=self.cleanup_age_hours):
                 return None
 
             # Load content
-            with open(content_file, 'rb') as f:
+            with open(content_file, "rb") as f:
                 content = f.read()
 
             return CachedContent(
                 content=content,
-                content_type=metadata['content_type'],
-                timestamp=cached_time
+                content_type=metadata["content_type"],
+                timestamp=cached_time,
             )
 
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
@@ -216,18 +219,18 @@ class TempFileManager:
             metadata_file = self.cache_path / f"{cache_key}.json"
 
             # Store content
-            with open(content_file, 'wb') as f:
+            with open(content_file, "wb") as f:
                 f.write(content)
 
             # Store metadata
             metadata = {
-                'url': url,
-                'content_type': content_type,
-                'timestamp': datetime.now().isoformat(),
-                'size': len(content)
+                "url": url,
+                "content_type": content_type,
+                "timestamp": datetime.now().isoformat(),
+                "size": len(content),
             }
 
-            with open(metadata_file, 'w', encoding='utf-8') as f:
+            with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
 
             logger.debug(f"Cached content for URL {url} ({len(content)} bytes)")

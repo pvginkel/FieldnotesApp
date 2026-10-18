@@ -83,19 +83,21 @@ class TaskProgressHandle:
         event = TaskEvent(
             event_type=TaskEventType.PROGRESS_UPDATE,
             task_id=self.task_id,
-            data=progress.model_dump()
+            data=progress.model_dump(),
         )
         try:
             # Use mode='json' to serialize datetime to ISO format string
             self.sse_connection_manager.send_event(
                 self.target,
-                event.model_dump(mode='json'),
+                event.model_dump(mode="json"),
                 event_name="task_event",
                 service_type="task",
             )
         except Exception as e:
             # If sending fails, log warning and continue
-            logger.warning(f"Failed to send progress event for task {self.task_id}: {e}")
+            logger.warning(
+                f"Failed to send progress event for task {self.task_id}: {e}"
+            )
 
 
 class TaskService:
@@ -107,7 +109,7 @@ class TaskService:
         sse_connection_manager: SSEConnectionManager,
         max_workers: int = 4,
         task_timeout: int = 300,
-        cleanup_interval: int = 600
+        cleanup_interval: int = 600,
     ):
         """Initialize TaskService with configurable parameters.
 
@@ -132,13 +134,19 @@ class TaskService:
         self._tasks_complete_event = threading.Event()
 
         # Register with lifecycle coordinator
-        self.lifecycle_coordinator.register_lifecycle_notification(self._on_lifecycle_event)
-        self.lifecycle_coordinator.register_shutdown_waiter("TaskService", self._wait_for_tasks_completion)
+        self.lifecycle_coordinator.register_lifecycle_notification(
+            self._on_lifecycle_event
+        )
+        self.lifecycle_coordinator.register_shutdown_waiter(
+            "TaskService", self._wait_for_tasks_completion
+        )
 
         # Cleanup thread is started later via startup()
         self._cleanup_thread: threading.Thread | None = None
 
-        logger.info(f"TaskService initialized: max_workers={max_workers}, timeout={task_timeout}s, cleanup_interval={cleanup_interval}s")
+        logger.info(
+            f"TaskService initialized: max_workers={max_workers}, timeout={task_timeout}s, cleanup_interval={cleanup_interval}s"
+        )
 
     def startup(self) -> None:
         """Start the background cleanup thread.
@@ -147,7 +155,9 @@ class TaskService:
         from __init__ so that test fixtures can create a TaskService without
         spawning daemon threads.
         """
-        self._cleanup_thread = threading.Thread(target=self._cleanup_worker, daemon=True)
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_worker, daemon=True
+        )
         self._cleanup_thread.start()
 
     def start_task(
@@ -199,14 +209,13 @@ class TaskService:
             self._task_instances[task_id] = task
 
             # Submit task to thread pool
-            self._executor.submit(self._execute_task, task_id, task, kwargs, caller_subject)
+            self._executor.submit(
+                self._execute_task, task_id, task, kwargs, caller_subject
+            )
 
         logger.info(f"Started task {task_id} of type {type(task).__name__}")
 
-        return TaskStartResponse(
-            task_id=task_id,
-            status=TaskStatus.PENDING
-        )
+        return TaskStartResponse(task_id=task_id, status=TaskStatus.PENDING)
 
     def _send_task_event(self, event: TaskEvent, target: Target) -> None:
         """Send a task event to the task's target.
@@ -218,13 +227,15 @@ class TaskService:
         # Use mode='json' to serialize datetime to ISO format string
         success = self.sse_connection_manager.send_event(
             target,
-            event.model_dump(mode='json'),
+            event.model_dump(mode="json"),
             event_name="task_event",
             service_type="task",
         )
 
         if not success:
-            logger.debug(f"Task event {event.event_type} reached no connection ({target!r})")
+            logger.debug(
+                f"Task event {event.event_type} reached no connection ({target!r})"
+            )
 
     def get_task_status(self, task_id: str) -> TaskInfo | None:
         """Get current status of a task."""
@@ -245,7 +256,11 @@ class TaskService:
             if not task_instance or not task_info:
                 return False
 
-            if task_info.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            if task_info.status in [
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ]:
                 return False
 
             # Request cancellation
@@ -261,7 +276,9 @@ class TaskService:
         with self._lock:
             task_info = self._tasks.get(task_id)
             if not task_info or task_info.status not in [
-                TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
             ]:
                 return False
 
@@ -297,7 +314,9 @@ class TaskService:
             self._send_task_event(start_event, target)
 
             # Create progress handle
-            progress_handle = TaskProgressHandle(task_id, self.sse_connection_manager, target)
+            progress_handle = TaskProgressHandle(
+                task_id, self.sse_connection_manager, target
+            )
 
             # Execute the task
             result = task.execute(progress_handle, **kwargs)
@@ -315,7 +334,7 @@ class TaskService:
                     completion_event = TaskEvent(
                         event_type=TaskEventType.TASK_COMPLETED,
                         task_id=task_id,
-                        data=result.model_dump() if result else None
+                        data=result.model_dump() if result else None,
                     )
                     self._send_task_event(completion_event, target)
 
@@ -343,10 +362,7 @@ class TaskService:
             failure_event = TaskEvent(
                 event_type=TaskEventType.TASK_FAILED,
                 task_id=task_id,
-                data={
-                    "error": error_msg,
-                    "traceback": error_trace
-                }
+                data={"error": error_msg, "traceback": error_trace},
             )
             self._send_task_event(failure_event, target)
 
@@ -376,10 +392,16 @@ class TaskService:
         with self._lock:
             for task_id, task_info in self._tasks.items():
                 # Only clean up completed, failed, or cancelled tasks
-                if task_info.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+                if task_info.status in [
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ]:
                     if task_info.end_time:
                         # Calculate time since completion
-                        time_since_completion = (current_time - task_info.end_time).total_seconds()
+                        time_since_completion = (
+                            current_time - task_info.end_time
+                        ).total_seconds()
                         if time_since_completion >= self.cleanup_interval:
                             tasks_to_remove.append(task_id)
 
@@ -402,8 +424,11 @@ class TaskService:
         self._executor.shutdown(wait=True)
 
         with self._lock:
-            active_tasks = sum(1 for t in self._tasks.values()
-                             if t.status in [TaskStatus.PENDING, TaskStatus.RUNNING])
+            active_tasks = sum(
+                1
+                for t in self._tasks.values()
+                if t.status in [TaskStatus.PENDING, TaskStatus.RUNNING]
+            )
             if active_tasks > 0:
                 logger.warning(f"Shutting down with {active_tasks} active tasks")
 
@@ -419,7 +444,9 @@ class TaskService:
                 with self._lock:
                     self._shutting_down = True
                     active_count = self._get_active_task_count()
-                    logger.info(f"TaskService shutdown initiated with {active_count} active tasks")
+                    logger.info(
+                        f"TaskService shutdown initiated with {active_count} active tasks"
+                    )
 
                     # Record active tasks at shutdown via module-level gauge
                     ACTIVE_TASKS_AT_SHUTDOWN.set(active_count)
@@ -443,7 +470,9 @@ class TaskService:
                 logger.info("No active tasks to wait for")
                 return True
 
-            logger.info(f"Waiting for {active_count} active tasks to complete (timeout: {timeout:.1f}s)")
+            logger.info(
+                f"Waiting for {active_count} active tasks to complete (timeout: {timeout:.1f}s)"
+            )
 
         # Wait for tasks to complete
         completed = self._tasks_complete_event.wait(timeout=timeout)
@@ -453,7 +482,9 @@ class TaskService:
         else:
             with self._lock:
                 remaining = self._get_active_task_count()
-                logger.warning(f"Timeout waiting for tasks, {remaining} tasks still active")
+                logger.warning(
+                    f"Timeout waiting for tasks, {remaining} tasks still active"
+                )
 
         return completed
 
@@ -464,7 +495,8 @@ class TaskService:
             Number of active tasks
         """
         return sum(
-            1 for task in self._tasks.values()
+            1
+            for task in self._tasks.values()
             if task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]
         )
 

@@ -262,7 +262,7 @@ class AuthService:
             for implied_role in sorted(edges.get(role, ())):
                 state = colour.get(implied_role, white)
                 if state == grey:
-                    cycle = [*path[path.index(implied_role):], implied_role]
+                    cycle = [*path[path.index(implied_role) :], implied_role]
                     raise ValueError(
                         f"role_hierarchy contains a cycle: {' -> '.join(cycle)}"
                     )
@@ -365,7 +365,9 @@ class AuthService:
         Raises:
             AuthenticationException: If discovery fails or JWKS URI not found
         """
-        discovery_url = f"{self.config.oidc_issuer_url}/.well-known/openid-configuration"
+        discovery_url = (
+            f"{self.config.oidc_issuer_url}/.well-known/openid-configuration"
+        )
 
         try:
             response = httpx.get(discovery_url, timeout=10.0)
@@ -498,9 +500,7 @@ class AuthService:
             AUTH_VALIDATION_TOTAL.labels(status="error").inc()
             AUTH_VALIDATION_DURATION_SECONDS.observe(max(duration, 0.0))
             logger.error("Unexpected error during token validation: %s", str(e))
-            raise AuthenticationException(
-                f"Token validation failed: {str(e)}"
-            ) from e
+            raise AuthenticationException(f"Token validation failed: {str(e)}") from e
 
     def _extract_roles(self, payload: dict[str, Any], audience: str | None) -> set[str]:
         """Extract roles from JWT claims.

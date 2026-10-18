@@ -80,7 +80,9 @@ class TaskEventRequestSchema(BaseModel):
         description="Task identifier for the event",
         examples=["task-xyz-456"],
     )
-    event_type: Literal["task_started", "progress_update", "task_completed", "task_failed"] = Field(
+    event_type: Literal[
+        "task_started", "progress_update", "task_completed", "task_failed"
+    ] = Field(
         ...,
         description="Type of task event to send",
         examples=["progress_update"],
@@ -103,13 +105,6 @@ class TaskEventResponseSchema(BaseModel):
         description="Whether the event was delivered successfully",
         examples=[True],
     )
-
-
-class TestErrorResponseSchema(BaseModel):
-    """Error response schema for testing endpoints."""
-
-    error: str = Field(..., description="Error message")
-    status: str = Field(..., description="Error status code", examples=["not_found"])
 
 
 def _coerce_status_int(value: object) -> object:

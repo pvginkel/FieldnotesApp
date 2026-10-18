@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class TaskStatus(StrEnum):
     """Task execution status."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -16,6 +17,7 @@ class TaskStatus(StrEnum):
 
 class TaskEventType(StrEnum):
     """Types of task events sent via SSE."""
+
     TASK_STARTED = "task_started"
     PROGRESS_UPDATE = "progress_update"
     TASK_COMPLETED = "task_completed"
@@ -24,8 +26,11 @@ class TaskEventType(StrEnum):
 
 class TaskProgressUpdate(BaseModel):
     """Progress update data."""
+
     text: str = Field(..., description="Progress description text")
-    value: float = Field(..., ge=0.0, le=1.0, description="Progress value from 0.0 to 1.0")
+    value: float = Field(
+        ..., ge=0.0, le=1.0, description="Progress value from 0.0 to 1.0"
+    )
 
 
 def _now_utc() -> datetime:
@@ -35,6 +40,7 @@ def _now_utc() -> datetime:
 
 class TaskEvent(BaseModel):
     """Task event sent via SSE stream."""
+
     event_type: TaskEventType = Field(description="Type of task event")
     task_id: str = Field(description="Unique task identifier")
     timestamp: datetime = Field(default_factory=_now_utc, description="Event timestamp")
@@ -43,8 +49,11 @@ class TaskEvent(BaseModel):
 
 class TaskInfo(BaseModel):
     """In-memory task metadata."""
+
     task_id: str = Field(description="Unique task identifier")
-    subject: str | None = Field(None, description="Subject of the user who started the task, and who owns it")
+    subject: str | None = Field(
+        None, description="Subject of the user who started the task, and who owns it"
+    )
     status: TaskStatus = Field(description="Current task status")
     start_time: datetime = Field(description="Task start timestamp")
     end_time: datetime | None = Field(None, description="Task completion timestamp")
@@ -52,7 +61,17 @@ class TaskInfo(BaseModel):
     error: str | None = Field(None, description="Error message if task failed")
 
 
+class TaskActionResponse(BaseModel):
+    """Response when a task is cancelled or removed."""
+
+    success: bool = Field(
+        description="Whether the action was taken; an action that can't be is a 404"
+    )
+    message: str = Field(description="What was done")
+
+
 class TaskStartResponse(BaseModel):
     """Response when starting a new task."""
+
     task_id: str = Field(description="Unique task identifier")
     status: TaskStatus = Field(description="Initial task status")

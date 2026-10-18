@@ -1,6 +1,7 @@
 """
 Spectree configuration with Pydantic v2 compatibility.
 """
+
 import logging
 import re
 from typing import Any

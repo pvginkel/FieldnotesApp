@@ -33,7 +33,9 @@ def main() -> None:
     settings = Settings.load()
 
     handler = logging.StreamHandler()
-    handler.setFormatter(ExtraFieldFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    handler.setFormatter(
+        ExtraFieldFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
     logging.basicConfig(level=resolve_log_level(settings.log_level), handlers=[handler])
 
     # What this process booted with, secrets shown as ***
@@ -103,6 +105,7 @@ def main() -> None:
         lifecycle_coordinator.register_lifecycle_notification(signal_shutdown_prod)
 
         event.wait()
+
 
 if __name__ == "__main__":
     main()

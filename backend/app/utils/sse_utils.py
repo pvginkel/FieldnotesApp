@@ -9,7 +9,9 @@ from flask import Response
 SSE_HEARTBEAT_INTERVAL = 5  # Will be overridden by config
 
 
-def format_sse_event(event: str, data: dict[str, Any] | str, correlation_id: str | None = None) -> str:
+def format_sse_event(
+    event: str, data: dict[str, Any] | str, correlation_id: str | None = None
+) -> str:
     """Format event name and data into SSE format.
 
     Args:
@@ -44,6 +46,6 @@ def create_sse_response(generator: Generator[str]) -> Response:
         headers={
             "Cache-Control": "no-cache",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
+            "Access-Control-Allow-Headers": "Cache-Control",
+        },
     )

@@ -5,6 +5,7 @@ import { api } from '@/lib/api/generated/client';
 import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
 import type { SseTestEvent } from '@/lib/test/test-events';
+import { makeUniqueToken } from '@/lib/utils/random';
 import { SseContext } from './sse-context-base';
 import type { SseContextValue } from './sse-context-base';
 // Import to ensure test bridge registration (even though module is not used in production)
@@ -288,8 +289,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
    * Uses onmessage to unwrap the {type, payload} envelope — same logic as the SharedWorker.
    */
   const createDirectConnection = useCallback(() => {
-    const tabRequestId = Math.random().toString(36).substring(2, 15) +
-                         Math.random().toString(36).substring(2, 15);
+    const tabRequestId = makeUniqueToken(32);
 
     const params = new URLSearchParams({ request_id: tabRequestId });
     const url = `/api/sse/stream?${params}`;

@@ -17,6 +17,8 @@
  * When the last tab disconnects, the worker closes the SSE connection.
  */
 
+import { makeUniqueToken } from '@/lib/utils/random';
+
 // Type definitions for worker messages
 
 interface TestEventMetadata {
@@ -38,16 +40,6 @@ type TabCommand =
   | { type: 'connect'; isTestMode?: boolean }
   | { type: 'disconnect' }
   | { type: 'reconnect' };
-
-// Token generation utility (inline version of makeUniqueToken)
-const TOKEN_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
-function makeUniqueToken(length = 32): string {
-  let token = '';
-  for (let i = 0; i < length; i++) {
-    token += TOKEN_CHARS.charAt(Math.floor(Math.random() * TOKEN_CHARS.length));
-  }
-  return token;
-}
 
 // Worker state
 const ports = new Set<MessagePort>();

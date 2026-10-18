@@ -40,6 +40,15 @@ interface UiStateInstrumentationOptions {
   error?: unknown;
   getReadyMetadata?: () => UiStateMetadata;
   getErrorMetadata?: (error: unknown) => UiStateMetadata;
+  /**
+   * Emit `ready` on mount when the scope isn't loading (default true). That
+   * suits a data scope, whose data may be cached at mount, so a loading ->
+   * ready transition never comes. An action scope, whose `isLoading` follows
+   * a mutation or another user action, sets it to false: it has nothing to
+   * be ready about at mount, and the test-event buffer would hand that
+   * metadata-less `ready` to a waiter registered later for the action's own.
+   */
+  readyOnMount?: boolean;
 }
 
 /**
@@ -49,7 +58,7 @@ export function useUiStateInstrumentation(
   scope: string,
   options: UiStateInstrumentationOptions,
 ): void {
-  const { isLoading, error, getReadyMetadata, getErrorMetadata } = options;
+  const { isLoading, error, getReadyMetadata, getErrorMetadata, readyOnMount = true } = options;
   const activeRef = useRef(false);
   const mountedRef = useRef(false);
   const readyMetadataRef = useRef(getReadyMetadata);
@@ -91,15 +100,16 @@ export function useUiStateInstrumentation(
 
     // Data was already available on mount (e.g. route loader pre-cached) —
     // emit ready immediately so Playwright waiters don't hang waiting for a
-    // loading -> ready transition that will never happen.
-    if (isFirstRun && !isLoading) {
+    // loading -> ready transition that will never happen. Not for an action
+    // scope (readyOnMount: false), which is idle at mount, not ready.
+    if (isFirstRun && !isLoading && readyOnMount) {
       const hasError = Boolean(error);
       const metadata = hasError
         ? errorMetadataRef.current?.(error)
         : readyMetadataRef.current?.();
       endUiState(scope, metadata);
     }
-  }, [error, isLoading, scope, testMode]);
+  }, [error, isLoading, readyOnMount, scope, testMode]);
 
   useEffect(() => {
     if (!testMode) {

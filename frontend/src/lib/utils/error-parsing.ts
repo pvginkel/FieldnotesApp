@@ -65,6 +65,22 @@ export function parseApiError(error: unknown): string {
   return 'An unexpected error occurred'
 }
 
+/**
+ * One validation error with its field: spectree 2 answers a request that fails
+ * validation with pydantic's error list, where `loc` is the field's path
+ * (`["items", 0, "quantity"]`). The path is joined with dots, as pydantic
+ * writes it ("items.0.quantity: Input should be greater than 0"). An error
+ * without a `loc` is its message alone.
+ */
+function formatValidationError(error: ValidationErrorElement): string {
+  if (!error.msg) {
+    return ''
+  }
+
+  const field = Array.isArray(error.loc) ? error.loc.join('.') : ''
+  return field ? `${field}: ${error.msg}` : error.msg
+}
+
 export function formatValidationErrors(errors: ValidationError): string {
   if (!Array.isArray(errors) || errors.length === 0) {
     return 'Validation failed'
@@ -72,12 +88,11 @@ export function formatValidationErrors(errors: ValidationError): string {
 
   // If there's only one error, return it directly
   if (errors.length === 1) {
-    const error = errors[0]
-    return error.msg || 'Validation error'
+    return formatValidationError(errors[0]) || 'Validation error'
   }
 
   // For multiple errors, format as a list
-  const errorMessages = errors.map(error => error.msg).filter(Boolean)
+  const errorMessages = errors.map(formatValidationError).filter(Boolean)
   
   if (errorMessages.length === 0) {
     return 'Multiple validation errors occurred'

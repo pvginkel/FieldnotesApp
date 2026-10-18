@@ -4,6 +4,8 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import testingNoRouteMocksRule from './scripts/eslint-rules/testing/no-route-mocks.js'
+// The app's own blocks (app-owned, an empty array until the app adds some).
+import appConfig from './eslint.app.config.js'
 
 export default tseslint.config([
   { ignores: ['dist', 'node_modules', '.pnpm-store', '*.gen.ts', 'src/lib/api/generated/**'] },
@@ -63,4 +65,6 @@ export default tseslint.config([
       'testing/no-route-mocks': 'error',
     },
   },
+  // Last, so an app block can override a template rule.
+  ...appConfig,
 ])

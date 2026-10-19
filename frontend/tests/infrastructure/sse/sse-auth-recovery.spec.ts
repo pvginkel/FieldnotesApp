@@ -1,9 +1,9 @@
 /**
  * Recovery from a refused SSE stream.
  *
- * The backend's connect callback refuses a stream with 401 or 403, and the
- * gateway answers in-stream: it opens the stream, sends a named `rejected`
- * event carrying `{status, message}` and ends it. The app must not retry that
+ * The backend refuses a stream with 401 or 403 in-stream: it opens the
+ * stream, sends a named `rejected` event carrying `{status, message}` and
+ * ends it. The app must not retry that
  * stream in a loop. It checks the session through /api/auth/self, and then
  * opens a new stream when the session is valid, leaves the redirect to login
  * to the API client on 401, and shows a connection-lost toast otherwise.
@@ -74,7 +74,7 @@ async function openApp(
 }
 
 /** Make the next connect refuse with the given status. */
-async function armCallbackRefusal(page: Page, backendUrl: string, status: 401 | 403): Promise<void> {
+async function armConnectRefusal(page: Page, backendUrl: string, status: 401 | 403): Promise<void> {
   const response = await page.request.post(
     `${backendUrl}/api/testing/sse/force-callback-error?status=${status}`
   );
@@ -120,7 +120,7 @@ for (const path of PATHS) {
 
       const initialRequestId = await openApp(page, frontendUrl, path, deploymentSse);
 
-      await armCallbackRefusal(page, backendUrl, 401);
+      await armConnectRefusal(page, backendUrl, 401);
       await forceReconnect(page);
       await expectRejected(page, 401);
 
@@ -166,7 +166,7 @@ for (const path of PATHS) {
 
       await openApp(page, frontendUrl, path, deploymentSse);
 
-      await armCallbackRefusal(page, backendUrl, 401);
+      await armConnectRefusal(page, backendUrl, 401);
       await auth.forceError(401);
       const loginRequest = page.waitForRequest(request => request.url().includes('/api/auth/login'));
 
@@ -188,7 +188,7 @@ for (const path of PATHS) {
 
       await openApp(page, frontendUrl, path, deploymentSse);
 
-      await armCallbackRefusal(page, backendUrl, 403);
+      await armConnectRefusal(page, backendUrl, 403);
       await auth.forceError(500);
 
       await forceReconnect(page);

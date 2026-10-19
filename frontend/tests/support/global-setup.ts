@@ -11,7 +11,7 @@ async function globalSetup() {
       'PLAYWRIGHT_MANAGED_SERVICES=false is no longer supported. ' +
       'The external services mode has been removed. ' +
       'Please remove this environment variable. ' +
-      'All tests now use per-worker managed services (backend, SSE gateway, and frontend) for isolation.'
+      'All tests now use per-worker managed services (backend and frontend) for isolation.'
     );
   }
 
@@ -19,7 +19,7 @@ async function globalSetup() {
   console.log('Service management: Per-worker (Playwright managed)');
 
   await initializeSeedDatabase();
-  console.log('⏭️  Worker fixtures will boot backend, SSE gateway, and frontend on demand');
+  console.log('⏭️  Worker fixtures will boot backend and frontend on demand');
 }
 
 export default globalSetup;

@@ -2,7 +2,7 @@
  * SSE connectivity and event delivery tests.
  *
  * Verifies that:
- * - The SSE connection goes through the Vite dev server proxy (no direct gateway access)
+ * - The SSE connection goes through the Vite dev server proxy (no direct backend access)
  * - Version events are delivered correctly through the React SSE infrastructure
  * - Task events are routed through the Vite proxy to the browser (envelope format)
  * - SharedWorker path delivers events correctly when enabled via URL parameter
@@ -22,10 +22,10 @@ const SHARED_WORKER_SKIP_REASON =
 const sharedWorkerUnavailable = process.env.PLAYWRIGHT_PREVIEW_MODE !== 'true';
 
 test.describe('SSE connectivity', () => {
-  test('connects through the Vite proxy, not directly to the gateway', async ({
+  test('connects through the Vite proxy, not directly to the backend', async ({
     page,
     frontendUrl,
-    gatewayUrl,
+    backendUrl,
     deploymentSse,
   }) => {
     await page.goto(frontendUrl);
@@ -41,7 +41,7 @@ test.describe('SSE connectivity', () => {
     });
 
     // Inspect all resource entries to verify SSE URLs go through the frontend
-    // origin (Vite proxy) and not directly to the gateway.
+    // origin (Vite proxy) and not directly to the backend.
     const sseUrls = await page.evaluate(() => {
       const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
       return entries
@@ -50,7 +50,7 @@ test.describe('SSE connectivity', () => {
     });
 
     for (const url of sseUrls) {
-      expect(url).not.toContain(gatewayUrl);
+      expect(url).not.toContain(backendUrl);
       expect(url).toContain('/api/sse/stream');
     }
 
@@ -115,10 +115,10 @@ test.describe('SSE connectivity', () => {
     const taskId = makeUnique('task');
 
     // Create a standalone EventSource in the browser. This opens a separate
-    // SSE connection through the Vite proxy, registers with the SSE Gateway,
-    // and listens for task_event messages via the envelope format.
-    // The gateway now sends all events as unnamed data-only messages wrapping
-    // {type, payload}, so we use es.onmessage and filter by type.
+    // SSE connection through the Vite proxy to the backend's stream, and
+    // listens for task_event messages via the envelope format. The backend
+    // sends all events as unnamed data-only messages wrapping {type, payload},
+    // so we use es.onmessage and filter by type.
     const receivedEvent = await page.evaluate(
       async ({ tId, timeout }) => {
         // Generate a unique request_id for this connection
@@ -148,7 +148,7 @@ test.describe('SSE connectivity', () => {
           };
         });
 
-        // Wait for the EventSource to open (connection registered with Gateway)
+        // Wait for the EventSource to open (connection registered with the backend)
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(() => reject(new Error('EventSource open timeout')), timeout);
           es.addEventListener('open', () => { clearTimeout(timer); resolve(); });
@@ -160,8 +160,8 @@ test.describe('SSE connectivity', () => {
           });
         });
 
-        // No wait for the backend: the gateway opens the stream only after the
-        // backend's connect callback has registered the connection.
+        // No further wait for the backend: it registers the connection before
+        // it opens the stream.
 
         // Send a fake task event to our request_id via the backend testing API.
         // Uses relative URL so the request goes through the Vite proxy.
@@ -334,7 +334,7 @@ test.describe('SSE connectivity', () => {
   test('connects and receives events via SharedWorker', { tag: '@preview' }, async ({
     page,
     frontendUrl,
-    gatewayUrl,
+    backendUrl,
     deploymentSse,
   }) => {
     test.skip(sharedWorkerUnavailable, SHARED_WORKER_SKIP_REASON);
@@ -352,7 +352,7 @@ test.describe('SSE connectivity', () => {
       timeoutMs: 15000,
     });
 
-    // Verify SSE URLs go through the frontend (Vite proxy), not directly to the gateway
+    // Verify SSE URLs go through the frontend (Vite proxy), not directly to the backend
     const sseUrls = await page.evaluate(() => {
       const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
       return entries
@@ -361,7 +361,7 @@ test.describe('SSE connectivity', () => {
     });
 
     for (const url of sseUrls) {
-      expect(url).not.toContain(gatewayUrl);
+      expect(url).not.toContain(backendUrl);
       expect(url).toContain('/api/sse/stream');
     }
 

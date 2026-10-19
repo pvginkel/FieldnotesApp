@@ -2,11 +2,11 @@
  * SharedWorker for multiplexing a unified SSE connection across browser tabs.
  *
  * Maintains a single EventSource connection to the SSE endpoint and forwards
- * events to all connected tabs via MessagePort. The gateway sends all domain
+ * events to all connected tabs via MessagePort. The backend sends all domain
  * events as unnamed data-only messages with a {type, payload} envelope, so the
  * worker uses a single `onmessage` handler to capture them. Two control signals
- * are named events: `ready` (no data) once the gateway has accepted the stream,
- * and `rejected` when the backend's connect callback refused it.
+ * are named events: `ready` (no data) once the backend has accepted the stream,
+ * and `rejected` when it refused it.
  *
  * The stream counts as connected on `ready`, not on `onopen`: a refused stream
  * opens too, before its `rejected` event.
@@ -53,11 +53,11 @@ const maxRetryDelay = 60000; // 60 seconds
 // Cache the last version event so late-joining tabs receive it immediately
 let lastVersionPayload: unknown = null;
 
-// Whether the current stream has received the gateway's `ready` event. Tabs are
+// Whether the current stream has received the backend's `ready` event. Tabs are
 // told `connected` only then, late-joining tabs included.
 let readyReceived = false;
 
-// Set when the gateway sends `rejected`: keeps `onerror` from scheduling a
+// Set when the backend sends `rejected`: keeps `onerror` from scheduling a
 // reconnect until a tab sends `reconnect`. Cleared there and in
 // `handleConnect()` when it opens a new stream.
 let rejectedTerminal = false;
@@ -168,13 +168,13 @@ function createEventSource(): void {
   eventSource = new EventSource(url);
 
   eventSource.onopen = () => {
-    // Open is not connected: the gateway may still refuse the stream. Tabs hear
+    // Open is not connected: the backend may still refuse the stream. Tabs hear
     // `connected` on the `ready` event.
     console.debug('SSE worker: SSE connection opened (waiting for ready)');
     retryCount = 0;
   };
 
-  // Single onmessage handler captures all envelope events from the gateway.
+  // Single onmessage handler captures all envelope events from the backend.
   // Each message contains {type, payload} — unwrap and broadcast to tabs.
   eventSource.onmessage = (e: MessageEvent) => {
     let envelope: { type: string; payload: unknown };
@@ -211,7 +211,7 @@ function createEventSource(): void {
     broadcast(message);
   };
 
-  // The gateway sends `ready` as a named event with no data once it has
+  // The backend sends `ready` as a named event with no data once it has
   // accepted the stream. Don't read `event.data` here.
   eventSource.addEventListener('ready', () => {
     readyReceived = true;
@@ -230,11 +230,11 @@ function createEventSource(): void {
     broadcast(message);
   });
 
-  // The gateway sends `rejected` as a named event with a JSON payload
-  // (`{"status": <code>, "message": "<text>"}`) when the backend's connect
-  // callback refused the stream (401/403), then ends the stream. Terminal:
-  // close the EventSource, stop retrying, and tell every tab. The tabs refresh
-  // the session through /api/auth/self and send `reconnect` when it is valid.
+  // The backend sends `rejected` as a named event with a JSON payload
+  // (`{"status": <code>, "message": "<text>"}`) when it refused the stream
+  // (401/403), then ends the stream. Terminal: close the EventSource, stop
+  // retrying, and tell every tab. The tabs refresh the session through
+  // /api/auth/self and send `reconnect` when it is valid.
   eventSource.addEventListener('rejected', (event) => {
     let status = 0;
     let message = 'Unknown';

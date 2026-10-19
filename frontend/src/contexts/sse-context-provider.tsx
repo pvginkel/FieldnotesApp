@@ -38,7 +38,7 @@ interface SseTestEventMetadata {
 type SessionProbeOutcome = 'valid' | 'signed-out' | 'failed';
 
 /**
- * Check the session after the gateway refused the stream. GET /api/auth/self
+ * Check the session after the backend refused the stream. GET /api/auth/self
  * refreshes the session cookies while the refresh token is good, so `valid`
  * means a new stream will be accepted. On `signed-out` (401) the API client's
  * middleware is already sending the user to login.
@@ -59,7 +59,7 @@ async function probeSession(): Promise<SessionProbeOutcome> {
 }
 
 /**
- * Read the gateway's `rejected` payload, `{"status": <code>, "message": "<text>"}`.
+ * Read the backend's `rejected` payload, `{"status": <code>, "message": "<text>"}`.
  * A payload that doesn't parse gives status 0.
  */
 function parseRejection(data: unknown): { status: number; message: string } {
@@ -113,15 +113,15 @@ const USE_SHARED_WORKER = shouldUseSharedWorker();
  * Exposes a generic addEventListener interface. Consumer hooks subscribe to
  * named SSE events and handle their own DTO parsing.
  *
- * The gateway sends all domain events as unnamed data-only messages with a
+ * The backend sends all domain events as unnamed data-only messages with a
  * {type, payload} envelope. Both the SharedWorker and the direct EventSource
  * path unwrap the envelope and dispatch to local listeners by event name.
  *
- * Two control signals are named events. `ready` (no data) means the gateway
+ * Two control signals are named events. `ready` (no data) means the backend
  * accepted the stream; only then is the connection `isConnected`, since a
- * refused stream opens too. `rejected` means the backend's connect callback
- * refused it (401/403): both paths close the stream instead of retrying it,
- * check the session, and open a new stream once the session is valid again.
+ * refused stream opens too. `rejected` means the backend refused it
+ * (401/403): both paths close the stream instead of retrying it, check the
+ * session, and open a new stream once the session is valid again.
  *
  * Uses SharedWorker in production for cross-tab connection sharing, falls back to
  * direct EventSource in dev/test/iOS environments.
@@ -297,7 +297,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
 
-    // Open is not connected: the gateway may still refuse the stream. The
+    // Open is not connected: the backend may still refuse the stream. The
     // connection counts from the `ready` event (no data line; don't read it).
     eventSource.addEventListener('ready', () => {
       setIsConnected(true);
@@ -315,7 +315,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       }
     });
 
-    // The gateway refused the stream and is ending it. Close it before the
+    // The backend refused the stream and is ending it. Close it before the
     // browser retries it, and open a new one only once the session is valid,
     // unless this stream was replaced or disconnected meanwhile.
     eventSource.addEventListener('rejected', (event) => {

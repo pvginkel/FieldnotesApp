@@ -23,7 +23,6 @@ export interface ServiceLogCollector {
 
 export type BackendLogCollector = ServiceLogCollector;
 export type FrontendLogCollector = ServiceLogCollector;
-export type GatewayLogCollector = ServiceLogCollector;
 
 export function createBackendLogCollector(options: {
   workerIndex: number;
@@ -46,18 +45,6 @@ export function createFrontendLogCollector(options: {
     streamToConsole: options.streamToConsole,
     attachmentName: 'frontend.log',
     serviceLabel: 'frontend',
-  });
-}
-
-export function createGatewayLogCollector(options: {
-  workerIndex: number;
-  streamToConsole: boolean;
-}): GatewayLogCollector {
-  return createServiceLogCollector({
-    workerIndex: options.workerIndex,
-    streamToConsole: options.streamToConsole,
-    attachmentName: 'gateway.log',
-    serviceLabel: 'sse-gateway',
   });
 }
 

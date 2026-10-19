@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
@@ -8,11 +7,9 @@ import split2 from 'split2';
 
 const BACKEND_READY_PATH = '/health/readyz';
 const FRONTEND_READY_PATH = '/';
-const GATEWAY_READY_PATH = '/readyz';
 // Generous: workers start their services side by side on a loaded machine.
 const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
 const FRONTEND_STARTUP_TIMEOUT_MS = 120_000;
-const GATEWAY_STARTUP_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 200;
 const HOSTNAME = '127.0.0.1';
 
@@ -25,7 +22,6 @@ type ServerHandle = {
 
 export type BackendServerHandle = ServerHandle;
 export type FrontendServerHandle = ServerHandle;
-export type SSEGatewayServerHandle = ServerHandle;
 
 export async function startBackend(
   workerIndex: number,
@@ -117,42 +113,7 @@ export async function startFrontend(options: {
   });
 }
 
-export async function startSSEGateway(options: {
-  workerIndex: number;
-  backendUrl: string;
-  excludePorts?: number[];
-  streamLogs?: boolean;
-  port?: number;
-}): Promise<SSEGatewayServerHandle> {
-  const port =
-    typeof options.port === 'number'
-      ? options.port
-      : await getPort({
-          exclude: options.excludePorts ?? [],
-        });
-
-  const require = createRequire(import.meta.url);
-  const gatewayEntry = require.resolve('ssegateway');
-  const callbackUrl = `${options.backendUrl}/api/sse/callback`;
-
-  return startService({
-    workerIndex: options.workerIndex,
-    port,
-    serviceLabel: 'sse-gateway',
-    scriptPath: process.execPath,
-    args: [gatewayEntry],
-    readinessPath: GATEWAY_READY_PATH,
-    startupTimeoutMs: GATEWAY_STARTUP_TIMEOUT_MS,
-    streamLogs: options.streamLogs === true,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      CALLBACK_URL: callbackUrl,
-    },
-  });
-}
-
-type ServiceLabel = 'backend' | 'frontend' | 'sse-gateway';
+type ServiceLabel = 'backend' | 'frontend';
 
 type StartServiceOptions = {
   workerIndex: number;
@@ -380,9 +341,6 @@ function serviceShouldLogLifecycle(serviceLabel: ServiceLabel): boolean {
   }
   if (serviceLabel === 'frontend') {
     return process.env.PLAYWRIGHT_FRONTEND_LOG_STREAM === 'true';
-  }
-  if (serviceLabel === 'sse-gateway') {
-    return process.env.PLAYWRIGHT_GATEWAY_LOG_STREAM === 'true';
   }
   return false;
 }

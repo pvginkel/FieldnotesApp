@@ -64,7 +64,7 @@ test.describe('Task SSE events', () => {
     expect(response.ok()).toBe(true);
 
     // Verify the task event was received.
-    // The gateway wraps the event as {"type":"task_event","payload":{...}},
+    // The backend wraps the event as {"type":"task_event","payload":{...}},
     // so the streamId and event are both 'task_event'. The inner event_type
     // lives inside the payload data.
     const taskEvent = await waitForSseEvent(page, {

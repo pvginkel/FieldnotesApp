@@ -2,7 +2,7 @@
 """Start all dev services via honcho (process manager).
 
 Usage:
-    ./scripts/dev.py                    # start all services (backend + frontend + gateway)
+    ./scripts/dev.py                    # start all services (backend + frontend)
     ./scripts/dev.py backend frontend   # start a subset (positional; honcho's -e is --env, not --except)
     ./scripts/dev.py stop               # stop a running stack from another shell
 
@@ -22,8 +22,7 @@ This wrapper still runs honcho under a PID namespace (unshare --user --pid
 --fork) so nothing local is left behind.
 
 Note: run `kc project setup` first — it installs the uv and pnpm
-dependencies the services need (the SSE gateway on :3402 runs the
-`ssegateway` frontend devDependency).
+dependencies the services need.
 """
 
 import io

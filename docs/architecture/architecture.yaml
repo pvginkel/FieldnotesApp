@@ -127,16 +127,11 @@ relations:
     type: Assignment
 
   # --- What the frontend consumes ---
-  # The SPA calls the API same-origin; the UI's NGINX proxies /api/ to the backend.
+  # The SPA calls the API same-origin, its SSE event stream (/api/sse/stream)
+  # included; the UI's NGINX proxies /api/ to the backend.
   - id: rel:fieldnotes-ui-consumes-api
     source: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
     target: svc:fieldnotes-api,24ec3d57-28ec-4dfa-8901-1031ba7492f3
-    type: Association
-
-  # The SPA holds an event stream on /api/sse/, which the UI's NGINX proxies to the gateway.
-  - id: rel:fieldnotes-ui-consumes-ssegateway
-    source: app:fieldnotes-ui,588b1881-6693-439b-9d67-a07c878946dc
-    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
     type: Association
 
   # --- What the backend consumes: recipes the deployer resolves ---
@@ -146,14 +141,6 @@ relations:
     target: cap:iam
     type: Association
     boundBy: "env:OIDC_ISSUER_URL"
-
-  # Version and task events to the browsers. The default is the backend's own (app/config.py).
-  - id: rel:fieldnotes-consumes-ssegateway
-    source: app:fieldnotes,1606c9c8-a84b-4725-a952-27688349608c
-    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
-    type: Association
-    boundBy: "env:SSE_GATEWAY_URL"
-    boundByDefaultValue: "http://localhost:3402"
 
   # --- What the backend consumes: in-house providers another deploy repo runs ---
   # Each is located by an environment variable (FIELDNOTES_MODELS_URL, FIELDNOTES_YOUTRACK_URL,

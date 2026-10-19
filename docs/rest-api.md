@@ -28,10 +28,11 @@ included. A request with no session, or with an agent's bearer token, is
 refused with 401, and a signed-in user without the role with 403, both in the template's own
 `{error}` body rather than problem+json.
 
-The page's SSE connection is bound to its user by the gateway's connect, the template's callback
-(NFR-4): from the access cookie, and with OIDC off to `local-user`. A connect with a missing or
-expired token is refused with 401, and one by a user without the `editor` role with 403. On a
-refusal the page refreshes its session through `GET /api/auth/self` and connects again; a 401 there
+The page's SSE connection is bound to its user when it connects to the template's stream,
+`GET /api/sse/stream` (NFR-4): from the access cookie, refreshed from the refresh cookie where it
+has expired, and with OIDC off to `local-user`. A connect with a missing token, or an expired one
+the refresh cannot renew, is refused with 401, and one by a user without the `editor` role with
+403, each as the stream's one `rejected` event. On a refusal the page refreshes its session through `GET /api/auth/self` and connects again; a 401 there
 sends it to sign-in, and any other failure tells the user the connection was lost. So a connection
 is never held bound to no one.
 

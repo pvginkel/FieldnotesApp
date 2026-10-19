@@ -25,8 +25,9 @@ capabilities:
 
 tools:
   # FieldnotesApp's backend and frontend: Node, pnpm and uv in one sidecar,
-  # because the Playwright harness boots the Flask backend and the SSE gateway
-  # per worker, so one command needs both toolsets.
+  # because the Playwright harness boots the Flask backend per worker
+  # (frontend/tests/support/process/servers.ts), so a single command needs both
+  # toolsets in the same container.
   - use: modern-app
   # The store's `kc project lint` (ruff), which it runs from here.
   - use: python
@@ -50,8 +51,8 @@ secrets:
   GRAFANA_TOKEN: grafana-api-key
 
 ports:
-  # The dev stack (`scripts/dev.py`): the Vite dev server, which proxies /api
-  # to the backend on :3401 and the SSE gateway on :3402. Serves
+  # The dev stack (`scripts/dev.py`): the Vite dev server, which proxies /api,
+  # the SSE stream included, to the backend on :3401. Serves
   # https://fieldnotes.<env-id>.home, the BASEURL scripts/dev-instance-setup.sh
   # writes, for the operator to test the triage UI.
   - name: fieldnotes

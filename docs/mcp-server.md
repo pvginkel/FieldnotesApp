@@ -7,7 +7,7 @@ nothing: each tool is one call to the [REST API](rest-api.md), and the replies a
 ## Transport and authentication
 
 The server listens on `FIELDNOTES_MCP_HOST`:`FIELDNOTES_MCP_PORT` (default `0.0.0.0:8081`, clear of
-the pod's 3400–3402), entry point `fieldnotes-mcp`; it is a uv workspace member of the backend
+the pod's 3400 and 3401), entry point `fieldnotes-mcp`; it is a uv workspace member of the backend
 (`backend/mcp-server`) and ships in the backend's image. It is FastMCP from the official `mcp`
 SDK (1.x), serving Streamable HTTP at `/mcp`:
 

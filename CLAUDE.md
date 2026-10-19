@@ -58,9 +58,8 @@ on uv, as the template is. `kc project` runs `root`, `backend` and `frontend`.
   invented data, through `/api/testing/store` and `/api/testing/controller`
   (`tests/support/triage-store.ts`, `controller.ts`).
 
-The backend, the UI's nginx, the SSE gateway and the MCP server run as containers of one pod (two
-while a rollout overlaps them), next to a `webhook-relay` container that is the only
-internet-facing part.
+The backend, the UI's nginx and the MCP server run as containers of one pod (two while a rollout
+overlaps them), next to a `webhook-relay` container that is the only internet-facing part.
 
 Other repos the work touches:
 

@@ -44,7 +44,7 @@ projects:
   frontend:
     description: >-
       React SPA with a generated OpenAPI client; Playwright E2E suite that boots
-      the backend and SSE gateway per worker.
+      the backend per worker.
     setup:
       - cexec modern-app pnpm install --frozen-lockfile --config.confirmModulesPurge=false
       - cexec modern-app pnpm playwright install chromium

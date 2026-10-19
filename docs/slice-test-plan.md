@@ -78,8 +78,7 @@ until curl -sf -o /dev/null localhost:3401/health/readyz; do sleep 1; done
 ```
 
 The API answers on 3401 under `/api`. `/health/readyz` answers `200` once the store is cloned and
-indexed: its `store` check is the only critical one. The SSE gateway's check, which this run has no
-gateway for, fails without failing readiness, so the body reads `degraded`. The pid is written from inside the tool container: killing the local `cexec` client does
+indexed: its `store` check is its only one, and critical. The pid is written from inside the tool container: killing the local `cexec` client does
 not reach the process it started, and `.venv/bin/dev` rather than `uv run dev` keeps that pid the
 server's own.
 

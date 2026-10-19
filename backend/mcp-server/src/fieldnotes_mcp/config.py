@@ -24,7 +24,7 @@ PREFIX = "FIELDNOTES_"
 # The backend listens on 3401 in the same pod and serves the surface under /api; the client's
 # paths are relative to this.
 DEFAULT_API_URL = "http://localhost:3401/api"
-# Clear of the pod's 3400-3402 (UI, backend, SSE gateway).
+# Clear of the pod's 3400 and 3401 (UI, backend).
 DEFAULT_MCP_PORT = 8081
 
 

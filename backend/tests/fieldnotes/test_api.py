@@ -39,7 +39,7 @@ def test_health_answers_without_a_token(start):
     with start() as api:
         assert api.get("/health/healthz").status_code == 200
         readyz = api.get("/health/readyz")
-        # 200 though no suite runs the SSE gateway: only the store's check is critical.
+        # Readiness has one check, the store's, and it is critical.
         assert readyz.status_code == 200
         assert readyz.json()["checks"]["store"] == {"status": "ok", "critical": True}
 

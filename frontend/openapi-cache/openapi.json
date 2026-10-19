@@ -283,7 +283,7 @@
         "description": "Query parameters for /api/testing/sse/force-callback-error.",
         "properties": {
           "status": {
-            "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+            "description": "HTTP status the next SSE stream connect refuses with (401 or 403).",
             "enum": [
               401,
               403
@@ -2301,20 +2301,14 @@
         "tags": []
       }
     },
-    "/api/sse/callback": {
-      "post": {
-        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nA connect is accepted only for a caller the API would serve, and is refused before it is registered, so a refused stream never receives an event and never counts in the connection metrics. The gateway turns a refusal into an in-stream ``rejected`` event and ends the stream.\n\nReturns:     200 with an empty object on success\n\nRaises:     AuthenticationException: 401, the callback secret fails (production         only), or the forwarded token is missing or invalid     AuthorizationException: 403, the caller holds none of the app's roles         (or lacks the read role, where one is set)     ValidationException: 400, the body is not a JSON object, the action         is unknown, or the request_id is missing or malformed     pydantic.ValidationError: 400, the payload is not a valid callback",
-        "operationId": "post__api_sse_callback",
+    "/api/sse/stream": {
+      "get": {
+        "description": "Accepted only for a caller the API would serve a GET, and refused before the connection is registered, so a refused stream never receives an event and never counts in the connection metrics.\n\nQuery Parameters:     request_id: The browser's stream ID; a new stream with the same one         replaces the old\n\nReturns:     200 ``text/event-stream``: ``ready`` and the events, or ``rejected``",
+        "operationId": "get__api_sse_stream",
         "parameters": [],
         "responses": {},
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Handle SSE Gateway connect/disconnect callbacks.",
-        "tags": [],
-        "x-required-role": "editor"
+        "summary": "The browser's SSE stream.",
+        "tags": []
       }
     },
     "/api/tasks/{task_id}": {
@@ -2750,16 +2744,16 @@
     },
     "/api/testing/sse/force-callback-error": {
       "post": {
-        "description": "Single-shot: the callback after it behaves normally again. The gateway turns the refusal into an in-stream ``rejected`` event, which drives the frontend's refresh-and-reconnect path.\n\nQuery Parameters:     status: 401 or 403 (the schema refuses anything else with 400)\n\nReturns:     204: Hook armed",
+        "description": "Single-shot: the connect after it behaves normally again. The stream answers the refusal with an in-stream ``rejected`` event, which drives the frontend's refresh-and-reconnect path.\n\nQuery Parameters:     status: 401 or 403 (the schema refuses anything else with 400)\n\nReturns:     204: Hook armed",
         "operationId": "post__api_testing_sse_force-callback-error",
         "parameters": [
           {
-            "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+            "description": "HTTP status the next SSE stream connect refuses with (401 or 403).",
             "in": "query",
             "name": "status",
             "required": true,
             "schema": {
-              "description": "HTTP status the next SSE connect callback refuses with (401 or 403).",
+              "description": "HTTP status the next SSE stream connect refuses with (401 or 403).",
               "enum": [
                 401,
                 403
@@ -2789,14 +2783,14 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Make the next SSE Gateway connect callback refuse the connection.",
+        "summary": "Make the next SSE stream connect refuse the connection.",
         "tags": [],
         "x-required-role": "editor"
       }
     },
     "/api/testing/sse/task-event": {
       "post": {
-        "description": "Allows integration tests to simulate task events without running actual background tasks. The event is sent directly to the SSE connection identified by request_id.\n\nRaises:     RecordNotFoundException: 404, no SSE connection has that request_id     ExternalServiceException: 502, the SSE Gateway did not take the event",
+        "description": "Allows integration tests to simulate task events without running actual background tasks. The event is sent directly to the SSE connection identified by request_id.\n\nRaises:     RecordNotFoundException: 404, no SSE connection has that request_id     ExternalServiceException: 502, the connection did not take the event         (it closed meanwhile, or its queue was full)",
         "operationId": "post__api_testing_sse_task-event",
         "parameters": [],
         "requestBody": {

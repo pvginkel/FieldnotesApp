@@ -115,7 +115,7 @@ class TaskService:
 
         Args:
             lifecycle_coordinator: Coordinator for lifecycle events and graceful shutdown
-            sse_connection_manager: SSEConnectionManager for SSE Gateway integration
+            sse_connection_manager: SSEConnectionManager that delivers task events
             max_workers: Maximum number of concurrent tasks
             task_timeout: Task execution timeout in seconds
             cleanup_interval: How often to clean up completed tasks in seconds

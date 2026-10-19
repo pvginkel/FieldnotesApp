@@ -88,6 +88,10 @@ def main() -> None:
                 host=host,
                 port=port,
                 threads=threads,
+                # Keep reading a channel while its request runs, so a client
+                # that closes is seen at once: an SSE stream then ends on its
+                # next write, a heartbeat at the latest, not the third
+                channel_request_lookahead=1,
                 trusted_proxy="*",
                 trusted_proxy_count=1,
                 trusted_proxy_headers="x-forwarded-for x-forwarded-proto x-forwarded-host",

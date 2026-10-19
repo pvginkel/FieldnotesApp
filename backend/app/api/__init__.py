@@ -20,4 +20,9 @@ from app.api.ui_setup import ui_setup_bp  # noqa: E402
 
 api_bp.register_blueprint(ui_setup_bp)
 
+# The browser's SSE stream (under /api/sse)
+from app.api.sse import sse_bp  # noqa: E402
+
+api_bp.register_blueprint(sse_bp)
+
 # App-specific blueprints are registered in app/startup.py:register_blueprints()

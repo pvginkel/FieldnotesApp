@@ -124,5 +124,5 @@ class ForceSSECallbackErrorQuerySchema(BaseModel):
 
     status: Annotated[Literal[401, 403], BeforeValidator(_coerce_status_int)] = Field(
         ...,
-        description="HTTP status the next SSE connect callback refuses with (401 or 403).",
+        description="HTTP status the next SSE stream connect refuses with (401 or 403).",
     )

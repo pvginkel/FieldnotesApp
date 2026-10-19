@@ -1,16 +1,22 @@
-"""Connection manager for SSE Gateway integration.
+"""The browsers' SSE connections, and event delivery to them, in-process.
 
-This service manages the bidirectional mapping between request IDs
-and SSE Gateway tokens. It handles connection lifecycle events and provides
-an interface for sending events via HTTP to the SSE Gateway.
+Each browser holds one stream, ``GET /api/sse/stream`` (``app/api/sse.py``),
+on a request thread of its own. The route registers the stream here as an
+``SSEConnection`` and writes out what arrives on the connection's queue;
+``send_event`` formats an event once and queues it, without blocking, on
+every connection its ``Target`` names. There is no implicit broadcast.
 
 Key responsibilities:
-- Maintain bidirectional mappings: request_id <-> token
-- Handle connection replacement (close old, register new)
-- Send events via HTTP POST to SSE Gateway, to the connections a ``Target``
-  names; every send names one, and there is no implicit broadcast
-- Notify observers when connections are established
-- Clean up stale connections on failures
+- The registry: one connection per request_id, a new one replacing the old
+- Identity: the subject a connection is bound to, and the local admin
+- Subscriptions: the channels a connection takes events from
+- Delivery: a bounded queue per connection; a full one (a browser that has
+  stalled) closes that connection, and the browser reconnects
+- Observers notified on connect and disconnect
+- On ``PREPARE_SHUTDOWN``, every connection closed, so every stream ends
+
+Thread safety: the registry, identities and subscriptions change under one
+lock; observers are called and frames queued outside it.
 """
 
 import json
@@ -18,37 +24,27 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from time import perf_counter
+from queue import Full, Queue
 from typing import Any, Literal
 
-import requests
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Gauge
 
-from app.schemas.sse_gateway_schema import (
-    SSEGatewayEventData,
-    SSEGatewaySendRequest,
-)
-from app.services.health_service import CheckResult, CheckStatus, HealthService
+from app.utils.lifecycle_coordinator import LifecycleCoordinatorProtocol, LifecycleEvent
 
-# SSE Gateway metrics
-SSE_GATEWAY_CONNECTIONS_TOTAL = Counter(
-    "sse_gateway_connections_total",
-    "Total SSE Gateway connection lifecycle events",
+# SSE metrics
+SSE_CONNECTIONS_TOTAL = Counter(
+    "sse_connections_total",
+    "Total SSE connection lifecycle events",
     ["action"],
 )
-SSE_GATEWAY_EVENTS_SENT_TOTAL = Counter(
-    "sse_gateway_events_sent_total",
-    "Total events sent to SSE Gateway",
+SSE_EVENTS_SENT_TOTAL = Counter(
+    "sse_events_sent_total",
+    "Total SSE events queued for a connection, or dropped on a full queue",
     ["service", "status"],
 )
-SSE_GATEWAY_SEND_DURATION_SECONDS = Histogram(
-    "sse_gateway_send_duration_seconds",
-    "Duration of SSE Gateway HTTP send calls",
-    ["service"],
-)
-SSE_GATEWAY_ACTIVE_CONNECTIONS = Gauge(
-    "sse_gateway_active_connections",
-    "Current number of active SSE Gateway connections",
+SSE_ACTIVE_CONNECTIONS = Gauge(
+    "sse_active_connections",
+    "Current number of active SSE connections",
 )
 SSE_IDENTITY_BINDING_TOTAL = Counter(
     "sse_identity_binding_total",
@@ -56,10 +52,13 @@ SSE_IDENTITY_BINDING_TOTAL = Counter(
     ["status"],
 )
 
+# The frames a connection's queue holds before it counts as stalled
+DEFAULT_QUEUE_MAX_FRAMES = 1000
+
 logger = logging.getLogger(__name__)
 
 
-TargetKind = Literal["connection", "subject", "local_admin", "broadcast"]
+TargetKind = Literal["connection", "subject", "local_admin", "broadcast", "channel"]
 
 
 @dataclass(frozen=True)
@@ -73,6 +72,8 @@ class Target:
       subject, plus the local admin's connections. The local admin (OIDC off,
       subject ``local-user``) sees every subject's events, as it owns every
       task through ``/api/tasks``.
+    - ``Target.channel(name)``: every connection subscribed to the channel
+      (``subscribe``). The local admin gets no channel's events unsubscribed.
     - ``LOCAL_ADMIN_TARGET``: only the local admin's connections, so nobody
       when OIDC is on. A task started without a subject sends here.
     - ``BROADCAST_TARGET``: every connection. For infrastructure events that
@@ -96,6 +97,13 @@ class Target:
             raise ValueError("Target.subject needs a subject")
         return Target("subject", subject)
 
+    @staticmethod
+    def channel(name: str) -> "Target":
+        """Target the connections subscribed to this channel."""
+        if not name:
+            raise ValueError("Target.channel needs a channel name")
+        return Target("channel", name)
+
 
 LOCAL_ADMIN_TARGET = Target("local_admin")
 BROADCAST_TARGET = Target("broadcast")
@@ -107,39 +115,117 @@ class ConnectionInfo:
 
     request_id: str
     subject: str | None
+    local_admin: bool = False
 
 
-class SSEConnectionManager:
-    """Manages SSE Gateway token mappings and event delivery."""
+def format_event_frame(event_name: str, event_data: dict[str, Any]) -> str:
+    """Format a domain event as the browser receives it.
+
+    An unnamed message whose data is the envelope
+    ``{"type": <event name>, "payload": <data>}``, so the frontend's single
+    ``onmessage`` handler receives every event. No ``id:``, no ``retry:``.
+    """
+    return (
+        f'data: {{"type":{json.dumps(event_name)},'
+        f'"payload":{json.dumps(event_data)}}}\n\n'
+    )
+
+
+class SSEConnection:
+    """One browser's stream: its identity, its channels and its queue of frames.
+
+    The stream route reads the queue (``next_frame``); the manager changes
+    the identity and the channels, under its lock. Build one with
+    ``SSEConnectionManager.on_connect``.
+    """
 
     def __init__(
         self,
-        gateway_url: str,
-        http_timeout: float = 5.0,
-        health_service: HealthService | None = None,
+        request_id: str,
+        subject: str | None,
+        *,
+        local_admin: bool,
+        max_frames: int,
+    ) -> None:
+        self.request_id = request_id
+        self.subject = subject
+        self.local_admin = local_admin
+        self.channels: set[str] = set()
+        # Formatted frames; None wakes a reader blocked on an empty queue
+        # when the connection closes
+        self._frames: Queue[str | None] = Queue(maxsize=max_frames)
+        self._closed = threading.Event()
+
+    @property
+    def closed(self) -> bool:
+        """Whether the connection has closed: its stream ends."""
+        return self._closed.is_set()
+
+    def offer(self, frame: str) -> bool:
+        """Queue a frame for the stream without blocking.
+
+        Returns:
+            False when the queue is full
+        """
+        try:
+            self._frames.put_nowait(frame)
+        except Full:
+            return False
+        return True
+
+    def close(self) -> None:
+        """End the stream: ``next_frame`` answers None from now on. Idempotent."""
+        self._closed.set()
+        try:
+            self._frames.put_nowait(None)
+        except Full:
+            # The reader is not blocked: it takes a frame, then sees the flag
+            pass
+
+    def next_frame(self, timeout: float) -> str | None:
+        """Wait for the next frame to write to the stream.
+
+        Frames still queued when the connection closes are dropped.
+
+        Args:
+            timeout: How long to wait, in seconds
+
+        Returns:
+            The frame, or None once the connection has closed
+
+        Raises:
+            queue.Empty: Nothing arrived within ``timeout``
+        """
+        if self._closed.is_set():
+            return None
+        frame = self._frames.get(timeout=timeout)
+        if frame is None or self._closed.is_set():
+            return None
+        return frame
+
+
+class SSEConnectionManager:
+    """The registry of SSE connections and the delivery of events to them."""
+
+    def __init__(
+        self,
+        lifecycle_coordinator: LifecycleCoordinatorProtocol,
+        queue_max_frames: int = DEFAULT_QUEUE_MAX_FRAMES,
     ):
         """Initialize SSEConnectionManager.
 
         Args:
-            gateway_url: Base URL for SSE Gateway (e.g., "http://localhost:3000")
-            http_timeout: Timeout for HTTP requests to SSE Gateway in seconds
-            health_service: Where to register the non-critical ``sse_gateway``
-                readiness check; passed only when the app uses SSE.
+            lifecycle_coordinator: Notifies ``PREPARE_SHUTDOWN``, on which
+                every connection closes
+            queue_max_frames: The frames a connection's queue holds; a
+                connection whose queue is full is closed
         """
-        self.gateway_url = gateway_url.rstrip("/")
-        self.http_timeout = http_timeout
+        self.queue_max_frames = queue_max_frames
 
-        # Bidirectional mappings
-        # Forward: request_id -> connection info (token, url)
-        self._connections: dict[str, dict[str, str]] = {}
-        # Reverse: token -> request_id (for disconnect callback)
-        self._token_to_request_id: dict[str, str] = {}
-
-        # Identity map: request_id -> OIDC subject
-        self._identity_map: dict[str, str] = {}
-        # Request IDs bound as the local admin (OIDC off): they receive every
-        # subject's events
-        self._local_admin_ids: set[str] = set()
+        # request_id -> the current connection
+        self._connections: dict[str, SSEConnection] = {}
+        # Set on PREPARE_SHUTDOWN: no new connection is accepted after it
+        self._shutting_down = False
 
         # Observer callbacks for connection events
         self._on_connect_callbacks: list[Callable[[str], None]] = []
@@ -148,28 +234,15 @@ class SSEConnectionManager:
         # Thread safety
         self._lock = threading.RLock()
 
-        # Not critical: the app serves without live updates, and the gateway
-        # has its own readiness probe.
-        if health_service is not None:
-            health_service.register_check(
-                "sse_gateway", self.check_readiness, critical=False
-            )
-
-    def check_readiness(self) -> CheckResult:
-        """Readiness check: the SSE Gateway answers its own readyz with 200."""
-        response = requests.get(f"{self.gateway_url}/readyz", timeout=self.http_timeout)
-        if response.status_code != 200:
-            return CheckResult(
-                CheckStatus.ERROR, f"gateway readyz answered {response.status_code}"
-            )
-        return CheckResult(CheckStatus.OK)
+        lifecycle_coordinator.register_lifecycle_notification(self._on_lifecycle_event)
 
     def register_on_connect(self, callback: Callable[[str], None]) -> None:
         """Register a callback to be notified when connections are established.
 
-        Callbacks are invoked with the request_id after a connection is registered.
-        Each callback is wrapped in exception handling; failures are logged but
-        don't prevent other callbacks from running or the connection from being established.
+        Callbacks are invoked with the request_id after a connection is
+        registered and bound to its identity. Each callback is wrapped in
+        exception handling; failures are logged but don't prevent other
+        callbacks from running or the connection from being established.
 
         Args:
             callback: Function to call with request_id when connection established
@@ -183,7 +256,8 @@ class SSEConnectionManager:
         Callbacks are invoked with the request_id after a connection is removed.
         Each callback is wrapped in exception handling; failures are logged but
         don't prevent other callbacks from running or the cleanup from completing.
-        Stale disconnect callbacks (unknown or mismatched tokens) do NOT trigger observers.
+        A connection that was replaced under its request_id does NOT trigger
+        observers when it goes.
 
         Args:
             callback: Function to call with request_id when connection disconnected
@@ -191,69 +265,78 @@ class SSEConnectionManager:
         with self._lock:
             self._on_disconnect_callbacks.append(callback)
 
-    def on_connect(self, request_id: str, token: str, url: str) -> None:
-        """Register a new connection from SSE Gateway.
+    def on_connect(
+        self, request_id: str, subject: str | None, *, local_admin: bool = False
+    ) -> SSEConnection:
+        """Register a new connection, bound to its identity, and notify observers.
 
-        If a connection already exists for this request_id, the old connection
-        is closed before registering the new one (only one connection per request_id).
-        After registration, all registered observer callbacks are notified.
+        A connection already registered under the request_id is replaced and
+        closed, so its stream ends; the new one starts with this identity and
+        no subscriptions. Registration and binding happen under one lock,
+        before the observers fire, so an observer already reaches the new
+        connection through ``Target.subject``.
+
+        After ``PREPARE_SHUTDOWN`` the connection comes back closed and
+        unregistered, and no observer fires.
 
         Args:
-            request_id: Plain request ID (no prefix, e.g., "abc123")
-            token: Gateway-generated connection token
-            url: Original client request URL
+            request_id: The browser's request ID (from the stream's query)
+            subject: The accepted caller's subject, or None for an unbound
+                connection (it gets broadcasts and its own events only)
+            local_admin: The connection is the local admin's (OIDC off, no
+                test session), which receives every subject's events. Only
+                the stream route decides this; a subject string alone,
+                ``local-user`` included, never makes a connection the local
+                admin's.
+
+        Returns:
+            The connection, for the stream to read and to pass to
+            ``on_disconnect`` when it ends
         """
-        old_token_to_close: str | None = None
+        connection = SSEConnection(
+            request_id,
+            subject,
+            local_admin=local_admin,
+            max_frames=self.queue_max_frames,
+        )
 
-        # Update mappings under lock (fast, no I/O)
         with self._lock:
-            # Check for existing connection
-            existing = self._connections.get(request_id)
-            if existing:
-                old_token_to_close = existing["token"]
-                logger.debug(
-                    "Found existing connection, will close after releasing lock",
-                    extra={
-                        "request_id": request_id,
-                        "old_token": old_token_to_close,
-                        "new_token": token,
-                    },
+            if self._shutting_down:
+                connection.close()
+                logger.info(
+                    "SSE connection refused: shutting down",
+                    extra={"request_id": request_id},
                 )
-                # Remove old reverse mapping
-                self._token_to_request_id.pop(old_token_to_close, None)
+                return connection
 
-            # A new connection starts unbound: the old one's identity is not
-            # carried over to whoever connects with the same request_id
-            self._identity_map.pop(request_id, None)
-            self._local_admin_ids.discard(request_id)
+            replaced = self._connections.get(request_id)
+            self._connections[request_id] = connection
+            if replaced is not None:
+                SSE_CONNECTIONS_TOTAL.labels(action="disconnect").inc()
+            SSE_CONNECTIONS_TOTAL.labels(action="connect").inc()
+            SSE_ACTIVE_CONNECTIONS.set(len(self._connections))
+            callbacks_to_notify = list(self._on_connect_callbacks)
 
-            # Register new connection (atomic update of both mappings)
-            self._connections[request_id] = {
-                "token": token,
-                "url": url,
-            }
-            self._token_to_request_id[token] = request_id
+        if subject is not None:
+            SSE_IDENTITY_BINDING_TOTAL.labels(status="success").inc()
 
-            # Record connection metric
-            SSE_GATEWAY_CONNECTIONS_TOTAL.labels(action="connect").inc()
-            SSE_GATEWAY_ACTIVE_CONNECTIONS.inc()
-
-            logger.info(
-                "Registered SSE Gateway connection",
-                extra={
-                    "request_id": request_id,
-                    "token": token,
-                    "url": url,
-                },
+        # Close the replaced connection outside the lock: its stream ends,
+        # and its own on_disconnect finds it is no longer current
+        if replaced is not None:
+            replaced.close()
+            logger.debug(
+                "Replaced SSE connection",
+                extra={"request_id": request_id},
             )
 
-        # Close old connection OUTSIDE the lock (best-effort, avoids blocking other callbacks)
-        if old_token_to_close:
-            self._close_connection_internal(old_token_to_close, request_id)
-
-        # Copy callbacks list under lock to prevent race during iteration
-        with self._lock:
-            callbacks_to_notify = list(self._on_connect_callbacks)
+        logger.info(
+            "Registered SSE connection",
+            extra={
+                "request_id": request_id,
+                "subject": subject,
+                "local_admin": local_admin,
+            },
+        )
 
         # Notify all observers OUTSIDE the lock (each wrapped in exception handling)
         for callback in callbacks_to_notify:
@@ -270,75 +353,51 @@ class SSEConnectionManager:
                     },
                 )
 
-    def on_disconnect(self, token: str) -> None:
-        """Handle disconnect callback from SSE Gateway.
+        return connection
 
-        Uses reverse mapping to find request_id. Verifies token matches current
-        connection before removing (ignores stale disconnect callbacks).
-        After successful removal, notifies all registered disconnect observers.
+    def on_disconnect(self, connection: SSEConnection) -> None:
+        """Remove a connection whose stream has ended, and notify observers.
+
+        Closes the connection, then removes it only if it is still the
+        current one for its request_id: a connection that was replaced, or
+        already removed, changes nothing and notifies nobody. Idempotent.
 
         Args:
-            token: Gateway connection token from disconnect callback
+            connection: The connection ``on_connect`` returned
         """
-        disconnected_request_id: str | None = None
+        self._remove(connection)
 
+    def _remove(self, connection: SSEConnection, reason: str | None = None) -> bool:
+        """Close a connection, unregister it if current, and notify observers.
+
+        Returns:
+            True if the connection was the current one and was removed
+        """
+        request_id = connection.request_id
         with self._lock:
-            # Look up request_id via reverse mapping
-            request_id = self._token_to_request_id.get(token)
-            if not request_id:
-                logger.debug(
-                    "Disconnect callback for unknown token (expected for stale disconnects)",
-                    extra={"token": token},
-                )
-                return
+            removed = self._connections.get(request_id) is connection
+            if removed:
+                del self._connections[request_id]
+                SSE_CONNECTIONS_TOTAL.labels(action="disconnect").inc()
+                SSE_ACTIVE_CONNECTIONS.set(len(self._connections))
 
-            # Verify token matches current forward mapping
-            current_conn = self._connections.get(request_id)
-            if not current_conn or current_conn["token"] != token:
-                logger.debug(
-                    "Disconnect callback with mismatched token (stale disconnect after replacement)",
-                    extra={
-                        "token": token,
-                        "request_id": request_id,
-                        "current_token": current_conn["token"]
-                        if current_conn
-                        else None,
-                    },
-                )
-                # Clean up reverse mapping but don't touch forward mapping
-                self._token_to_request_id.pop(token, None)
-                return
+        connection.close()
 
-            self._remove_connection(request_id, token)
-            disconnected_request_id = request_id
-
-            logger.info(
-                "Unregistered SSE Gateway connection",
-                extra={
-                    "request_id": request_id,
-                    "token": token,
-                },
+        if not removed:
+            logger.debug(
+                "SSE connection already gone or replaced",
+                extra={"request_id": request_id},
             )
+            return False
 
-        # Notify disconnect observers OUTSIDE the lock (same pattern as on_connect)
-        if disconnected_request_id is not None:
-            self._notify_disconnect(disconnected_request_id)
-
-    def _remove_connection(self, request_id: str, token: str) -> None:
-        """Drop a connection's mappings and identity, and count it as disconnected.
-
-        Must be called with the lock held, for the connection that is current
-        for ``request_id``. The caller notifies the disconnect observers after
-        releasing the lock.
-        """
-        del self._connections[request_id]
-        del self._token_to_request_id[token]
-        self._identity_map.pop(request_id, None)
-        self._local_admin_ids.discard(request_id)
-
-        # Record disconnect metric
-        SSE_GATEWAY_CONNECTIONS_TOTAL.labels(action="disconnect").inc()
-        SSE_GATEWAY_ACTIVE_CONNECTIONS.dec()
+        if reason is None:
+            logger.info("Unregistered SSE connection", extra={"request_id": request_id})
+        else:
+            logger.warning(
+                f"Closed SSE connection: {reason}", extra={"request_id": request_id}
+            )
+        self._notify_disconnect(request_id)
+        return True
 
     def _notify_disconnect(self, request_id: str) -> None:
         """Notify the disconnect observers; call without the lock held."""
@@ -359,6 +418,24 @@ class SSEConnectionManager:
                     },
                 )
 
+    def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
+        """Close every connection on PREPARE_SHUTDOWN, so every stream ends.
+
+        Each stream's own end unregisters its connection and notifies the
+        observers; the browsers reconnect, to the next process.
+        """
+        if event != LifecycleEvent.PREPARE_SHUTDOWN:
+            return
+        with self._lock:
+            self._shutting_down = True
+            connections = list(self._connections.values())
+        for connection in connections:
+            connection.close()
+        logger.info(
+            "Closed every SSE connection for shutdown",
+            extra={"connection_count": len(connections)},
+        )
+
     def has_connection(self, request_id: str) -> bool:
         """Check if a connection exists for the given request_id.
 
@@ -374,34 +451,32 @@ class SSEConnectionManager:
     def bind_identity(
         self, request_id: str, subject: str, *, local_admin: bool = False
     ) -> None:
-        """Associate an OIDC subject with a connected request_id.
+        """Bind a connected request_id to another OIDC subject.
 
-        The caller is responsible for token extraction and validation;
-        this method simply stores the mapping. Typically called from the
-        SSE Gateway connect callback after validating the forwarded headers.
+        ``on_connect`` binds a connection's identity already; this rebinds
+        it. The caller is responsible for validating the subject.
 
         Args:
             request_id: SSE connection request ID (must already be connected)
             subject: Validated OIDC subject string
             local_admin: The connection is the local admin's (OIDC off, no
-                test session), which receives every subject's events. Only
-                the connect callback decides this; a subject string alone,
-                ``local-user`` included, never makes a connection the local
-                admin's.
+                test session), which receives every subject's events. A
+                subject string alone, ``local-user`` included, never makes a
+                connection the local admin's.
         """
         with self._lock:
-            if request_id not in self._connections:
-                SSE_IDENTITY_BINDING_TOTAL.labels(status="failed").inc()
-                logger.warning(
-                    "Identity binding failed: no active connection",
-                    extra={"request_id": request_id},
-                )
-                return
-            self._identity_map[request_id] = subject
-            if local_admin:
-                self._local_admin_ids.add(request_id)
-            else:
-                self._local_admin_ids.discard(request_id)
+            connection = self._connections.get(request_id)
+            if connection is not None:
+                connection.subject = subject
+                connection.local_admin = local_admin
+
+        if connection is None:
+            SSE_IDENTITY_BINDING_TOTAL.labels(status="failed").inc()
+            logger.warning(
+                "Identity binding failed: no active connection",
+                extra={"request_id": request_id},
+            )
+            return
 
         SSE_IDENTITY_BINDING_TOTAL.labels(status="success").inc()
         logger.info(
@@ -416,6 +491,10 @@ class SSEConnectionManager:
     def get_connection_info(self, request_id: str) -> ConnectionInfo | None:
         """Get information about an active SSE connection.
 
+        A route that subscribes a browser checks with it that the connection
+        is the caller's own: its ``subject`` is the caller's, or it is the
+        local admin's.
+
         Args:
             request_id: SSE connection request ID
 
@@ -423,12 +502,53 @@ class SSEConnectionManager:
             ConnectionInfo if the connection is active, None otherwise
         """
         with self._lock:
-            if request_id not in self._connections:
+            connection = self._connections.get(request_id)
+            if connection is None:
                 return None
             return ConnectionInfo(
                 request_id=request_id,
-                subject=self._identity_map.get(request_id),
+                subject=connection.subject,
+                local_admin=connection.local_admin,
             )
+
+    def subscribe(self, request_id: str, channel: str) -> bool:
+        """Subscribe a connection to a channel, for ``Target.channel``.
+
+        The subscription goes with the connection; a connection that
+        replaces it under the same request_id starts with none. Channel
+        names are the app's: the manager interprets none.
+
+        Args:
+            request_id: SSE connection request ID
+            channel: The channel name
+
+        Returns:
+            False if no connection has that request_id
+        """
+        if not channel:
+            raise ValueError("subscribe needs a channel name")
+        with self._lock:
+            connection = self._connections.get(request_id)
+            if connection is None:
+                return False
+            connection.channels.add(channel)
+        logger.debug(
+            "Subscribed SSE connection",
+            extra={"request_id": request_id, "channel": channel},
+        )
+        return True
+
+    def unsubscribe(self, request_id: str, channel: str) -> None:
+        """Unsubscribe a connection from a channel; a no-op if it was not subscribed.
+
+        Args:
+            request_id: SSE connection request ID
+            channel: The channel name
+        """
+        with self._lock:
+            connection = self._connections.get(request_id)
+            if connection is not None:
+                connection.channels.discard(channel)
 
     def send_event(
         self,
@@ -437,7 +557,10 @@ class SSEConnectionManager:
         event_name: str,
         service_type: str,
     ) -> bool:
-        """Send an event to the SSE Gateway for delivery to the target's connections.
+        """Queue an event on the connections the target names.
+
+        Never blocks: a connection whose queue is full is closed (its
+        browser has stalled; it reconnects) and does not count as reached.
 
         Args:
             target: Who the event is for; see ``Target``. There is no
@@ -447,7 +570,7 @@ class SSEConnectionManager:
             service_type: Service type for metrics ("task" or "version")
 
         Returns:
-            True if event sent successfully to at least one connection, False otherwise
+            True if at least one connection took the event, False otherwise
 
         Raises:
             TypeError: If target is not a Target (a request ID or None, as
@@ -457,7 +580,7 @@ class SSEConnectionManager:
             raise TypeError(
                 f"send_event needs a Target, got {type(target).__name__}: "
                 "use Target.connection(request_id), Target.subject(subject), "
-                "LOCAL_ADMIN_TARGET or BROADCAST_TARGET"
+                "Target.channel(name), LOCAL_ADMIN_TARGET or BROADCAST_TARGET"
             )
 
         with self._lock:
@@ -476,198 +599,75 @@ class SSEConnectionManager:
                 )
             return False
 
-        # Send to each connection serially
-        success_count = 0
-        for req_id, token in recipients:
-            if self._send_event_to_token(
-                token, event_data, event_name, service_type, req_id
-            ):
-                success_count += 1
+        frame = format_event_frame(event_name, event_data)
 
-        if target.kind != "connection":
-            logger.debug(
-                "Sent event to target",
-                extra={
-                    "event_name": event_name,
-                    "target": repr(target),
-                    "success_count": success_count,
-                    "total_count": len(recipients),
-                },
+        success_count = 0
+        stalled: list[SSEConnection] = []
+        for connection in recipients:
+            if connection.closed:
+                # Closed since the target was resolved; its stream is ending
+                continue
+            if connection.offer(frame):
+                success_count += 1
+                SSE_EVENTS_SENT_TOTAL.labels(
+                    service=service_type, status="success"
+                ).inc()
+            else:
+                SSE_EVENTS_SENT_TOTAL.labels(
+                    service=service_type, status="dropped"
+                ).inc()
+                stalled.append(connection)
+
+        for connection in stalled:
+            self._remove(
+                connection,
+                reason=f"its queue is full ({self.queue_max_frames} frames)",
             )
+
+        logger.debug(
+            "Queued event for target",
+            extra={
+                "event_name": event_name,
+                "target": repr(target),
+                "success_count": success_count,
+                "total_count": len(recipients),
+            },
+        )
         return success_count > 0
 
-    def _resolve_target(self, target: Target) -> list[tuple[str, str]]:
-        """Return (request_id, token) for each connection the target names.
+    def _resolve_target(self, target: Target) -> list[SSEConnection]:
+        """Return the connections the target names.
 
         Must be called with the lock held.
         """
         if target.kind == "connection":
             assert target.value is not None
-            conn = self._connections.get(target.value)
-            return [(target.value, conn["token"])] if conn else []
+            connection = self._connections.get(target.value)
+            return [connection] if connection is not None else []
 
         if target.kind == "subject":
             return [
-                (req_id, conn["token"])
-                for req_id, conn in self._connections.items()
-                if req_id in self._local_admin_ids
-                or self._identity_map.get(req_id) == target.value
+                connection
+                for connection in self._connections.values()
+                if connection.local_admin or connection.subject == target.value
             ]
 
         if target.kind == "local_admin":
             return [
-                (req_id, conn["token"])
-                for req_id, conn in self._connections.items()
-                if req_id in self._local_admin_ids
+                connection
+                for connection in self._connections.values()
+                if connection.local_admin
             ]
 
         if target.kind == "broadcast":
+            return list(self._connections.values())
+
+        if target.kind == "channel":
+            assert target.value is not None
             return [
-                (req_id, conn["token"]) for req_id, conn in self._connections.items()
+                connection
+                for connection in self._connections.values()
+                if target.value in connection.channels
             ]
 
         raise ValueError(f"Unknown target kind: {target.kind}")
-
-    def _send_event_to_token(
-        self,
-        token: str,
-        event_data: dict[str, Any],
-        event_name: str,
-        service_type: str,
-        request_id: str | None = None,
-    ) -> bool:
-        """Send an event to a specific token via SSE Gateway.
-
-        Args:
-            token: Gateway connection token
-            event_data: Event payload
-            event_name: SSE event name
-            service_type: Service type for metrics
-            request_id: Request ID for logging (optional)
-
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        start_time = perf_counter()
-
-        try:
-            # Format event payload
-            event = SSEGatewayEventData(name=event_name, data=json.dumps(event_data))
-            send_request = SSEGatewaySendRequest(
-                token=token,
-                event=event,
-                close=False,  # Connections never close on event send
-            )
-
-            # POST to SSE Gateway
-            url = f"{self.gateway_url}/internal/send"
-            response = requests.post(
-                url,
-                json=send_request.model_dump(exclude_none=True),
-                timeout=self.http_timeout,
-                headers={"Content-Type": "application/json"},
-            )
-
-            if response.status_code == 404:
-                # The gateway no longer has the connection: drop it as a
-                # disconnect would, observers included, unless a new
-                # connection has taken the request_id meanwhile
-                logger.warning(
-                    "SSE Gateway returned 404: connection not found; removing stale mapping",
-                    extra={"request_id": request_id, "token": token},
-                )
-                if request_id:
-                    with self._lock:
-                        current = self._connections.get(request_id)
-                        removed = current is not None and current["token"] == token
-                        if removed:
-                            self._remove_connection(request_id, token)
-                    if removed:
-                        self._notify_disconnect(request_id)
-                SSE_GATEWAY_EVENTS_SENT_TOTAL.labels(
-                    service=service_type, status="error"
-                ).inc()
-                return False
-
-            if response.status_code != 200:
-                logger.error(
-                    "SSE Gateway returned non-2xx status",
-                    extra={
-                        "request_id": request_id,
-                        "status_code": response.status_code,
-                        "response_body": response.text,
-                    },
-                )
-                SSE_GATEWAY_EVENTS_SENT_TOTAL.labels(
-                    service=service_type, status="error"
-                ).inc()
-                return False
-
-            logger.debug(
-                "Sent event to SSE Gateway",
-                extra={
-                    "request_id": request_id,
-                    "event_name": event_name,
-                },
-            )
-            SSE_GATEWAY_EVENTS_SENT_TOTAL.labels(
-                service=service_type, status="success"
-            ).inc()
-            return True
-
-        except requests.RequestException as e:
-            logger.error(
-                "Failed to send event to SSE Gateway",
-                exc_info=e,
-                extra={
-                    "request_id": request_id,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            SSE_GATEWAY_EVENTS_SENT_TOTAL.labels(
-                service=service_type, status="error"
-            ).inc()
-            return False
-
-        finally:
-            duration = perf_counter() - start_time
-            SSE_GATEWAY_SEND_DURATION_SECONDS.labels(service=service_type).observe(
-                duration
-            )
-
-    def _close_connection_internal(self, token: str, request_id: str) -> None:
-        """Close a connection via SSE Gateway (best-effort, no retries).
-
-        Args:
-            token: Gateway connection token
-            request_id: Request identifier (for logging)
-        """
-        try:
-            send_request = SSEGatewaySendRequest(token=token, event=None, close=True)
-            url = f"{self.gateway_url}/internal/send"
-            response = requests.post(
-                url,
-                json=send_request.model_dump(exclude_none=True),
-                timeout=self.http_timeout,
-                headers={"Content-Type": "application/json"},
-            )
-            if response.status_code not in (200, 404):
-                logger.warning(
-                    "Failed to close old connection",
-                    extra={
-                        "request_id": request_id,
-                        "token": token,
-                        "status_code": response.status_code,
-                    },
-                )
-        except requests.RequestException as e:
-            logger.warning(
-                "Exception while closing old connection (continuing anyway)",
-                exc_info=True,
-                extra={
-                    "request_id": request_id,
-                    "token": token,
-                    "error": str(e),
-                },
-            )

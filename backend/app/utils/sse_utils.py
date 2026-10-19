@@ -47,5 +47,7 @@ def create_sse_response(generator: Generator[str]) -> Response:
             "Cache-Control": "no-cache",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Cache-Control",
+            # nginx must not buffer the stream
+            "X-Accel-Buffering": "no",
         },
     )

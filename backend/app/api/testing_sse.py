@@ -1,9 +1,9 @@
 """Testing endpoints for SSE integration tests.
 
 Provides endpoints to start demo tasks, trigger version events, send
-fake task events and force the next connect callback to refuse, enabling
-integration tests to exercise the SSE Gateway pipeline without requiring
-real domain logic.
+fake task events and force the next stream connect to refuse, enabling
+integration tests to exercise the SSE pipeline without requiring real
+domain logic.
 
 All endpoints are guarded by reject_if_not_testing() so they are
 only available when FLASK_ENV=testing.
@@ -180,7 +180,8 @@ def send_task_event(
 
     Raises:
         RecordNotFoundException: 404, no SSE connection has that request_id
-        ExternalServiceException: 502, the SSE Gateway did not take the event
+        ExternalServiceException: 502, the connection did not take the event
+            (it closed meanwhile, or its queue was full)
     """
     payload = TaskEventRequestSchema.model_validate(request.get_json() or {})
 
@@ -203,7 +204,7 @@ def send_task_event(
     if not success:
         raise ExternalServiceException(
             f"send the task event to SSE connection {payload.request_id}",
-            "the SSE Gateway did not deliver it",
+            "the connection did not take it",
         )
 
     response = TaskEventResponseSchema(
@@ -223,11 +224,11 @@ def send_task_event(
 def force_sse_callback_error(
     testing_service: TestingService = Provide[ServiceContainer.testing_service],
 ) -> tuple[str, int]:
-    """Make the next SSE Gateway connect callback refuse the connection.
+    """Make the next SSE stream connect refuse the connection.
 
-    Single-shot: the callback after it behaves normally again. The gateway
-    turns the refusal into an in-stream ``rejected`` event, which drives the
-    frontend's refresh-and-reconnect path.
+    Single-shot: the connect after it behaves normally again. The stream
+    answers the refusal with an in-stream ``rejected`` event, which drives
+    the frontend's refresh-and-reconnect path.
 
     Query Parameters:
         status: 401 or 403 (the schema refuses anything else with 400)
@@ -237,8 +238,8 @@ def force_sse_callback_error(
     """
     query = ForceSSECallbackErrorQuerySchema.model_validate(request.args.to_dict())
 
-    testing_service.set_forced_sse_callback_error(query.status)
+    testing_service.set_forced_sse_connect_error(query.status)
 
-    logger.info("Configured forced SSE callback error: status=%d", query.status)
+    logger.info("Configured forced SSE connect error: status=%d", query.status)
 
     return "", 204

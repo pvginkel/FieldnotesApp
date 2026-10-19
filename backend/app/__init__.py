@@ -145,11 +145,6 @@ def create_app(
 
     app.register_blueprint(testing_sse_bp)
 
-    # Register SSE Gateway callback blueprint
-    from app.api.sse import sse_bp
-
-    app.register_blueprint(sse_bp)
-
     # Register testing auth endpoints (runtime check handles access control)
     from app.api.testing_auth import testing_auth_bp
 

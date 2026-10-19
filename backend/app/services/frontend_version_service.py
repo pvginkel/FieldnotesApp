@@ -81,10 +81,9 @@ class FrontendVersionService:
         stage, it fetches the current version and sends it; a failed fetch sends
         nothing.
 
-        It runs inside the gateway's connect callback, and the gateway opens the
-        stream only once that has answered. So the fetch, which waits up to its
-        timeout on a slow or down frontend, runs on a thread of its own, and the
-        connect never waits for it.
+        It runs inside the stream request, before the stream writes ``ready``.
+        So the fetch, which waits up to its timeout on a slow or down frontend,
+        runs on a thread of its own, and the connect never waits for it.
 
         Args:
             request_id: Request ID from the established connection

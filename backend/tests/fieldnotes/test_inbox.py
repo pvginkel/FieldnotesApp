@@ -9,6 +9,7 @@ Against the fake controller; every environment, line and message is invented."""
 import json
 from datetime import timedelta
 from pathlib import Path
+from queue import Empty
 
 import pytest
 
@@ -16,6 +17,7 @@ from app.fieldnotes.inbox import DEFAULT_TRACKER, PendingMessage, Sitting
 from app.fieldnotes.runtime import INBOX_SITTING
 from app.fieldnotes.testing import FakeMessage, FakeTurn
 from app.schemas.task_schema import TaskStatus
+from app.services.sse_connection_manager import SSEConnection
 from tests.fieldnotes.test_triage import openapi_document
 
 ENV = "pvginkel-fieldnotes-0a1b2c"
@@ -921,31 +923,22 @@ def test_the_inbox_refuses_all_but_the_editor(
 
 
 def test_a_tasks_events_reach_only_the_connections_of_the_editor_who_began_it(
-    start, oidc_app, generate_test_jwt, kubecoder, eventually, environ, monkeypatch
+    start, oidc_app, generate_test_jwt, kubecoder, eventually, environ
 ):
     """NFR-4 on the task channel: a Start's and a turn's events carry the session's log lines and
     its messages, so they go to the SSE connections bound to the editor whose request began them,
     not to one bound to no one or to another user."""
     kubecoder.add_environment(ENV)
-    heard: dict[str, list[dict]] = {"editor": [], "anonymous": [], "other": []}
     with start(app=oidc_app) as api:
-        manager = api.app.container.sse_connection_manager()
-
-        def sent(token, event_data, event_name, service_type, request_id=None):
-            if event_name == "task_event":
-                heard[token].append(event_data)
-            return True
-
-        monkeypatch.setattr(manager, "_send_event_to_token", sent)
-        for name in heard:
-            manager.on_connect(name, name, f"http://sse.invalid/?request_id={name}")
-        manager.bind_identity("editor", "inbox-editor")
-        manager.bind_identity("other", "inbox-viewer")
+        connections = connected(
+            api, editor="inbox-editor", anonymous=None, other="inbox-viewer"
+        )
         api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
         opened(api, eventually, kubecoder)
         kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
         task_id = send(api, "close EX-7").json()["sitting"]["turn"]["task"]
         finished(api, eventually, task_id)
+        heard = {name: task_events(c) for name, c in connections.items()}
 
     assert heard["anonymous"] == heard["other"] == []
     assert [
@@ -958,63 +951,65 @@ def test_a_tasks_events_reach_only_the_connections_of_the_editor_who_began_it(
     assert held.subject == "inbox-editor"
 
 
-def connected(api, monkeypatch, **subjects) -> dict[str, list[dict]]:
-    """SSE connections the gateway registered, each bound to the subject its connect authenticated
-    as, or to no one; the task events each one hears."""
-    heard: dict[str, list[dict]] = {name: [] for name in subjects}
+def connected(api, **subjects) -> dict[str, SSEConnection]:
+    """SSE connections the backend's stream registered, each bound to the subject its connect
+    authenticated as, or to no one."""
     manager = api.app.container.sse_connection_manager()
+    return {
+        name: manager.on_connect(name, subject) for name, subject in subjects.items()
+    }
 
-    def sent(token, event_data, event_name, service_type, request_id=None):
-        if event_name == "task_event":
-            heard[token].append(event_data)
-        return True
 
-    monkeypatch.setattr(manager, "_send_event_to_token", sent)
-    for name, subject in subjects.items():
-        manager.on_connect(name, name, f"http://sse.invalid/?request_id={name}")
-        if subject is not None:
-            manager.bind_identity(name, subject)
-    return heard
+def task_events(connection: SSEConnection) -> list[dict]:
+    """The task events an SSE connection has queued for its stream, taken without waiting.
+    Read before the app stops: a connection closed at shutdown drops what it still queues."""
+    events: list[dict] = []
+    while True:
+        try:
+            frame = connection.next_frame(0)
+        except Empty:
+            return events
+        if frame is None:
+            return events
+        message = json.loads(frame.removeprefix("data: "))
+        if message["type"] == "task_event":
+            events.append(message["payload"])
 
 
 def test_a_page_reopened_mid_sitting_hears_the_turn_its_send_begins(
-    start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
+    start, oidc_app, generate_test_jwt, kubecoder, eventually
 ):
     """FR-30 under NFR-4: a page reopened mid-sitting (a reload, a second browser) has a
-    connection of its own, which the gateway's connect binds to the editor, so it hears the turn
+    connection of its own, which its stream's connect binds to the editor, so it hears the turn
     its Send begins."""
     kubecoder.add_environment(ENV)
     with start(app=oidc_app) as api:
-        heard = connected(api, monkeypatch, opener="inbox-editor")
+        connected(api, opener="inbox-editor")
         api.sign_in(generate_test_jwt(subject="inbox-editor", roles=["editor"]))
         opened(api, eventually, kubecoder)
-        heard["reopened"] = []
-        manager = api.app.container.sse_connection_manager()
-        manager.on_connect(
-            "reopened", "reopened", "http://sse.invalid/?request_id=reopened"
-        )
-        manager.bind_identity("reopened", "inbox-editor")
+        reopened = connected(api, reopened="inbox-editor")["reopened"]
         kubecoder.turns.append(FakeTurn(["[3s] [tool_use: update] EX-7"], ANSWER))
         task_id = send(api, "close EX-7").json()["sitting"]["turn"]["task"]
         finished(api, eventually, task_id)
+        heard = task_events(reopened)
 
     assert [
         e["data"]["reply"]["messages"]
-        for e in heard["reopened"]
+        for e in heard
         if e["event_type"] == "task_completed"
     ] == [[ANSWER]]
-    assert progress(heard["reopened"], task_id) == ["[3s] [tool_use: update] EX-7"]
+    assert progress(heard, task_id) == ["[3s] [tool_use: update] EX-7"]
 
 
 def test_an_editors_tasks_reach_no_connection_bound_to_another_user_nor_one_no_one_bound(
-    start, oidc_app, generate_test_jwt, kubecoder, eventually, monkeypatch
+    start, oidc_app, generate_test_jwt, kubecoder, eventually
 ):
     """NFR-4: another user's connections, a viewer's included, and one bound to no one hear none
     of the editor's tasks; a request without a session and a viewer's are refused."""
     kubecoder.add_environment(ENV)
     with start(app=oidc_app) as api:
-        heard = connected(
-            api, monkeypatch, other="inbox-other", viewer="inbox-viewer", anonymous=None
+        connections = connected(
+            api, other="inbox-other", viewer="inbox-viewer", anonymous=None
         )
         refused = [begin(api)]
         api.sign_in(generate_test_jwt(subject="inbox-viewer", roles=["viewer"]))
@@ -1025,6 +1020,7 @@ def test_an_editors_tasks_reach_no_connection_bound_to_another_user_nor_one_no_o
         reply = send(api, "close EX-7")
         assert reply.status_code == 202, reply.text
         finished(api, eventually, reply.json()["sitting"]["turn"]["task"])
+        heard = {name: task_events(c) for name, c in connections.items()}
 
         assert [r.status_code for r in refused] == [401, 403]
     assert heard == {"other": [], "viewer": [], "anonymous": []}

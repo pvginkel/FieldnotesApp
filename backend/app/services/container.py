@@ -77,9 +77,8 @@ class ServiceContainer(containers.DeclarativeContainer):
     # SSE connection manager (always included - TaskService depends on it)
     sse_connection_manager = providers.Singleton(
         SSEConnectionManager,
-        gateway_url=config.provided.sse_gateway_url,
-        http_timeout=2.0,
-        health_service=health_service,
+        lifecycle_coordinator=lifecycle_coordinator,
+        queue_max_frames=config.provided.sse_queue_max_frames,
     )
 
     # Task service - in-memory task management

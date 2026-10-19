@@ -4,7 +4,8 @@ from typing import Any
 
 
 def test_liveness_answers(client: Any) -> None:
-    # Not readyz: readiness includes the SSE gateway, which a unit test has no process for.
+    # Not readyz: readiness includes checks of services a unit test may have
+    # no process for.
     assert client.get("/health/healthz").status_code == 200
 
 

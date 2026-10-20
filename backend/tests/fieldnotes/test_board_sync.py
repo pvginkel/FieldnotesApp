@@ -302,8 +302,10 @@ def test_syncs_and_deliveries_are_counted(
         hook(api, {"event": "issueUpdated", "id": "KC-65"})
         youtrack.resolve("FN-12", clock.tick(), "Resolved")
         hook(api, {"event": "issueUpdated", "id": "FN-12"})
+        # The queued sync counts after its write is visible: wait on the count, not the file.
         eventually(
-            lambda: observation(api, auth, id_)["status"] == "closed", "the queued sync"
+            lambda: scrape(api)("fieldnotes_board_syncs_total", result="changed") >= 2,
+            "the queued sync",
         )
         value = scrape(api)
 

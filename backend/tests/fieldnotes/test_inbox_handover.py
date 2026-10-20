@@ -1461,7 +1461,7 @@ def test_a_turn_orphaned_with_no_page_open_is_finished_on_the_timer_then_rests(
         eventually(lambda: held(environ).turn is None, "the turn finished")
         answered = held(environ)
         clock.tick(30 * 60)
-        eventually(lambda: held(environ).session is None, "the rest")
+        eventually(lambda: kubecoder.environments[ENV].status == "stopped", "the rest")
 
     assert [m.messages for m in answered.transcript][-2:] == [["close EX-7"], [ANSWER]]
     assert answered.lost is None

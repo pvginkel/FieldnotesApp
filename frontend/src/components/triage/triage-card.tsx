@@ -96,7 +96,7 @@ export function TriageCard({ item, live, onApply }: TriageCardProps) {
         {item.proposal && (
           <section className="box proposal-box" data-testid="triage.card.proposal">
             <div className="box-head">
-              <Bot className="icon" aria-hidden="true" /> Proposed ruling
+              Proposed ruling
               <span className="proposal-verb" data-testid="triage.card.proposal.verb">{item.proposal.verb}</span>
             </div>
             <div className="proposal">

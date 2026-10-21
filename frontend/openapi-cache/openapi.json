@@ -1110,6 +1110,17 @@
             "title": "Observation",
             "type": "string"
           },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageItem.b288cbf.Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "question": {
             "anyOf": [
               {
@@ -1182,6 +1193,24 @@
           "done"
         ],
         "title": "Actioned",
+        "type": "object"
+      },
+      "TriageItem.b288cbf.Proposal": {
+        "description": "The reconciler's: the ruling it would bet on, which the operator may apply.",
+        "properties": {
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/TriageItem.b288cbf.Verb"
+          }
+        },
+        "required": [
+          "verb",
+          "note"
+        ],
+        "title": "Proposal",
         "type": "object"
       },
       "TriageItem.b288cbf.Question": {
@@ -1269,7 +1298,7 @@
         "type": "object"
       },
       "TriageItem.b288cbf.Ruling": {
-        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the reconciler's draft, its bet on the item, and the operator's once they submit it\nuntouched; a ruling of their own replaces it. A ruling from before the flag has none.",
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the item's proposal as the reconciler wrote it, applied untouched. A ruling from before\nthe flag has none.",
         "properties": {
           "at": {
             "title": "At",
@@ -1450,6 +1479,24 @@
         "title": "Actioned",
         "type": "object"
       },
+      "TriageQueue.b288cbf.Proposal": {
+        "description": "The reconciler's: the ruling it would bet on, which the operator may apply.",
+        "properties": {
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/TriageQueue.b288cbf.Verb"
+          }
+        },
+        "required": [
+          "verb",
+          "note"
+        ],
+        "title": "Proposal",
+        "type": "object"
+      },
       "TriageQueue.b288cbf.Question": {
         "description": "The actioner's, handing the item back to the operator.",
         "properties": {
@@ -1535,7 +1582,7 @@
         "type": "object"
       },
       "TriageQueue.b288cbf.Ruling": {
-        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the reconciler's draft, its bet on the item, and the operator's once they submit it\nuntouched; a ruling of their own replaces it. A ruling from before the flag has none.",
+        "description": "The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`\none is the item's proposal as the reconciler wrote it, applied untouched. A ruling from before\nthe flag has none.",
         "properties": {
           "at": {
             "title": "At",
@@ -1689,6 +1736,17 @@
           "observation": {
             "title": "Observation",
             "type": "string"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageQueue.b288cbf.Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "question": {
             "anyOf": [

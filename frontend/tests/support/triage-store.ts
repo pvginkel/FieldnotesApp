@@ -44,7 +44,12 @@ interface Ruling {
   note: string;
   at: string;
   submitted: string | null;
-  guessed?: boolean; // the reconciler's draft; a ruling from before the flag has none
+  guessed?: boolean; // the reconciler's proposal, applied; a ruling from before the flag has none
+}
+
+interface Proposal {
+  verb: Verb;
+  note: string;
 }
 
 interface Item {
@@ -57,6 +62,7 @@ interface Item {
   impact: string;
   snapshot: Omit<Observation, 'id' | 'reactions'>;
   reports: (Reaction & { new: boolean })[];
+  proposal: Proposal | null;
   ruling: Ruling | null;
   question: { at: string; text: string } | null;
   actioned: null;
@@ -109,6 +115,7 @@ export function item(obs: Observation, fields: Partial<Item> = {}): Item {
     impact: 'Every build pays the full compile.',
     snapshot: snapshotOf(obs),
     reports: obs.reactions.map((reaction) => ({ ...reaction, new: false })),
+    proposal: null,
     ruling: null,
     question: null,
     actioned: null,

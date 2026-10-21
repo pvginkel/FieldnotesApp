@@ -103,6 +103,7 @@ export function TriagePage() {
       if (onCard && key === 'y') triage.setVerb('yes');
       else if (onCard && key === 'n') triage.setVerb('no');
       else if (onCard && key === 'l') triage.setVerb('later');
+      else if (onCard && key === 'a') triage.apply();
       else if (onCard && key === 'Tab' && !event.shiftKey) noteRef.current?.focus();
       else if (key === 'ArrowLeft' && shown !== 'actioner') triage.previous();
       else if (onCard && key === 'ArrowRight') triage.next();
@@ -119,7 +120,9 @@ export function TriagePage() {
       case 'actioner':
         return <ActionerPage />;
       case 'card':
-        return <TriageCard item={current!} live={queue?.observations[current!.observation]} />;
+        return (
+          <TriageCard item={current!} live={queue?.observations[current!.observation]} onApply={triage.apply} />
+        );
       case 'finish':
         return (
           <FinishCard
@@ -180,7 +183,6 @@ export function TriagePage() {
           noteRef={noteRef}
           verbsRef={triage.verbsRef}
           draft={triage.draft}
-          guessed={triage.guessed}
           message={triage.message}
           canGoBack={triage.idx > 0}
           onPrevious={triage.previous}

@@ -309,7 +309,7 @@ kbd {
 }
 
 /* A tinted box: the actioner's question in the warning colour, the ask in the info colour, the
-   recommendation in the success colour. */
+   recommendation in the success colour, the reconciler's proposal in the primary. */
 .box {
   margin-top: 20px;
   padding: 12px 16px;
@@ -322,6 +322,27 @@ kbd {
 .box.returned { --tone: var(--warning); --tone-text: var(--warning-text); }
 .box.ask-box { --tone: var(--info); --tone-text: var(--info-text); }
 .box.recommendation-box { --tone: var(--success); --tone-text: var(--success-text); }
+.box.proposal-box { --tone: var(--primary); --tone-text: var(--primary-muted-foreground); }
+.proposal-box .box-head { display: flex; align-items: center; gap: 6px; }
+/* The verb as the pane shows a pressed one. */
+.proposal-verb {
+  margin-left: 4px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: hsl(var(--primary-strong));
+  color: hsl(var(--primary-foreground));
+  font-size: 14px;
+  line-height: 22px;
+}
+/* The note, and Apply at its end: beside a short one, under the last line of a long one. */
+.proposal { display: flex; align-items: flex-end; gap: 16px; }
+.proposal .prose { flex: 1; }
+.proposal .btn { margin-left: auto; flex: none; }
+.btn-primary kbd {
+  border-color: hsl(var(--primary-edge) / 0.6);
+  background: #fff;
+  color: hsl(var(--primary-strong));
+}
 .returned .was { margin-top: 8px; color: hsl(var(--muted-foreground)); }
 
 .section { margin-top: 28px; }
@@ -473,9 +494,8 @@ kbd {
   font-weight: 500;
   cursor: pointer;
 }
-/* The reconciler's draft: a small robot after the verb it drafted. */
-.guessed { display: inline-flex; margin-left: -2px; opacity: 0.75; }
-.returned .was .guessed { margin-left: 0; vertical-align: -0.1em; }
+/* A ruling that is the reconciler's proposal, applied: a small robot after its verb. */
+.guessed { display: inline-flex; vertical-align: -0.1em; }
 .verbs.shake { animation: shake 300ms; }
 @keyframes shake {
   25% { transform: translateX(-4px); }

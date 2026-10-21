@@ -10,8 +10,9 @@ import { item, minutesAgo, observation } from '../support/triage-store';
 test.describe('the mockup checks', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`text meets WCAG AA in the ${theme} theme`, async ({ store, triage, page }) => {
-      // A card with everything on it: a question, a changed observation, reports old and new,
-      // links, issue keys and code; then one of each category, one of them ruled.
+      // A card with everything on it: a question, a changed observation, the reconciler's
+      // proposal and the old ruling that applied it, reports old and new, links, issue keys and
+      // code; then one of each category, one of them ruled.
       const was = observation({ category: 'friction' });
       const now = observation({
         ...was,
@@ -24,7 +25,8 @@ test.describe('the mockup checks', () => {
       const returned = item(was, {
         written: minutesAgo(90),
         question: { at: minutesAgo(30), text: 'Should **acme/widgets** keep `~/.cache`? See https://example.invalid/runners.' },
-        ruling: { verb: 'no', note: 'Not now.', at: minutesAgo(60), submitted: null },
+        proposal: { verb: 'no', note: 'Not now.' },
+        ruling: { verb: 'no', note: 'Not now.', at: minutesAgo(60), submitted: null, guessed: true },
         reports: [...was.reactions.map((r) => ({ ...r, new: false })), { ...now.reactions[1], new: true }],
       });
       const hint = observation({ category: 'hint' });

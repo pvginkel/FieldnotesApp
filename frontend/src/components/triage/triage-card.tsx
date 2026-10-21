@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { Info } from 'lucide-react';
+import { Bot, Info } from 'lucide-react';
 import { changesOf, GITHUB, YOUTRACK, type Item, type Snapshot } from '@/lib/triage/queue';
 import { when } from '@/lib/triage/time';
 import { Emoji, Inline, Prose, Repo, Time } from './prose';
-import { Guessed } from './ruling-pane';
 
 interface TriageCardProps {
   item: Item;
   live: Snapshot | null | undefined; // the observation as the store has it now; null when gone
+  onApply: () => void;
 }
 
 const SectionHead = ({ title }: { title: string }) => (
@@ -23,7 +23,7 @@ const TextSection = ({ title, body }: { title: string; body: string }) =>
     </section>
   ) : null;
 
-export function TriageCard({ item, live }: TriageCardProps) {
+export function TriageCard({ item, live, onApply }: TriageCardProps) {
   const snapshot = item.snapshot;
   const repos = snapshot.repos;
   const changes = changesOf(item, live);
@@ -93,12 +93,33 @@ export function TriageCard({ item, live }: TriageCardProps) {
             )}
           </section>
         )}
+        {item.proposal && (
+          <section className="box proposal-box" data-testid="triage.card.proposal">
+            <div className="box-head">
+              <Bot className="icon" aria-hidden="true" /> Proposed ruling
+              <span className="proposal-verb" data-testid="triage.card.proposal.verb">{item.proposal.verb}</span>
+            </div>
+            <div className="proposal">
+              {item.proposal.note && <Prose source={item.proposal.note} />}
+              <button type="button" className="btn btn-primary" onClick={onApply} data-testid="triage.apply">
+                <kbd>a</kbd> Apply
+              </button>
+            </div>
+          </section>
+        )}
         <TextSection title="Evidence" body={item.evidence} />
         <Reports item={item} />
       </article>
     </div>
   );
 }
+
+/** The mark of a ruling that is the reconciler's proposal, applied as it was. */
+const Guessed = () => (
+  <span className="guessed" title="The reconciler's proposal, applied" data-testid="triage.guessed">
+    <Bot className="icon" role="img" aria-label="The reconciler's proposal, applied" />
+  </span>
+);
 
 /** A popup under its label, left-aligned with it, open while the pointer is on either: a short
  * delay to open, and a grace period to close, so the pointer can move into it to follow a link. */

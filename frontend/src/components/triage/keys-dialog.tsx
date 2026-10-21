@@ -5,6 +5,7 @@ export function KeysDialog({ onClose }: { onClose: () => void }) {
         <h2>Keys</h2>
         <dl className="keys">
           <dt><kbd>y</kbd> <kbd>n</kbd> <kbd>l</kbd></dt><dd>set the verb: yes, no, later</dd>
+          <dt><kbd>a</kbd></dt><dd>apply the proposed ruling and show the next card</dd>
           <dt><kbd>Tab</kbd></dt><dd>to the note</dd>
           <dt><kbd>Esc</kbd></dt><dd>out of the note</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>rule and show the next card</dd>

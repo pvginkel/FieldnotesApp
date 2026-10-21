@@ -100,19 +100,21 @@ class Rulings:
         self.metrics = metrics
 
     def rule(self, id_: str, request: RulingRequest) -> TriageItem:
-        """FR-25: the ruling over any draft, the reconciler's guessed one included; the item as it
-        now stands."""
+        """FR-25: the ruling over any draft, `guessed` when it is the item's proposal as the
+        reconciler wrote it; the item as it now stands."""
         verb = request.verb.value
 
         def edit(root: Path) -> Edited:
             data = _open(root, id_, request.written)
             at = stamp(self.clock())
+            proposal = data.get("proposal") or {}
             ruling = {
                 "verb": verb,
                 "note": request.note,
                 "at": at,
                 "submitted": None,
-                "guessed": False,
+                "guessed": (proposal.get("verb"), proposal.get("note"))
+                == (verb, request.note),
             }
             return _set_ruling(root, id_, data, ruling, f"rule {id_} {verb} (operator)")
 
@@ -133,8 +135,8 @@ class Rulings:
         return item
 
     def submit(self) -> list[str]:
-        """FR-26: every ruled, unsubmitted item submitted in one commit, a guessed draft the
-        operator left as it was included; the ids submitted."""
+        """FR-26: every ruled, unsubmitted item submitted in one commit; the ids submitted. A
+        proposal the operator did not apply is no ruling and goes nowhere."""
 
         def edit(root: Path) -> tuple[list[str], Commit | None]:
             now = stamp(self.clock())

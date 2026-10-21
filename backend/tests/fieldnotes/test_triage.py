@@ -26,6 +26,7 @@ QUESTION = {
     "at": "2026-09-22T07:00:00Z",
     "text": "Which repository holds the setup verb?",
 }
+PROPOSAL = {"verb": "no", "note": "a duplicate"}
 
 
 def snapshot(**fields):
@@ -65,6 +66,7 @@ def item(id_, written=WRITTEN, **fields):
                 "new": False,
             }
         ],
+        "proposal": None,
         "ruling": None,
         "question": None,
         "actioned": None,
@@ -187,7 +189,10 @@ def test_the_queue_is_every_item_not_submitted_returned_first_then_by_written(
 
 def test_an_item_comes_as_the_store_holds_it(start, remote):
     returned = item(
-        IDS[0], ruling=ruling("no", "not ours: KubeCoder's"), question=QUESTION
+        IDS[0],
+        proposal=PROPOSAL,
+        ruling=ruling("no", "not ours: KubeCoder's"),
+        question=QUESTION,
     )
     seed(remote, returned)
     with start() as api:
@@ -206,6 +211,16 @@ def test_a_ruling_from_before_the_flag_is_not_guessed(start, remote):
         [served] = queue(api)["items"]
 
     assert served["ruling"] == ruling("no", "not ours")
+
+
+def test_an_item_from_before_the_proposal_has_none(start, remote):
+    old = item(IDS[0])
+    del old["proposal"]
+    seed(remote, old)
+    with start() as api:
+        [served] = queue(api)["items"]
+
+    assert served == item(IDS[0])
 
 
 def test_the_observations_are_as_the_store_has_them_now(
@@ -247,6 +262,7 @@ def test_a_bad_item_is_left_out_and_logged(start, remote, caplog):
         remote,
         item(IDS[1], ruling=ruling("maybe")),
         item(IDS[7], ruling=ruling(guessed="yes")),
+        item(IDS[8], proposal={"verb": "maybe", "note": ""}),
         item(IDS[2], actioned={"at": "2026-09-22T09:00:00Z", "done": "closed"}),
         broken,
         item(IDS[6]),
@@ -260,10 +276,11 @@ def test_a_bad_item_is_left_out_and_logged(start, remote, caplog):
 
     assert ids(reply) == [IDS[6]]
     logged = "\n".join(caplog.messages)
-    for id_ in (IDS[0], IDS[1], IDS[2], IDS[3], IDS[5], IDS[7]):
+    for id_ in (IDS[0], IDS[1], IDS[2], IDS[3], IDS[5], IDS[7], IDS[8]):
         assert f"{item_path(id_)} is left out of the triage queue" in logged
     assert "the ruling's verb is not one of yes, no, later" in logged
     assert "the ruling's guessed is neither true nor false" in logged
+    assert "the proposal's verb is not one of yes, no, later" in logged
     assert "a stamped item is still open" in logged
     assert f"the file name is not {IDS[4]}.json" in logged
 
@@ -514,18 +531,37 @@ def test_a_ruling_replaces_a_draft_and_a_returned_item_keeps_its_question(
     assert stored(remote, IDS[0]) == response.json()
 
 
-def test_a_ruling_over_the_reconcilers_guessed_draft_is_the_operators(
-    start, remote, clock
-):
-    seed(remote, item(IDS[0], ruling=ruling("no", "a duplicate", guessed=True)))
+def test_the_proposal_applied_is_a_guessed_ruling(start, remote, clock):
+    seed(remote, item(IDS[0], proposal=PROPOSAL))
     clock.now = NOW
     with start() as api:
-        guessed = queue(api)["items"][0]["ruling"]
-        response = rule(api, IDS[0], "no", "a duplicate")
+        [queued] = queue(api)["items"]
+        response = rule(api, IDS[0], "no", "  a duplicate ")
 
-    assert guessed == ruling("no", "a duplicate", guessed=True)
-    assert response.json()["ruling"] == ruling("no", "a duplicate", at=AT)
-    assert stored(remote, IDS[0]) == response.json()
+    # A proposal is no ruling until the operator applies it, and stays beside the ruling.
+    assert queued["proposal"] == PROPOSAL
+    assert queued["ruling"] is None
+    expected = item(
+        IDS[0], proposal=PROPOSAL, ruling=ruling("no", "a duplicate", AT, guessed=True)
+    )
+    assert response.json() == expected
+    assert remote.file(item_path(IDS[0])) == spelled(expected)
+
+
+@pytest.mark.parametrize(
+    "verb, note", [("later", "a duplicate"), ("no", "a duplicate of the uv one")]
+)
+def test_a_ruling_other_than_the_proposal_is_the_operators(
+    start, remote, clock, verb, note
+):
+    seed(remote, item(IDS[0], proposal=PROPOSAL))
+    clock.now = NOW
+    with start() as api:
+        response = rule(api, IDS[0], verb, note)
+
+    expected = item(IDS[0], proposal=PROPOSAL, ruling=ruling(verb, note, AT))
+    assert response.json() == expected
+    assert stored(remote, IDS[0]) == expected
 
 
 @pytest.mark.parametrize("verb", ["no", "later"])
@@ -683,8 +719,12 @@ def test_submit_marks_every_ruled_item_submitted_in_one_commit(start, remote, cl
         ),
         # Returned, and ruled again after its question.
         item(IDS[5], ruling=again, question=QUESTION),
-        # The reconciler's draft, untouched: ruled, and still guessed once submitted.
-        item(IDS[6], ruling=ruling("no", "a duplicate", guessed=True)),
+        # The proposal applied: ruled, and still guessed once submitted.
+        item(
+            IDS[6], proposal=PROPOSAL, ruling=ruling("no", "a duplicate", guessed=True)
+        ),
+        # The proposal alone: no ruling, and not submitted.
+        item(IDS[8], proposal=PROPOSAL),
     ]
     seed(remote, *seeded, **{item_path(IDS[7]): "{"})
     clock.now = NOW
@@ -697,13 +737,14 @@ def test_submit_marks_every_ruled_item_submitted_in_one_commit(start, remote, cl
     assert response.json() == [IDS[1], IDS[2], IDS[5], IDS[6]]
     assert remote.log() == ["submit 4 (operator)", *before]
     assert touched(remote) == [item_path(IDS[n]) for n in (1, 2, 5, 6)]
-    for n, original in enumerate(seeded):
+    for original in seeded:
+        id_ = original["observation"]
         expected = original
-        if n in (1, 2, 5, 6):
+        if id_ in response.json():
             expected = original | {"ruling": original["ruling"] | {"submitted": AT}}
-        assert remote.file(item_path(IDS[n])) == spelled(expected)
-        assert item_faults(f"{IDS[n]}.json", expected) == []
-    assert left == [IDS[4], IDS[0]]
+        assert remote.file(item_path(id_)) == spelled(expected)
+        assert item_faults(f"{id_}.json", expected) == []
+    assert left == [IDS[4], IDS[0], IDS[8]]
 
 
 def test_submit_with_nothing_ruled_writes_nothing(start, remote):

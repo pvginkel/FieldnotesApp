@@ -260,18 +260,16 @@ export function useTriage() {
     noteRef.current?.focus();
   };
 
-  const rule = () => {
-    if (!current || !nav) return;
-    const { verb, note } = draftOf(current);
+  // The ruling saved and the next card shown, without waiting on the write. It is guessed when it
+  // is the item's proposal as the reconciler wrote it, as the store will have it (FR-25).
+  const save = (item: Item, verb: Verb, note: string) => {
+    if (!nav) return;
     const text = note.trim();
-    if (!verb) return refuse(null);
-    if (verb === 'no' && !text) return refuse('A no needs a note.');
-    if (verb === 'later' && !text) return refuse('A later needs a note.');
-    const item = current;
     const id = item.observation;
+    const guessed = item.proposal?.verb === verb && item.proposal.note === text;
     write(
       item,
-      { verb, note: text, at: storeNow(), submitted: null, guessed: false },
+      { verb, note: text, at: storeNow(), submitted: null, guessed },
       () =>
         api.PUT('/api/triage/items/{id}/ruling', {
           params: { path: { id } },
@@ -284,6 +282,28 @@ export function useTriage() {
     go(nav.idx + 1);
   };
 
+  const rule = () => {
+    if (!current) return;
+    const { verb, note } = draftOf(current);
+    const text = note.trim();
+    if (!verb) return refuse(null);
+    if (verb === 'no' && !text) return refuse('A no needs a note.');
+    if (verb === 'later' && !text) return refuse('A later needs a note.');
+    save(current, verb, note);
+  };
+
+  // Apply rules the reconciler's proposal over whatever the pane holds, and moves on. A ruling in
+  // force that is the proposal already stays as it is.
+  const apply = () => {
+    if (!current?.proposal || !nav) return;
+    const { verb, note } = current.proposal;
+    const ruling = isRuled(current) ? current.ruling! : null;
+    if (ruling?.verb !== verb || ruling.note !== note) return save(current, verb, note);
+    const id = current.observation;
+    setBrowser((b) => ({ ...b, drafts: without(b.drafts, id), skipped: without(b.skipped, id) }));
+    go(nav.idx + 1);
+  };
+
   // The pane holds something other than the ruling in force.
   const edited = (item: Item) => {
     const draft = browser.drafts[item.observation];
@@ -291,11 +311,6 @@ export function useTriage() {
     if (!isRuled(item)) return true;
     return draft.verb !== item.ruling!.verb || draft.note.trim() !== item.ruling!.note;
   };
-
-  // The pane shows the reconciler's draft as it wrote it: a submit takes it as ruled (FR-26), and
-  // an edit saved over it is the operator's. A ruling without the flag is no guess, as the
-  // backend's default has it.
-  const guessed = (item: Item) => isRuled(item) && (item.ruling!.guessed ?? false) && !edited(item);
 
   // → is `next` while the pane shows a verb: it saves an edit, as Ctrl+Enter does, and moves on.
   // Without a verb it is `skip`: the card goes to the back of the stack next time. A ruled card
@@ -378,7 +393,6 @@ export function useTriage() {
     ruledCount,
     submitting,
     draft: current ? draftOf(current) : { verb: null, note: '' },
-    guessed: current ? guessed(current) : false,
     message,
     skipped: browser.skipped,
     prefs: browser.prefs,
@@ -390,6 +404,7 @@ export function useTriage() {
     previous,
     next,
     rule,
+    apply,
     setVerb,
     setNote,
     clearNote,

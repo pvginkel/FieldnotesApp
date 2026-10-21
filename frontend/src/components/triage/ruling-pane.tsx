@@ -1,5 +1,4 @@
 import { useLayoutEffect, type RefObject } from 'react';
-import { Bot } from 'lucide-react';
 import type { Draft } from '@/lib/triage/browser-state';
 import type { Verb } from '@/lib/triage/queue';
 
@@ -9,7 +8,6 @@ interface RulingPaneProps {
   noteRef: RefObject<HTMLTextAreaElement | null>;
   verbsRef: RefObject<HTMLDivElement | null>;
   draft: Draft;
-  guessed: boolean; // the draft is the reconciler's, untouched
   message: string | null;
   canGoBack: boolean;
   onPrevious: () => void;
@@ -39,7 +37,6 @@ export function RulingPane({
   noteRef,
   verbsRef,
   draft,
-  guessed,
   message,
   canGoBack,
   onPrevious,
@@ -84,7 +81,6 @@ export function RulingPane({
                 data-testid={`triage.verb.${verb}`}
               >
                 <kbd>{key}</kbd> {verb}
-                {guessed && draft.verb === verb && <Guessed />}
               </button>
             ))}
           </div>
@@ -120,10 +116,3 @@ export function RulingPane({
     </section>
   );
 }
-
-/** The mark of the reconciler's draft ruling. */
-export const Guessed = () => (
-  <span className="guessed" title="Drafted by the reconciler" data-testid="triage.guessed">
-    <Bot className="icon" role="img" aria-label="Drafted by the reconciler" />
-  </span>
-);

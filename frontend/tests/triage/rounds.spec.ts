@@ -85,38 +85,72 @@ test.describe('the finish card', () => {
   });
 });
 
-test.describe("the reconciler's draft", () => {
-  test('shows a robot on its verb; → leaves it as drafted, a submit takes it, and an edit saved over it is the operator\'s', async ({ store, triage }) => {
-    const drafted = (note: string) => ({ verb: 'no' as const, note, at: minutesAgo(60), submitted: null, guessed: true });
-    const { observations, items, ids } = stack(2, (i) => ({ ruling: drafted(`A duplicate (${i}).`) }));
+test.describe("the reconciler's proposal", () => {
+  test('is a box of its own with nothing preset; Apply rules it over any answer and moves on; one left unapplied is no ruling', async ({ store, triage }) => {
+    const proposal = (i: number) => ({ verb: 'no' as const, note: `A duplicate (${i}).` });
+    const saved = { verb: 'yes' as const, note: 'Raise it.', at: minutesAgo(30), submitted: null, guessed: false };
+    const { observations, items, ids } = stack(4, (i) => ({
+      proposal: proposal(i),
+      ...(i === 1 ? { ruling: saved } : {}),
+    }));
+    await store.layOut({ observations, items });
+    await triage.open();
+
+    // Nothing preset: the proposal is read in its box, and the pane is the operator's.
+    await triage.expectCard(ids[0]);
+    await expect(triage.proposalVerb).toHaveText('no');
+    await expect(triage.proposal).toContainText('A duplicate (0).');
+    await triage.expectVerb(null);
+    await expect(triage.note).toHaveValue('');
+    await triage.expectSegments(['open', 'ruled', 'open', 'open']);
+
+    // Apply over a verb picked and a note typed.
+    await triage.press('y');
+    await triage.note.pressSequentially('Mine.');
+    await triage.apply.click();
+    await triage.expectCard(ids[1]);
+    await expect.poll(() => store.ruling(ids[0])).toMatchObject({ verb: 'no', note: 'A duplicate (0).', guessed: true });
+
+    // Its key, over a ruling the operator saved.
+    await triage.expectVerb('yes');
+    await triage.press('a');
+    await triage.expectCard(ids[2]);
+    await expect.poll(() => store.ruling(ids[1])).toMatchObject({ verb: 'no', note: 'A duplicate (1).', guessed: true });
+
+    // A ruling of the operator's own is theirs, the proposal beside it.
+    await triage.press('n');
+    await triage.note.pressSequentially('Not a duplicate.');
+    await triage.press('Control+Enter');
+    await expect.poll(() => store.ruling(ids[2])).toMatchObject({ verb: 'no', note: 'Not a duplicate.', guessed: false });
+
+    // Back on an applied card: the ruling in the pane, the proposal still in its box.
+    await triage.press('ArrowLeft');
+    await triage.press('ArrowLeft');
+    await triage.expectCard(ids[1]);
+    await triage.expectVerb('no');
+    await expect(triage.note).toHaveValue('A duplicate (1).');
+    await expect(triage.proposal).toBeVisible();
+
+    await triage.headerSubmit.click();
+    await expect(triage.finishSubmit).toHaveText('Submit 3');
+    await triage.finishSubmit.click();
+    await expect(triage.toasts).toContainText('3 rulings submitted.');
+    expect(await store.ruling(ids[0])).toMatchObject({ guessed: true, submitted: expect.stringMatching(/Z$/) });
+    // The proposal never applied went nowhere: the item is still the operator's to rule.
+    expect(await store.ruling(ids[3])).toBeNull();
+    await triage.expectCard(ids[3]);
+  });
+
+  test('an item without one shows no box, and its key does nothing', async ({ store, triage }) => {
+    const { observations, items, ids } = stack(1);
     await store.layOut({ observations, items });
     await triage.open();
 
     await triage.expectCard(ids[0]);
-    await triage.expectVerb('no');
-    await expect(triage.note).toHaveValue('A duplicate (0).');
-    await expect(triage.pane.getByTestId('triage.verb.no').getByTestId('triage.guessed')).toBeVisible();
-    await triage.expectSegments(['ruled', 'ruled']);
-    await triage.press('ArrowRight');
-
-    // An edit takes the robot off at once, and → saves it as the operator's.
-    await triage.expectCard(ids[1]);
-    await expect(triage.guessed).toBeVisible();
-    await triage.press('Tab');
-    await triage.note.press('End');
-    await triage.note.pressSequentially(' Merge it.');
-    await expect(triage.guessed).toHaveCount(0);
-    await triage.press('Escape');
-    await triage.press('ArrowRight');
-    await expect.poll(() => store.ruling(ids[1])).toMatchObject({ note: 'A duplicate (1). Merge it.', guessed: false });
-
-    await expect(triage.finishSubmit).toHaveText('Submit 2');
-    await triage.finishSubmit.click();
-    await expect(triage.toasts).toContainText('2 rulings submitted.');
-    // The untouched draft went as the reconciler wrote it, still marked guessed.
-    const untouched = await store.ruling(ids[0]);
-    expect(untouched).toMatchObject({ verb: 'no', note: 'A duplicate (0).', guessed: true });
-    expect(untouched?.submitted).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    await expect(triage.proposal).toHaveCount(0);
+    await triage.press('a');
+    await triage.expectCard(ids[0]);
+    await triage.expectVerb(null);
   });
 });
 

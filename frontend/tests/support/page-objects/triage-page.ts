@@ -11,7 +11,9 @@ export class TriagePage {
   readonly pane: Locator;
   readonly note: Locator;
   readonly noteClear: Locator;
-  readonly guessed: Locator;
+  readonly proposal: Locator;
+  readonly proposalVerb: Locator;
+  readonly apply: Locator;
   readonly previousButton: Locator;
   readonly nextButton: Locator;
   readonly segments: Locator;
@@ -43,8 +45,10 @@ export class TriagePage {
     this.pane = page.getByTestId('triage.pane');
     this.note = page.getByTestId('triage.note');
     this.noteClear = page.getByTestId('triage.note.clear');
-    // The robot on the verb of the reconciler's draft, untouched.
-    this.guessed = page.getByTestId('triage.guessed');
+    // The reconciler's proposal, in its own box below the recommendation.
+    this.proposal = page.getByTestId('triage.card.proposal');
+    this.proposalVerb = page.getByTestId('triage.card.proposal.verb');
+    this.apply = page.getByTestId('triage.apply');
     this.previousButton = page.getByTestId('triage.previous');
     this.nextButton = page.getByTestId('triage.next');
     this.segments = page.getByTestId('triage.progress.segment');

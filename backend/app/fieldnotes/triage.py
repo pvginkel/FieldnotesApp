@@ -10,6 +10,9 @@ The item rules are the app's own copy of the store's (`skills/reconciler/reconci
 repo: `ITEM_KEYS`, `SNAPSHOT_KEYS`, `item_faults`), for an open item. An item file that is not JSON,
 breaks a rule, or does not parse as an item is logged and left out until an edit fixes it; it never
 fails the queue.
+
+The reconciler's `proposal`, the ruling it would bet on, sits beside the operator's `ruling` and is
+never one: the operator applies it or rules otherwise. An item from before the key has none.
 """
 
 from __future__ import annotations
@@ -52,11 +55,13 @@ ITEM_KEYS = (
     "impact",
     "snapshot",
     "reports",
+    "proposal",
     "ruling",
     "question",
     "actioned",
 )
 ITEM_TEXTS = ("headline", "ask", "evidence", "recommendation", "impact")
+OPTIONAL_KEYS = ("proposal",)  # an item from before the key has none
 SNAPSHOT_KEYS = (
     "status",
     "category",
@@ -114,7 +119,11 @@ def _is_text(value: Any) -> bool:
 def item_faults(name: str, item: dict[str, Any]) -> list[str]:
     """What the store's check finds wrong with the open item `triage/<name>`; none when it
     passes."""
-    found = [f"{key} is missing" for key in ITEM_KEYS if key not in item]
+    found = [
+        f"{key} is missing"
+        for key in ITEM_KEYS
+        if key not in item and key not in OPTIONAL_KEYS
+    ]
     id_ = item.get("observation")
     if not isinstance(id_, str) or not _ID.match(id_):
         found.append(f"observation {id_!r} is not a ULID")
@@ -137,6 +146,12 @@ def item_faults(name: str, item: dict[str, Any]) -> list[str]:
             report.get(k) is None for k in REPORT_KEYS[:3]
         ):
             found.append(f"report {position} lacks at, emoji or repo")
+    proposal = item.get("proposal")
+    if proposal is not None:
+        if not isinstance(proposal, dict) or proposal.get("verb") not in tuple(Verb):
+            found.append(f"the proposal's verb is not one of {', '.join(Verb)}")
+        elif not isinstance(proposal.get("note"), str):
+            found.append("the proposal's note is not text")
     ruling = item.get("ruling")
     if ruling is not None:
         if not isinstance(ruling, dict) or ruling.get("verb") not in tuple(Verb):
@@ -204,10 +219,17 @@ class Report(_Model):
     new: bool
 
 
+class Proposal(_Model):
+    """The reconciler's: the ruling it would bet on, which the operator may apply."""
+
+    verb: Verb
+    note: str
+
+
 class Ruling(_Model):
     """The operator's: a draft until `submitted` is set, the actioner's from then on. A `guessed`
-    one is the reconciler's draft, its bet on the item, and the operator's once they submit it
-    untouched; a ruling of their own replaces it. A ruling from before the flag has none."""
+    one is the item's proposal as the reconciler wrote it, applied untouched. A ruling from before
+    the flag has none."""
 
     verb: Verb
     note: str
@@ -240,6 +262,7 @@ class TriageItem(_Model):
     impact: str
     snapshot: Snapshot
     reports: list[Report]
+    proposal: Proposal | None = None
     ruling: Ruling | None
     question: Question | None
     actioned: Actioned | None

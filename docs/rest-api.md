@@ -115,21 +115,22 @@ unknown fields are refused.
   [webhooks.md](webhooks.md#board-sync).
 - **Triage queue** (FR-23): the operator's queue. `items` holds every open item in the store's
   `triage/` (not `done/`, not `archive/`) whose ruling is absent or not submitted, every field as
-  the item's file holds it, but for a ruling from before `guessed`, which is served with
-  `guessed: false`. Returned items (a `question`, and not submitted since) come first, then
-  the rest, each group by `written`, oldest first. `observations` maps each item's observation id to
-  its fields as the observation index holds them, which is as they stand now unless the index lags
-  (see [match-pipeline.md](match-pipeline.md#the-index)): the ten fields of an item's `snapshot`,
-  spelled as the snapshot spells them, so an observation unchanged since its item was written equals
-  the snapshot. It is null for an observation the index does not hold (merged away or deleted, or
-  not taken in yet). The items come from the
-  triage index, which reads `triage/*.json` at startup and after every pull and write. An item file
-  that is not JSON, breaks the store's item rules (the app's own copy of the store's check) or does
-  not parse is logged and left out.
-- **Ruling** (FR-25): sets the item's `ruling` to
-  `{verb, note, at: now, submitted: null, guessed: false}` over any draft, the reconciler's guessed
-  one included. A returned item keeps its `question`; a ruling whose `at` is later than the
-  question's is its answer. A `no` or a `later` without a note is refused (`validation-error`).
+  the item's file holds it, but for a ruling from before `guessed`, which is served with `guessed:
+  false`, and an item from before `proposal`, which is served with `proposal: null`. Returned items
+  (a `question`, and not submitted since) come first, then the rest, each group by `written`, oldest
+  first. `observations` maps each item's observation id to its fields as the observation index holds
+  them, which is as they stand now unless the index lags (see
+  [match-pipeline.md](match-pipeline.md#the-index)): the ten fields of an item's `snapshot`, spelled
+  as the snapshot spells them, so an observation unchanged since its item was written equals the
+  snapshot. It is null for an observation the index does not hold (merged away or deleted, or not
+  taken in yet). The items come from the triage index, which reads `triage/*.json` at startup and
+  after every pull and write. An item file that is not JSON, breaks the store's item rules (the
+  app's own copy of the store's check) or does not parse is logged and left out.
+- **Ruling** (FR-25): sets the item's `ruling` to `{verb, note, at: now, submitted: null, guessed}`
+  over any draft, `guessed` true when the verb and the note, stripped, equal the item's `proposal`
+  (the triage UI's Apply) and false otherwise. A returned item keeps its `question`; a ruling whose
+  `at` is later than the question's is its answer. A `no` or a `later` without a note is refused
+  (`validation-error`).
 - **Take-back** (FR-25): sets the item's `ruling` to null. On an item without a ruling it writes
   nothing.
 - **Refusals of a ruling and a take-back**, each decided on the item as the store holds it at the
@@ -140,11 +141,11 @@ unknown fields are refused.
   one the queue leaves out (not JSON, against the store's item rules, or not parsing), the fault
   named in the detail. A refusal writes nothing.
 - **Submit** (FR-26): marks every ruled, unsubmitted item in `triage/` submitted (`ruling.submitted:
-  now`) and answers with their ids. A guessed draft (the reconciler's, untouched) is ruled, and
-  keeps `guessed: true`. A returned item counts as ruled only once its ruling's `at` is later than
-  its question's. With nothing ruled it writes nothing, starts nothing and answers `[]`. A submit
-  that submitted something then starts the actioner, off the request: see
-  [The actioner start](#the-actioner-start).
+  now`) and answers with their ids. An item with a `proposal` and no ruling is not ruled, and is not
+  submitted; a ruling that is the proposal applied keeps `guessed: true`. A returned item counts as
+  ruled only once its ruling's `at` is later than its question's. With nothing ruled it writes
+  nothing, starts nothing and answers `[]`. A submit that submitted something then starts the
+  actioner, off the request: see [The actioner start](#the-actioner-start).
 - **Actioner state** (FR-33): the actioner as the app bar's Actioner pill and the actioner page
   show it: a start pending, the run held with its last log lines, and the last failure. See
   [The actioner's state](#the-actioners-state).

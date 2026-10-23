@@ -40,9 +40,9 @@ leaves its follow as its shutdown is announced, held by no follow. A follow held
 whose heartbeat has stopped, is taken over by whichever pod next reads the actioner's state, and
 goes on from where the record stands. A pod that has left its follows takes none over.
 
-At most one start is pending in a pod, from the submit that asks for it until the controller accepts
-the run, refuses it, or nothing waits: a submit meanwhile is covered by it. The pending start lives
-in this process alone, so a restarted API resumes none; the hold outlives it.
+At most one start is pending in a pod, from the submit that asks for it until the run the controller
+accepted is held, the controller refuses it, or nothing waits: a submit meanwhile is covered by it.
+The pending start lives in this process alone, so a restarted API resumes none; the hold outlives it.
 """
 
 from __future__ import annotations
@@ -203,9 +203,19 @@ class Hold:
     def read(self) -> Held | None:
         return self.load()[0]
 
-    def take(self, run_id: str, at: datetime, follow: Followed | None = None) -> None:
-        """Hold the run started, followed as `follow` has it, which clears the last failure."""
-        self.change(lambda held, failure: (None, Held(run_id, at, follow=follow), None))
+    def take(
+        self,
+        run_id: str,
+        at: datetime,
+        follow: Followed | None = None,
+        then: Callable[[], None] | None = None,
+    ) -> None:
+        """Hold the run started, followed as `follow` has it, which clears the last failure;
+        `then` runs once the hold is written, before any other writer reads it."""
+        self.change(
+            lambda held, failure: (None, Held(run_id, at, follow=follow), None),
+            then,
+        )
 
     def release(self, run_id: str, failure: ActionerFailure | None = None) -> bool:
         """Release the hold if it names `run_id`, recording `failure` when the run did not
@@ -283,9 +293,10 @@ class Hold:
             [Held | None, ActionerFailure | None],
             tuple[T, Held | None, ActionerFailure | None],
         ],
+        then: Callable[[], None] | None = None,
     ) -> T:
-        """Load the file and write what `change` makes of it, one writer at a time on either pod;
-        the value `change` answers with it."""
+        """Load the file and write what `change` makes of it, one writer at a time on either pod,
+        and run `then` before the next writer's turn; the value `change` answers with it."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock.open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -293,6 +304,8 @@ class Hold:
             value, held, failure = change(*current)
             if (held, failure) != current:
                 self._write(held, failure)
+            if then is not None:
+                then()
             return value
 
     def _write(self, held: Held | None, failure: ActionerFailure | None) -> None:
@@ -555,7 +568,9 @@ class Actioner:
             followed = Followed(
                 note, follower=self._follower(follow) if follow is not None else None
             )
-        self.hold.take(run_id, self.clock(), followed)
+        # The start ends in the hold's turn: a webhook for the run, which releases the hold in a
+        # turn of its own, then finds no start pending that would cover its retry.
+        self.hold.take(run_id, self.clock(), followed, then=self._settle)
         self.metrics.actioner_starts.labels("started").inc()
         logger.info(
             "actioner run %s started for %d waiting: %s",
@@ -570,7 +585,6 @@ class Actioner:
                 "actioner run %s: its follow left to the other pod: shutdown is announced",
                 run_id,
             )
-        self._settle()
         return "started"
 
     def ended(self, report: RunReport, tasks: TaskService) -> bool:

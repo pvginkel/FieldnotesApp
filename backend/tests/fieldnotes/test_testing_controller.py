@@ -78,11 +78,12 @@ def fake(api):
 
 
 def submitted(api, eventually):
-    """An invented item ruled and submitted, and the actioner's run held."""
+    """An invented item ruled and submitted, and the actioner's start over: its run held, or its
+    refusal recorded."""
     store = {item_path(IDS[0]): spelled(item(IDS[0], ruling=ruling()))}
     assert api.put("/api/testing/store", json={"files": store}).status_code == 204
     assert api.post("/api/triage/submit").json() == [IDS[0]]
-    eventually(lambda: actioner(api)["state"] != "starting", "the actioner's start")
+    eventually(lambda: not api.runtime.actioner.pending, "the actioner's start")
 
 
 def test_the_backend_serves_the_inbox_and_the_actioner_over_its_fake_controller(

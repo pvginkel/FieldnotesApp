@@ -303,7 +303,7 @@ def test_a_run_skipped_for_want_of_an_environment_is_tried_again_five_minutes_la
         skipped_retry = api.runtime.actioner.skipped_retry
         api.runtime.actioner.skipped_retry = 0.01
         submit(api)
-        eventually(lambda: held(api) == "run-1", "the run")
+        eventually(lambda: not api.runtime.actioner.pending, "the start")
         ended(api, kubecoder, "run-1", "skipped", reason)
         eventually(lambda: held(api) == "run-2", "the run tried again")
         value = scrape(api)
@@ -313,6 +313,48 @@ def test_a_run_skipped_for_want_of_an_environment_is_tried_again_five_minutes_la
         value("fieldnotes_actioner_runs_total", outcome="skipped", reason=reason) == 1
     )
     assert f"actioner run run-1 skipped, {reason}" in caplog.text
+
+
+def test_a_skip_that_comes_as_its_run_is_held_is_tried_again(
+    start, remote, kubecoder, monkeypatch
+):
+    """A skip whose webhook comes as soon as the run is held, before the start that holds it has
+    returned, is still tried again: the start ended as it held the run, so it covers no retry
+    (FN-58)."""
+    seed(remote, item(IDS[0], ruling=ruling()))
+    with start() as api:
+        actioner = api.runtime.actioner
+        take, attempt = actioner.hold.take, actioner.attempt
+        taken = threading.Event()
+        delivered = threading.Event()
+        returned = threading.Event()
+
+        def hold_then_wait(*args, **kwargs):
+            take(*args, **kwargs)
+            taken.set()
+            delivered.wait(20)
+
+        def attempt_then_tell():
+            try:
+                return attempt()
+            finally:
+                returned.set()
+
+        monkeypatch.setattr(actioner.hold, "take", hold_then_wait)
+        monkeypatch.setattr(actioner, "attempt", attempt_then_tell)
+        submit(api)
+        assert taken.wait(20), "the run held"
+        reply = ended(api, kubecoder, "run-1", "skipped", "in-use")
+        delivered.set()
+        assert returned.wait(20), "the start returned"
+        pending = actioner.pending
+        shown = state(api)
+
+    assert reply.json() == {"action": "queued"}
+    assert pending
+    assert (shown["state"], shown["run"]) == ("starting", None)
+    assert shown["failure"]["outcome"] == "skipped"
+    assert len(kubecoder.runs) == 1
 
 
 @pytest.mark.parametrize(

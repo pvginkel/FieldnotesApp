@@ -7,7 +7,6 @@ session works in it, and clears the sitting. All behind the operator's `editor` 
 Against the fake controller; every environment, line and message is invented."""
 
 import json
-from datetime import timedelta
 from pathlib import Path
 from queue import Empty
 
@@ -623,60 +622,6 @@ def test_a_turn_in_flight_shows_no_message_and_keeps_them_on_file(
     assert kept.offset == read
     assert progress(heard, task_id) == [LINES[0]]
     assert state["sitting"]["transcript"][-1] == entry("session", NARRATION, ANSWER)
-
-
-def written_before(environ) -> None:
-    """The sitting's file rewritten in the layout before 2026-10-15: each entry's one text as
-    `text`."""
-    path = Path(environ["FIELDNOTES_CACHE_DIR"]) / INBOX_SITTING
-    raw = json.loads(path.read_text())
-    raw["transcript"] = [
-        {"author": e["author"], "text": e["messages"][0], "at": e["at"]}
-        for e in raw["transcript"]
-    ]
-    path.write_text(json.dumps(raw))
-
-
-def test_a_live_sitting_written_before_replies_held_messages_loads_and_goes_on(
-    start, kubecoder, eventually, environ
-):
-    kubecoder.add_environment(ENV)
-    with start() as api:
-        opened(api, eventually, kubecoder)
-        written_before(environ)
-        loaded = inbox(api)
-        kubecoder.turns.append(FakeTurn([FakeMessage(NARRATION), LINES[0]], ANSWER))
-        finished(api, eventually, send(api, "go").json()["sitting"]["turn"]["task"])
-        state = inbox(api)
-
-    assert loaded["sitting"]["transcript"] == [
-        entry("operator", "/dev:inbox"),
-        entry("session", WRITE_UP),
-    ]
-    assert state["sitting"]["transcript"] == [
-        entry("operator", "/dev:inbox"),
-        entry("session", WRITE_UP),
-        entry("operator", "go"),
-        entry("session", NARRATION, ANSWER),
-    ]
-    assert kubecoder.session(ENV, "claude").messages == ["/dev:inbox", "go"]
-
-
-def test_a_rested_sitting_written_before_replies_held_messages_loads(
-    start, kubecoder, eventually, environ
-):
-    kubecoder.add_environment(ENV)
-    with start() as api:
-        opened(api, eventually, kubecoder)
-        assert api.runtime.inbox.rest(timedelta(0))
-        written_before(environ)
-        state = inbox(api)
-
-    assert state["sitting"]["lost"] is None
-    assert state["sitting"]["transcript"] == [
-        entry("operator", "/dev:inbox"),
-        entry("session", WRITE_UP),
-    ]
 
 
 def test_a_send_without_a_sitting_is_a_conflict(start, kubecoder):

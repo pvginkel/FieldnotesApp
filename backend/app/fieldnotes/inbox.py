@@ -124,17 +124,6 @@ class InboxEntry(_Model):
     messages: list[str] = Field(min_length=1)
     at: str
 
-    @model_validator(mode="before")
-    @classmethod
-    def _one_text(cls, data: Any) -> Any:
-        # A sitting file of the layout before 2026-10-15 holds each entry's one text as `text`.
-        if isinstance(data, dict) and "text" in data:
-            return {
-                **{key: value for key, value in data.items() if key != "text"},
-                "messages": [data["text"]],
-            }
-        return data
-
 
 class InboxTurn(_Model):
     """The turn in flight, a Start's included: the task the page follows for its progress, and the

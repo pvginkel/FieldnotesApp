@@ -253,7 +253,17 @@ kbd {
   background: hsl(var(--background));
 }
 
-.card { padding: 20px 0 40px; }
+.card { padding: 20px 0 40px; animation: card-in 150ms ease-out; }
+.card.back { animation-name: card-in-back; }
+
+/* A new card slides in from the side the stack moved to, so a move reads as one. The card is
+   keyed by its observation, so each move mounts it again; it stays inside the column's padding. */
+@keyframes card-in { from { opacity: 0.5; transform: translateX(24px); } }
+@keyframes card-in-back { from { opacity: 0.5; transform: translateX(-24px); } }
+@media (prefers-reduced-motion: reduce) {
+  .card, .card.back { animation-name: card-fade; }
+}
+@keyframes card-fade { from { opacity: 0.5; } }
 
 /* The info bars, the card's top line and each report's head: a tinted strip, set off from
    the prose. */

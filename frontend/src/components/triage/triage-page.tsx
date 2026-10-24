@@ -121,7 +121,13 @@ export function TriagePage() {
         return <ActionerPage />;
       case 'card':
         return (
-          <TriageCard item={current!} live={queue?.observations[current!.observation]} onApply={triage.apply} />
+          <TriageCard
+            key={current!.observation}
+            item={current!}
+            live={queue?.observations[current!.observation]}
+            back={triage.back}
+            onApply={triage.apply}
+          />
         );
       case 'finish':
         return (

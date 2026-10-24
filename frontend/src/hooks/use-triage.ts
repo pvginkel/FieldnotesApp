@@ -23,12 +23,13 @@ import { storeNow } from '@/lib/triage/time';
 const QUEUE_KEY = ['getTriageQueue', undefined];
 
 // Where the operator is: the stack for this visit (what was seen, then the rest in stack order),
-// the card shown, and whether the page is past the last card, where an item arriving meanwhile
-// does not move it.
+// the card shown, whether the page is past the last card, where an item arriving meanwhile does
+// not move it, and whether the last move went back, which the card slides in from.
 interface Nav {
   order: string[];
   idx: number;
   atFinish: boolean;
+  back?: boolean;
 }
 
 type View = 'loading' | 'error' | 'empty' | 'finish' | 'card';
@@ -169,7 +170,7 @@ export function useTriage() {
       setBrowser((b) => (b.seen.includes(id) ? b : { ...b, seen: [...b.seen, id] }));
     }
     const next = Math.max(0, Math.min(idx, nav.order.length));
-    setNav({ ...nav, idx: next, atFinish: next >= nav.order.length });
+    setNav({ ...nav, idx: next, atFinish: next >= nav.order.length, back: next < nav.idx });
     setMessage(null);
     if (mainRef.current) mainRef.current.scrollTop = 0;
   };
@@ -389,6 +390,7 @@ export function useTriage() {
     current,
     order: nav?.order ?? [],
     idx: nav?.idx ?? 0,
+    back: nav?.back ?? false,
     byId,
     ruledCount,
     submitting,

@@ -20,10 +20,18 @@ export interface Failure {
  * the text. A placeholder counts as text. Exempt: a disabled control, as WCAG exempts inactive
  * components; the meta line's `·` separators, which are decoration; and the header's help icon,
  * dimmed until hovered by the operator's call (triage.css, `.help`). Measured at rest: the mouse
- * is moved off whatever it was over.
+ * is moved off whatever it was over, and what animates, such as a card fading in, has finished.
  */
 export async function contrastFailures(page: Page): Promise<Failure[]> {
   await page.mouse.move(0, 0);
+  await page.evaluate(() =>
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished),
+    ),
+  );
   return page.evaluate(() => {
     type Rgba = [number, number, number, number];
     const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;

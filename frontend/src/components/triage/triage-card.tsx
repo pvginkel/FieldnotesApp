@@ -8,6 +8,7 @@ import { Emoji, Inline, Prose, Repo, Time } from './prose';
 interface TriageCardProps {
   item: Item;
   live: Snapshot | null | undefined; // the observation as the store has it now; null when gone
+  back: boolean; // reached by going back: it slides in from the left
   onApply: () => void;
 }
 
@@ -23,7 +24,7 @@ const TextSection = ({ title, body }: { title: string; body: string }) =>
     </section>
   ) : null;
 
-export function TriageCard({ item, live, onApply }: TriageCardProps) {
+export function TriageCard({ item, live, back, onApply }: TriageCardProps) {
   const snapshot = item.snapshot;
   const repos = snapshot.repos;
   const changes = changesOf(item, live);
@@ -32,7 +33,11 @@ export function TriageCard({ item, live, onApply }: TriageCardProps) {
 
   return (
     <div className="column">
-      <article className="card" data-testid="triage.card" data-observation={item.observation}>
+      <article
+        className={`card${back ? ' back' : ''}`}
+        data-testid="triage.card"
+        data-observation={item.observation}
+      >
         <div className="meta">
           <div className="id-anchor">
             <HoverPopover content={store}>

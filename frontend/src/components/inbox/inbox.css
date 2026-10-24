@@ -30,7 +30,7 @@
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
 }
-.session-md > .md + .md { margin-top: 32px; }
+.session-md > .md + .md { margin-top: 14px; }
 
 .fenced {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

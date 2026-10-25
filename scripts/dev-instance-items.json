@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "headline": "A suite's scratch directory outlives the run that made it",
+      "ask": "Remove it in the fixture's teardown, or leave it to the container's next restart?",
+      "recommendation": "Remove it in the teardown: it is one line, and a full disk is a confusing failure.",
+      "impact": "A few hundred megabytes per run, until a restart clears them.",
+      "proposal": {"verb": "yes", "note": "Card it: the fixture's teardown removes its scratch directory."}
+    },
+    {
+      "headline": "The formatter and the linter disagree on one rule",
+      "ask": "Pin the two to one line length, or is the disagreement known and harmless?",
+      "recommendation": "No change: the formatter's output is what CI checks, and the linter's rule is off there.",
+      "impact": "One confused retry per agent that runs the linter on its own.",
+      "proposal": {"verb": "no", "note": "Known and harmless: CI checks the formatter's output, so follow the formatter."}
+    },
+    {
+      "headline": "A long build's log has no timestamps",
+      "ask": "Add timestamps to the build log now, or wait until a slow stage needs finding?",
+      "recommendation": "Later: one report, and the stage durations in the build's summary answer most of it.",
+      "impact": "Minutes of scrolling whenever a build is slow.",
+      "proposal": {"verb": "later", "note": "When a second session has to find a slow stage by hand."}
+    },
+    {
+      "headline": "A sidecar's port is documented in two places with two numbers",
+      "ask": "Which number is right, and should one of the two places go?",
+      "recommendation": "Your call: the running sidecar answers on the first, but the guide shows the second.",
+      "impact": "A failed connection for each agent that reads the guide first."
+    },
+    {
+      "headline": "A timer can be deleted but not paused",
+      "ask": "Give timers a pause, or is deleting and recreating one enough?",
+      "recommendation": "Your call: a pause is a small API change, but nobody has asked for it twice.",
+      "impact": "A recreated timer for every pause, and its run history lost with the old one."
+    }
+  ]
+}

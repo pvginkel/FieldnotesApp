@@ -6,7 +6,15 @@
 # it up), and seeds the dev instance's store: a scratch copy of the Fieldnotes store under
 # backend/.run/dev, so rulings made here never reach the real one. The `.env` is rewritten every
 # time; the scratch store is seeded only when it is missing, so what was ruled on it survives a
-# restart. Refresh it (stack stopped): rm -rf backend/.run/dev and run this again.
+# restart.
+#
+# `--reset` rebuilds it (FN-60): it stops the dev stack, seeds the scratch store afresh, and lays
+# the invented triage items of scripts/dev-instance-items.json on it through the store's own
+# `reconcile.py triage`, so the triage UI has a queue to try whatever the real one holds, written
+# in the item format of the day. The items carry no ids: each goes on an open observation of the
+# copy that has no open item. The embedding cache stays, as it is addressed by the embedded text.
+# Start the stack again afterwards. Items are seeded only here, never at environment start: a
+# stale items file fails the reset, not `kc project setup`.
 #
 # An environment without the store's checkout gets no dev instance: ModernAppTemplate's environment
 # checks FieldnotesApp out for template syncs only, and failing here would stop `kc project setup`
@@ -17,6 +25,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEV="$ROOT/backend/.run/dev"
 STORE_SOURCE=/work/Fieldnotes # the store's checkout, a repo of this environment
+ITEMS="$ROOT/scripts/dev-instance-items.json"
+
+reset=false
+case "${1-}" in
+    "") ;;
+    --reset) reset=true ;;
+    *)
+        echo "usage: $0 [--reset]" >&2
+        exit 2
+        ;;
+esac
+
+if $reset; then
+    if [[ ! -d "$STORE_SOURCE/.git" ]]; then
+        echo "no store checkout at $STORE_SOURCE: nothing to reset the dev instance from" >&2
+        exit 1
+    fi
+    "$ROOT/scripts/dev.py" stop
+    rm -rf "$DEV/remote.git" # the seeding below removes the checkout
+fi
 
 if [[ ! -d "$DEV/remote.git" ]]; then
     if [[ ! -d "$STORE_SOURCE/.git" ]]; then
@@ -44,3 +72,38 @@ FIELDNOTES_STORE_DIR=$DEV/checkout
 FIELDNOTES_CACHE_DIR=$DEV/cache
 # No FIELDNOTES_KUBECODER_*: a submit here starts no actioner.
 EOF
+
+if $reset; then
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "$WORK"' EXIT
+    git clone --quiet "$DEV/remote.git" "$WORK/store"
+    # Each item on the next open observation, oldest first, that has no open item.
+    python3 -I - "$ITEMS" "$WORK/store" >"$WORK/items.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+items, store = Path(sys.argv[1]), Path(sys.argv[2])
+specs = json.loads(items.read_text())["items"]
+listed = {path.stem for path in (store / "triage").glob("*.json")}
+free = [
+    path.stem
+    for path in sorted((store / "observations").glob("*.md"))
+    if path.stem not in listed
+    and re.search(r"^status: open$", path.read_text().split("\n---\n", 1)[0], re.M)
+]
+if len(free) < len(specs):
+    sys.exit(f"{len(specs)} items, but {len(free)} open observations without an open item")
+json.dump({"items": [{**spec, "id": id_} for spec, id_ in zip(specs, free)]}, sys.stdout)
+PY
+    reconcile="$WORK/store/skills/reconciler/reconcile.py"
+    python3 -I "$reconcile" triage "$WORK/items.json"
+    python3 -I "$reconcile" check
+    git -C "$WORK/store" add --all
+    git -C "$WORK/store" \
+        -c user.name="Fieldnotes dev instance" -c user.email="dev-instance@noreply.localhost" \
+        commit --quiet --message "dev: the invented triage items of scripts/dev-instance-items.json"
+    git -C "$WORK/store" push --quiet origin main
+    echo "seeded the dev instance's triage items from $ITEMS: start the stack with scripts/dev.py"
+fi

@@ -189,24 +189,15 @@ within 90 s. The API, MCP and UI hostnames answer throughout, and the roll check
 environment reads prd but cannot roll it (its kubeconfig is read-only outside `development`), so
 the check rides the roll a push causes: this repo's push, whose build pins a new image, and a chart
 push that changes the pod template (`chart/templates/app-deployment.yaml`, or a value or helper it
-reads). A chart push that leaves the pod template alone rolls nothing and has no roll check. Start
-the check in the background, before the push:
+reads). A chart push that leaves the pod template alone rolls nothing and has no roll check. The
+check is `scripts/roll-check.sh`; start it in the background, before `git push`, under a timeout
+above its own 30 minutes:
 
 ```bash
-SECONDS=0
-mkdir -p tmp/roll && rm -f tmp/roll/*
-cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes -o name | cut -d/ -f2 > tmp/roll/old
-[ "$(wc -l < tmp/roll/old)" -eq 1 ] || { echo "tmp/roll/old names $(wc -l < tmp/roll/old) pods, not one: no check"; exit 1; }
-probe() { while :; do echo "$(date -u +%T.%3N) $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1") $1"; sleep 0.5; done >> tmp/roll/probes; }
-probe https://fieldnotes-api.home/health/readyz & probe https://fieldnotes-mcp.home/readyz & probe https://fieldnotes/ &
-until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n fieldnotes-prd get pods -l app=fieldnotes --no-headers --request-timeout=10s > tmp/roll/now &&
-    sed "s/^/$(date -u +%T) /" tmp/roll/now >> tmp/roll/pods && ! grep -qwFf tmp/roll/old tmp/roll/now; }; do sleep 5; done
-kill $(jobs -p)
-grep -vwFf tmp/roll/old tmp/roll/now | cut -d' ' -f1 > tmp/roll/new
-grep -qwFf tmp/roll/old tmp/roll/now && echo "the old pod outlived the check"
-awk '{ print $3, $2 }' tmp/roll/probes | sort | uniq -c
+timeout 1900 scripts/roll-check.sh
 ```
 
+It runs from the repo root whatever the cwd, and leaves no probe running however it ends.
 `tmp/roll/old` names the one pod that runs before the push, and the check stops at once unless it
 names exactly one: none means the listing failed, two a roll already under way, so wait for it to
 end and start again. The check probes each hostname every half second, with the

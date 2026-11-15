@@ -7,7 +7,12 @@ which event arrived or in what order:
   altogether while the field's condition hides it (an issue that is not Done);
 - the time of its latest change: the later of the issue's `updated` and every comment's created
   and updated times, so a comment counts whether or not it moves the issue's own timestamp;
-- the pointer, from the newest comment whose text starts `Resolved:`.
+- the pointer, from the newest comment whose text starts `Resolved:`;
+- its parent, the issue it is a subtask of.
+
+A card closed with a resolution that defers to its parent (`Absorbed`: folded into the parent,
+which delivers it) is read together with that parent: the parent's resolution and latest change
+count as the card's (`through_parents`).
 
 Times are cut to whole seconds, the precision a file holds them at.
 """
@@ -15,8 +20,8 @@ Times are cut to whole seconds, the precision a file holds them at.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import quote
@@ -25,7 +30,10 @@ import httpx
 
 from fieldnotes_contracts import Outcome
 
-FIELDS = "idReadable,updated,customFields(name,value(name)),comments(text,created,updated,deleted)"
+FIELDS = (
+    "idReadable,updated,customFields(name,value(name)),comments(text,created,updated,deleted),"
+    "parent(issues(idReadable))"
+)
 
 _POINTER = re.compile(r"^\s*Resolved:[ \t]*(\S[^\n]*?)\s*$", re.MULTILINE)
 
@@ -44,6 +52,8 @@ class BoardSettings:
     token: str
     resolution_field: str
     outcomes: Mapping[str, Outcome]  # resolution value -> outcome
+    # the resolution values that defer to the card's parent
+    parent_resolutions: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,9 @@ class Card:
     resolution: str | None
     updated: datetime
     pointer: str | None
+    parent: str | None = None
+    # the open parent the card's outcome waits on, set by `through_parents`
+    waiting_on: str | None = None
 
 
 class Board(Protocol):
@@ -85,11 +98,42 @@ def read_card(issue: Mapping[str, Any], resolution_field: str) -> Card:
         if match:
             pointer = match.group(1)
             break
+    parents = (issue.get("parent") or {}).get("issues") or []
     return Card(
         id=issue["idReadable"],
         resolution=resolution,
         updated=_time(max(times)),
         pointer=pointer,
+        parent=parents[0].get("idReadable") if parents else None,
+    )
+
+
+def through_parents(board: Board, card: Card, resolutions: Collection[str]) -> Card:
+    """The card as a sync applies it (FR-21). A card closed with a resolution in `resolutions`
+    takes its parent's resolution and latest change, up through a parent closed the same way.
+    While that parent is open the card has no resolution and waits on it. A card with no parent,
+    or a parent YouTrack does not have, keeps the resolution it got to; so do the card's own id
+    and pointer."""
+    seen = {card.id.upper()}
+    current, updated = card, card.updated
+    while (
+        current.resolution in resolutions
+        and current.parent is not None
+        and current.parent.upper() not in seen
+    ):
+        try:
+            parent = board.card(current.parent)
+        except CardMissing:
+            break
+        seen.add(parent.id.upper())
+        current, updated = parent, max(updated, parent.updated)
+    if current is card:
+        return card
+    return replace(
+        card,
+        resolution=current.resolution,
+        updated=updated,
+        waiting_on=current.id if current.resolution is None else None,
     )
 
 

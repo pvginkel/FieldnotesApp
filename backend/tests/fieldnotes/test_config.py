@@ -252,8 +252,19 @@ def test_the_board_defaults_to_the_designs_field_and_map():
         "Absorbed": "done",
         "Won't Do": "wont-do",
     }
+    assert settings.board.parent_resolutions == {"Absorbed"}  # FN-71
     assert settings.youtrack_hook.header == "X-YouTrack-Token"
     assert settings.youtrack_hook.settle == 5.0
+
+
+def test_the_resolutions_that_read_the_parent_are_a_list_of_values():
+    board = {
+        "FIELDNOTES_YOUTRACK_URL": "https://issues.example.invalid",
+        "FIELDNOTES_YOUTRACK_TOKEN": "perm:token",
+        "FIELDNOTES_YOUTRACK_PARENT_RESOLUTIONS": " Absorbed, Merged ,",
+    }
+    settings = load_settings(BASE | board)
+    assert settings.board.parent_resolutions == {"Absorbed", "Merged"}
 
 
 def test_the_webhooks_settle_time_is_a_number_of_seconds_and_not_negative():

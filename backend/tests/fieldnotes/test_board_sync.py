@@ -97,10 +97,98 @@ def test_a_later_resolution_changes_the_outcome(carded, auth, clock, youtrack, r
     assert "outcome: wont-do" in remote.file(observation_path(id_))
 
 
-def test_absorbed_is_done(carded, auth, clock, youtrack):
+def test_absorbed_without_a_parent_is_done(carded, auth, clock, youtrack):
     with carded() as (api, id_):
-        youtrack.resolve("FN-12", clock.tick(), "Absorbed")
+        youtrack.absorb("FN-12", clock.tick(), None)
         assert sync(api, auth, id_).json()["outcome"] == "done"
+
+
+# FN-71: a card closed Absorbed is read with its parent, which delivers it.
+
+
+def test_an_absorbed_card_is_raised_while_its_parent_is_open(
+    carded, auth, clock, youtrack, remote
+):
+    with carded() as (api, id_):
+        youtrack.add("FN-90", clock.tick())
+        youtrack.absorb("FN-12", clock.tick(), "FN-90")
+        youtrack.comment("FN-90", "Handover: the fix is queued.", clock.tick())
+        reply = sync(api, auth, id_).json()
+
+    assert (reply["status"], reply["outcome"], reply["changed"]) == (
+        "raised",
+        None,
+        True,
+    )
+    assert reply["card_updated"] == "2026-09-19T10:04:00Z"  # the parent's comment
+    assert "status: raised" in remote.file(observation_path(id_))
+
+
+def test_an_absorbed_card_closes_done_when_its_parent_does(
+    carded, auth, clock, youtrack
+):
+    with carded() as (api, id_):
+        youtrack.add("FN-90", clock.tick())
+        youtrack.comment("FN-12", "Resolved: pvginkel/Example@abc123", clock.tick())
+        youtrack.absorb("FN-12", clock.tick(), "FN-90")
+        assert sync(api, auth, id_).json()["status"] == "raised"
+        youtrack.comment("FN-90", "Resolved: pvginkel/Example@def456", clock.tick())
+        youtrack.resolve("FN-90", clock.tick(), "Resolved")
+        reply = sync(api, auth, id_).json()
+
+    assert (reply["status"], reply["outcome"], reply["changed"]) == (
+        "closed",
+        "done",
+        True,
+    )
+    assert reply["card_updated"] == "2026-09-19T10:06:00Z"  # the parent's close
+    assert reply["pointer"] == "pvginkel/Example@abc123"  # the card's own
+
+
+def test_an_observation_an_absorbed_card_closed_goes_back_to_raised(
+    carded, auth, clock, youtrack, remote
+):
+    # The six of 2026-11-13: read done before the parent counted, then the parent changed.
+    with carded() as (api, id_):
+        youtrack.add("FN-90", clock.tick())
+        youtrack.absorb("FN-12", clock.tick(), None)
+        assert sync(api, auth, id_).json()["outcome"] == "done"
+        youtrack.issues["FN-12"]["parent"] = "FN-90"
+        youtrack.comment("FN-90", "Handover: worked on main next.", clock.tick())
+        reply = sync(api, auth, id_).json()
+
+    assert (reply["status"], reply["outcome"], reply["changed"]) == (
+        "raised",
+        None,
+        True,
+    )
+    assert "outcome: null" in remote.file(observation_path(id_))
+
+
+def test_an_absorbed_parent_is_followed_up_to_its_outcome(
+    carded, auth, clock, youtrack
+):
+    with carded() as (api, id_):
+        youtrack.add("FN-91", clock.tick())
+        youtrack.add("FN-90", clock.tick())
+        youtrack.absorb("FN-90", clock.tick(), "FN-91")
+        youtrack.absorb("FN-12", clock.tick(), "FN-90")
+        assert sync(api, auth, id_).json()["status"] == "raised"
+        youtrack.resolve("FN-91", clock.tick(), "Won't Do")
+        reply = sync(api, auth, id_).json()
+
+    assert (reply["status"], reply["outcome"]) == ("closed", "wont-do")
+
+
+def test_an_open_observation_with_an_absorbed_card_keeps_its_status(
+    carded, auth, clock, youtrack
+):
+    with carded(status="open") as (api, id_):
+        youtrack.add("FN-90", clock.tick())
+        youtrack.absorb("FN-12", clock.tick(), "FN-90")
+        reply = sync(api, auth, id_).json()
+
+    assert (reply["status"], reply["outcome"], reply["changed"]) == ("open", None, True)
 
 
 def test_a_comment_moves_card_updated_once_and_a_second_sync_writes_nothing(

@@ -85,6 +85,8 @@ DEFAULT_LEXICAL_WEIGHT = 0.25
 DEFAULT_RESOLUTION_FIELD = "Resolution"
 # FR-21's map: Resolved and Absorbed are done, Won't Do is wont-do.
 DEFAULT_OUTCOMES = "Resolved=done,Absorbed=done,Won't Do=wont-do"
+# FR-21: a card closed Absorbed is read with its parent; the map's Absorbed is for one with none.
+DEFAULT_PARENT_RESOLUTIONS = "Absorbed"
 DEFAULT_YOUTRACK_WEBHOOK_HEADER = "X-YouTrack-Token"
 # YouTrack sends a delivery before it commits the change the delivery is about: a card read at
 # once is the card as it was one event ago (seen live, 2026-09-21).
@@ -218,6 +220,13 @@ def _board(environ: Mapping[str, str]) -> BoardSettings | None:
             environ, "YOUTRACK_RESOLUTION_FIELD", DEFAULT_RESOLUTION_FIELD
         ),
         outcomes=_outcomes(environ),
+        parent_resolutions=frozenset(
+            value.strip()
+            for value in _get(
+                environ, "YOUTRACK_PARENT_RESOLUTIONS", DEFAULT_PARENT_RESOLUTIONS
+            ).split(",")
+            if value.strip()
+        ),
     )
 
 

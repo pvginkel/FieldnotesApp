@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime
 from pathlib import Path
 
-from app.fieldnotes.board import Board, Card, CardMissing
+from app.fieldnotes.board import Board, Card, CardMissing, through_parents
 from app.fieldnotes.document import Document, DocumentError, new_document
 from app.fieldnotes.errors import ProblemException, not_found
 from app.fieldnotes.index import Index, embedded_text, observation_path
@@ -77,6 +77,7 @@ class Observations:
         board: Board | None,
         outcomes: Mapping[str, Outcome],
         metrics: Metrics,
+        parent_resolutions: Collection[str] = frozenset(),
     ) -> None:
         self.store = store
         self.index = index
@@ -84,6 +85,7 @@ class Observations:
         self.clock = clock
         self.board = board
         self.outcomes = outcomes
+        self.parent_resolutions = parent_resolutions
         self.metrics = metrics
         self._settling: dict[
             str, threading.Timer
@@ -211,7 +213,9 @@ class Observations:
     def board_sync(self, id_: str) -> BoardSyncReply:
         """FR-21, FR-22: read the observation's card from the board and apply it. Writes only when
         the card changed since the last sync: then `card_updated` and `last_updated` move, the
-        outcome follows the resolution field, and a `Resolved:` comment supplies the pointer."""
+        outcome follows the resolution field, and a `Resolved:` comment supplies the pointer. A
+        card closed Absorbed is read with its parent, whose resolution and latest change count as
+        the card's: while the parent is open, the observation is raised."""
         observation = self.get(id_)
         if observation.card is None:
             raise ProblemException(
@@ -224,6 +228,7 @@ class Observations:
             raise no_board()
         try:
             card = self.board.card(observation.card)
+            card = through_parents(self.board, card, self.parent_resolutions)
         except CardMissing as exc:
             raise ProblemException(
                 409,
@@ -268,6 +273,9 @@ class Observations:
         outcome = self.outcomes.get(card.resolution) if card.resolution else None
         if outcome is not None and observation.status in _CLOSABLE:
             fields |= {"status": Status.closed, "outcome": outcome}
+        elif card.waiting_on is not None and observation.status is Status.closed:
+            # Absorbed into a parent still open: the work is queued, not done.
+            fields |= {"status": Status.raised, "outcome": None}
         if card.pointer is not None and card.pointer != observation.pointer:
             fields["pointer"] = card.pointer
         document = document.with_fields(**fields)

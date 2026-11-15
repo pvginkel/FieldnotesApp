@@ -84,6 +84,11 @@ class Runtime:
             controller = HttpController(self._clients[-1], settings.controller)
         self.controller = controller
         outcomes = settings.board.outcomes if settings.board is not None else {}
+        parent_resolutions = (
+            settings.board.parent_resolutions
+            if settings.board is not None
+            else frozenset()
+        )
         self.store = Store(settings.store, os.environ if environ is None else environ)
         self.index = Index(
             settings.store.root,
@@ -94,7 +99,14 @@ class Runtime:
         self.matcher = Matcher(self.index, models, settings.match)
         self.metrics = Metrics(self.index, self.triage, clock, settings.clients.names)
         self.observations = Observations(
-            self.store, self.index, self.matcher, clock, board, outcomes, self.metrics
+            self.store,
+            self.index,
+            self.matcher,
+            clock,
+            board,
+            outcomes,
+            self.metrics,
+            parent_resolutions,
         )
         self.rulings = Rulings(self.store, clock, self.metrics)
         sitting = SittingFile(settings.cache_dir / INBOX_SITTING)

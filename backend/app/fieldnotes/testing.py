@@ -73,9 +73,11 @@ class FakeYouTrack:
         self.reads: list[str] = []  # the issue ids read, in order
         self.fail = False  # when set, every read answers 503
 
-    def add(self, id_: str, at: datetime, state: str = "Accepted") -> None:
+    def add(
+        self, id_: str, at: datetime, state: str = "Accepted", parent: str | None = None
+    ) -> None:
         self.issues[id_] = {"updated": _millis(at), "state": state, "resolution": None}
-        self.issues[id_]["comments"] = []
+        self.issues[id_] |= {"comments": [], "parent": parent}
 
     def resolve(self, id_: str, at: datetime, resolution: str = "Resolved") -> None:
         """Move the issue to Done with the resolution; Done is what shows the field."""
@@ -84,6 +86,11 @@ class FakeYouTrack:
             "state": "Done",
             "resolution": resolution,
         }
+
+    def absorb(self, id_: str, at: datetime, parent: str | None) -> None:
+        """Close the issue Absorbed as `parent`'s subtask, in one change, as the board does."""
+        self.resolve(id_, at, "Absorbed")
+        self.issues[id_]["parent"] = parent
 
     def reopen(self, id_: str, at: datetime) -> None:
         """Back to an unresolved state: the field's condition hides the resolution."""
@@ -120,6 +127,12 @@ class FakeYouTrack:
             "updated": issue["updated"],
             "customFields": fields,
             "comments": comments,
+            "parent": {
+                "issues": [{"idReadable": issue.get("parent"), "$type": "Issue"}]
+                if issue.get("parent") is not None
+                else [],
+                "$type": "IssueParent",
+            },
             "$type": "Issue",
         }
 

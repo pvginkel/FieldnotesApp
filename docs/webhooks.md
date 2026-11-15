@@ -65,7 +65,7 @@ card to cover missed webhooks. The result never depends on which event arrived o
 because it reads the card whole:
 
 ```
-GET /api/issues/<card>?fields=idReadable,updated,customFields(name,value(name)),comments(text,created,updated,deleted)
+GET /api/issues/<card>?fields=idReadable,updated,customFields(name,value(name)),comments(text,created,updated,deleted),parent(issues(idReadable))
 ```
 
 on `FIELDNOTES_YOUTRACK_URL`, with `FIELDNOTES_YOUTRACK_TOKEN` (read-only) as a bearer. From it:
@@ -77,7 +77,18 @@ on `FIELDNOTES_YOUTRACK_URL`, with `FIELDNOTES_YOUTRACK_TOKEN` (read-only) as a 
   created and updated times, cut to whole seconds, so a comment counts whether or not it moves the
   issue's own `updated`;
 - **the pointer**: from the newest non-deleted comment with a line starting `Resolved:`, the rest of
-  that line.
+  that line;
+- **the parent**: the issue the card is a subtask of.
+
+**A card closed Absorbed is read together with its parent.** When the resolution is one of
+`FIELDNOTES_YOUTRACK_PARENT_RESOLUTIONS` (default `Absorbed`; values separated by commas) and the
+card has a parent, the parent is read the same way, and so is its own parent while it too is closed
+that way. The resolution of the first issue up that chain that is not, and the latest change of
+every issue read, count as the card's; the card's own pointer stays. So while the parent is open
+the card has no resolution, and when the parent closes, its resolution maps as the card's would. An
+absorbed card with no parent, or whose parent YouTrack does not have, keeps its own resolution,
+`done` by the default map. An event for the parent names no observation's card and is ignored: the
+reconciler's board scan applies the parent's change.
 
 It writes only when the card's latest change is later than the observation's `card_updated` (or
 `card_updated` is null; see [observation-file.md](observation-file.md) for that field). Then:
@@ -89,6 +100,8 @@ It writes only when the card's latest change is later than the observation's `ca
   and the observation is `raised` or `closed`, it becomes `closed` with that outcome, so a later
   change to the field changes the outcome. An `open` or `proposed` observation that still has a card
   was reopened: its old card's resolution is history, and its status stays;
+- a card absorbed into a parent that is still open puts a `closed` observation back to `raised`,
+  with no outcome: the work is queued, not done;
 - a pointer found on the card replaces a different one.
 
 A resolution that maps to nothing, or has been cleared, changes neither status nor outcome; the
